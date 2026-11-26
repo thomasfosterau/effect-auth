@@ -13,7 +13,7 @@ import {
 } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import {
-  makeDecoyHash,
+  lazyDecoyHash,
   storedPasswordVerifier,
   verifyPasswordOrDecoy,
 } from "../password/DecoyVerify.ts";
@@ -570,7 +570,7 @@ export const make = (
 
     // Cached decoy hash — computed on first signIn call so that unknown-user
     // attempts always perform the same hashing work as known-user ones.
-    const getDecoyHash = makeDecoyHash(passwordHasher, "getDecoyHash");
+    const getDecoyHash = lazyDecoyHash(passwordHasher, "getDecoyHash");
 
     // The answer to a sign-up for an address another user holds, however the
     // flow finds that out (the pre-check, a lost insert race, or a store that

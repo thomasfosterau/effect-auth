@@ -13,7 +13,7 @@ import { MultiAlgorithmVerifier, type PasswordHasher } from "./Password.ts";
  * cached, so an attempt against a missing account does the same hashing work
  * as one against a real account.
  */
-export const makeDecoyHash = (
+export const lazyDecoyHash = (
   passwordHasher: typeof PasswordHasher.Service,
   spanName: string,
 ): (() => Effect.Effect<string, Errors.HashingError>) => {

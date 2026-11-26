@@ -26,17 +26,7 @@ import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail } from "./utils.ts";
-import {
-  anyEmail,
-  anyEmailValue,
-  claimIdentifier,
-  IdentifierStore,
-  lookupIdentifier,
-  makeIdentifier,
-  refusalAuthError,
-  replaceIdentifier,
-  type Identifier,
-} from "./Identifier.ts";
+import * as Identifier from "./Identifier.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /** Which flow a pending token belongs to. */
@@ -287,7 +277,7 @@ const make = (
   never,
   | AccountManagementStore
   | UserServiceStore
-  | IdentifierStore
+  | Identifier.IdentifierStore
   | SessionService
   | SecureRandom.SecureRandom
   | Digest.Digest
@@ -299,7 +289,7 @@ const make = (
     const reauthenticationMaxAge = config.reauthenticationMaxAge ?? 5 * 60 * 1000;
 
     const users = yield* UserServiceStore;
-    const identifiers = yield* IdentifierStore;
+    const identifiers = yield* Identifier.IdentifierStore;
     const store = hashedAccountTokens(yield* AccountManagementStore, yield* tokenHasher);
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -374,13 +364,13 @@ const make = (
 
         // Tell the current address before anything else, so an attempt is
         // reported whether or not the new address turns out to be free.
-        const oldEmail = anyEmailValue(yield* identifiers.listByUser(userId));
+        const oldEmail = Identifier.anyEmailValue(yield* identifiers.listByUser(userId));
         if (Option.isSome(oldEmail) && oldEmail.value !== newEmail) {
           yield* config.sendEmailChangeNotice({ user, oldEmail: oldEmail.value, newEmail });
         }
 
         // Uniqueness: reject if another account already owns the address.
-        const existing = yield* lookupIdentifier(identifiers, "email", newEmail);
+        const existing = yield* Identifier.lookupIdentifier(identifiers, "email", newEmail);
         if (Option.exists(existing, (held) => held.userId !== userId)) {
           return yield* new Errors.EmailInUseError({
             message: "Email already in use",
@@ -430,12 +420,12 @@ const make = (
         }
         const user = foundUser.value;
         const currentIdentifiers = yield* identifiers.listByUser(user.id);
-        const current = anyEmail(currentIdentifiers);
+        const current = Identifier.anyEmail(currentIdentifiers);
         const oldEmail = Option.map(current, (identifier) => identifier.value);
 
         // Re-check uniqueness at confirm time (the address may have been
         // taken between request and confirm).
-        const clash = yield* lookupIdentifier(identifiers, "email", newEmail);
+        const clash = yield* Identifier.lookupIdentifier(identifiers, "email", newEmail);
         if (Option.exists(clash, (held) => held.userId !== user.id)) {
           yield* store.delete(token);
           return yield* new AccountTokenError({ message: "Email already in use" });
@@ -449,10 +439,10 @@ const make = (
         let replaced: Option.Option<string> = Option.none();
         let held = currentIdentifiers;
         // The identifier holding the confirmed address once this user has it.
-        let confirmed: Identifier;
+        let confirmed: Identifier.Identifier;
         if (Option.isNone(clash)) {
           const verifiedAt = yield* DateTime.nowAsDate;
-          const next = makeIdentifier({
+          const next = Identifier.makeIdentifier({
             userId: user.id,
             type: "email",
             value: newEmail,
@@ -462,12 +452,12 @@ const make = (
           });
           const outcome = yield* (
             Option.isNone(current)
-              ? claimIdentifier(identifiers, next).pipe(
+              ? Identifier.claimIdentifier(identifiers, next).pipe(
                   Effect.catchTag("IdentifierRefusedError", (error) =>
-                    Effect.fail(refusalAuthError(error)),
+                    Effect.fail(Identifier.refusalAuthError(error)),
                   ),
                 )
-              : replaceIdentifier(identifiers, current.value, next)
+              : Identifier.replaceIdentifier(identifiers, current.value, next)
           ).pipe(
             Effect.map((identifier) => ({ identifier, converged: null })),
             Effect.catchTags({
@@ -477,7 +467,7 @@ const make = (
               IdentifierTakenError: () =>
                 Effect.gen(function* () {
                   const found = Option.isNone(current)
-                    ? yield* lookupIdentifier(identifiers, "email", newEmail)
+                    ? yield* Identifier.lookupIdentifier(identifiers, "email", newEmail)
                     : Option.none();
                   if (Option.isSome(found) && found.value.userId === user.id) {
                     return { identifier: found.value, converged: currentIdentifiers };
@@ -574,7 +564,7 @@ const make = (
             expiresAt: now + deleteAccountExpiresIn,
           });
 
-          const email = anyEmailValue(yield* identifiers.listByUser(userId));
+          const email = Identifier.anyEmailValue(yield* identifiers.listByUser(userId));
           yield* config.sendDeleteAccountVerification({ user, email, token });
 
           return { token, expiresAt: now + deleteAccountExpiresIn };
@@ -662,7 +652,7 @@ const make = (
 export const accountDeletionLayer: Layer.Layer<
   AccountDeletion,
   never,
-  UserServiceStore | IdentifierStore | SessionService
+  UserServiceStore | Identifier.IdentifierStore | SessionService
 > = Layer.effect(
   AccountDeletion,
   Effect.gen(function* () {
@@ -671,7 +661,7 @@ export const accountDeletionLayer: Layer.Layer<
     const purgeServices = definedKeys({
       ...(yield* userPurgeStores),
       accountTokens: Option.getOrUndefined(yield* Effect.serviceOption(AccountManagementStore)),
-      identifiers: Option.some(yield* IdentifierStore),
+      identifiers: Option.some(yield* Identifier.IdentifierStore),
       revokeSessions: sessions.invalidateUserSessions,
       deleteUser: users.delete,
     });

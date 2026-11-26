@@ -17,14 +17,14 @@ import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
 import { type CreateUserResult, type NewUserIdentifier, UserStore } from "../UserStore.ts";
-import { makeDetachedSend } from "../DeliveryScheduler.ts";
+import * as DeliveryScheduler from "../DeliveryScheduler.ts";
 import { deliverCode } from "../CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
-import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
+import { buildRecipientSendGate } from "../RecipientSendLimit.ts";
 import { SessionService } from "../SessionService.ts";
 import {
   EmailPasswordStore,
@@ -384,8 +384,8 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const hashCode = yield* RootSecret.pepperHasher;
-    const detached = yield* makeDetachedSend;
-    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
+    const recipientSendGate = yield* buildRecipientSendGate(config.recipientSendLimit);
 
     /**
      * Whether `send` hides, for this purpose, whether the email has an

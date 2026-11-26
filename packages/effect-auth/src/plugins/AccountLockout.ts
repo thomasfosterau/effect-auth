@@ -13,23 +13,17 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
-import { makeAmortizedPrune } from "../AmortizedPrune.ts";
+import { amortizedPrune } from "../AmortizedPrune.ts";
 import * as Errors from "../Errors.ts";
-import {
-  type AuthenticateAttempt,
-  type AuthenticationMethod,
-  authenticationSubject,
-  isPossessionMethod,
-  makePlugin,
-} from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import * as Types from "../Types.ts";
 
 /**
  * Whether the lock leaves `method` alone: a possession proof or a
  * passkey.
  */
-const isLockExempt = (method: AuthenticationMethod): boolean =>
-  isPossessionMethod(method) || method === "passkey";
+const isLockExempt = (method: Hooks.AuthenticationMethod): boolean =>
+  Hooks.isPossessionMethod(method) || method === "passkey";
 
 /** Per-identifier lockout state. `lockedUntil` is epoch-ms when present. */
 export interface AccountLockoutRecord {
@@ -124,7 +118,7 @@ export const memoryAccountLockoutStore = (
   records: MutableHashMap.MutableHashMap<string, AccountLockoutRecord> = MutableHashMap.empty(),
 ): typeof AccountLockoutStore.Service => {
   const lastAttemptAt = MutableHashMap.empty<string, number>();
-  const prune = makeAmortizedPrune(records);
+  const prune = amortizedPrune(records);
   return {
     get: (key) => Effect.sync(() => MutableHashMap.get(records, key)),
     registerAttempt: (key, options) =>
@@ -205,8 +199,8 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
    * cover: a possession proof (a one-time code or a magic link; a
    * passkey) or an unkeyed attempt, which names no account.
    */
-  const counterFor = (attempt: AuthenticateAttempt): Counter | null => {
-    const subject = authenticationSubject(attempt);
+  const counterFor = (attempt: Hooks.AuthenticateAttempt): Counter | null => {
+    const subject = Hooks.authenticationSubject(attempt);
     if (subject === undefined || isLockExempt(attempt.method)) return null;
     return attempt.method === "second-factor"
       ? {
@@ -221,7 +215,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
         };
   };
 
-  return makePlugin(
+  return Hooks.makePlugin(
     Effect.gen(function* () {
       const store = yield* AccountLockoutStore;
 
@@ -240,7 +234,7 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
           : effect;
 
       return {
-        beforeAuthenticate: (attempt: AuthenticateAttempt) =>
+        beforeAuthenticate: (attempt: Hooks.AuthenticateAttempt) =>
           Effect.gen(function* () {
             const counter = counterFor(attempt);
             if (counter === null) return attempt;

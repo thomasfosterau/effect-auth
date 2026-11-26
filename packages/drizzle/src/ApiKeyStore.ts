@@ -20,7 +20,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { affectedRows, makeQuery } from "./internal.ts";
+import { affectedRows, queryRunner } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 /** What a key read projects, under the store's own field names. */
@@ -96,7 +96,7 @@ export const make = (
   tables: ApiKeyTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.ApiKeyStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const schema = resolveApiKeyTable(tables);
     const table = schema.table;
     const column = schema.columns;

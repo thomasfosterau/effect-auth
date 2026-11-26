@@ -46,7 +46,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery, selectOne } from "./internal.ts";
+import { queryRunner, selectOne } from "./internal.ts";
 
 // ---------------------------------------------------------------------------
 // Mapping
@@ -151,7 +151,7 @@ export const make = (
   users: SingleTableUsers,
 ): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const column = users.columns;
     const table = users.table;
     const nullable = users.emailNullable;

@@ -15,12 +15,7 @@ import { Hex } from "effect/encoding";
 import { HttpClientRequest } from "effect/http";
 import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
-import {
-  type ChangePasswordArgs,
-  makePlugin,
-  type ResetPasswordArgs,
-  type SetPasswordArgs,
-} from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { AuthError, PwnedPasswordError } from "../Errors.ts";
 
 /** Configuration for {@link HaveIBeenPwnedPlugin}. */
@@ -49,7 +44,7 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
   const failClosed = config.failClosed ?? false;
   const timeout = config.timeout ?? Duration.seconds(5);
 
-  return makePlugin(
+  return Hooks.makePlugin(
     Effect.gen(function* () {
       const outbound = yield* OutboundHttp.resolve();
       const digest = yield* Digest.Digest;
@@ -100,11 +95,12 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
 
       return {
         beforeSignUp: (input: SignUpInput) => check(input.password).pipe(Effect.as(input)),
-        beforeResetPassword: (args: ResetPasswordArgs) =>
+        beforeResetPassword: (args: Hooks.ResetPasswordArgs) =>
           check(args.newPassword).pipe(Effect.as(args)),
-        beforeChangePassword: (args: ChangePasswordArgs) =>
+        beforeChangePassword: (args: Hooks.ChangePasswordArgs) =>
           check(args.newPassword).pipe(Effect.as(args)),
-        beforeSetPassword: (args: SetPasswordArgs) => check(args.newPassword).pipe(Effect.as(args)),
+        beforeSetPassword: (args: Hooks.SetPasswordArgs) =>
+          check(args.newPassword).pipe(Effect.as(args)),
       };
     }),
   );

@@ -44,7 +44,7 @@ export type RecipientSendGate = (
  * refusal carries the time left in the window as `retryAfter`, and a message
  * that names neither the address nor the key.
  */
-export const makeRecipientSendGate = (
+export const buildRecipientSendGate = (
   limit: RecipientSendLimit | false | undefined,
 ): Effect.Effect<RecipientSendGate, never, RateLimit.RateLimitStore | Digest.Digest> =>
   Effect.gen(function* () {

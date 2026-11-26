@@ -21,7 +21,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { affectedRows, completeById, makeQuery } from "./internal.ts";
+import { affectedRows, completeById, queryRunner } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ export const make = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.SessionStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const sessions: SessionSchema = resolveSchema(schema).sessions;
     const column = sessions.columns;
     const table = sessions.table;
@@ -176,7 +176,7 @@ export const makeResolver = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<GetSession>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
-    const query = makeQuery(handle);
+    const query = queryRunner(handle);
     const sessions: SessionSchema = resolveSchema(schema).sessions;
     const column = sessions.columns;
     const table = sessions.table;

@@ -23,15 +23,8 @@ import { Digest, SecureRandom } from "effect/crypto";
 import { flow } from "effect/Function";
 import * as Errors from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
-import { Hooks, makePlugin } from "./Hooks.ts";
-import {
-  claimIdentifier,
-  IdentifierStore,
-  lookupIdentifier,
-  makeIdentifier,
-  primaryEmailValue,
-  type Identifier,
-} from "./Identifier.ts";
+import * as Hooks from "./Hooks.ts";
+import * as Identifier from "./Identifier.ts";
 import {
   isManagedBy,
   isOnDomains,
@@ -118,7 +111,9 @@ export const SCIM_EXTERNAL_ID_ATTRIBUTE = "scimExternalId";
  *
  * @deprecated Drop it from your hook stack; deactivation is enforced without it.
  */
-export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});
+export const ScimDeactivatedPlugin: Layer.Layer<Hooks.Hooks, never, Hooks.Hooks> = Hooks.makePlugin(
+  {},
+);
 
 // ---------------------------------------------------------------------------
 // Connections
@@ -715,7 +710,7 @@ export const make = (
   never,
   | ScimConnectionStore
   | ScimUserStore
-  | IdentifierStore
+  | Identifier.IdentifierStore
   | OrganizationStore
   | SessionService
   | SecureRandom.SecureRandom
@@ -728,7 +723,7 @@ export const make = (
     const connections = yield* ScimConnectionStore;
     const hashToken = yield* tokenHasher;
     const users = yield* ScimUserStore;
-    const identifiers = yield* IdentifierStore;
+    const identifiers = yield* Identifier.IdentifierStore;
     const orgs = yield* OrganizationStore;
     const sessions = yield* SessionService;
     const credentials = yield* userCredentialStores;
@@ -757,7 +752,9 @@ export const make = (
 
     // --- Reads -------------------------------------------------------------
 
-    const emailIdentifiers = (all: ReadonlyArray<Identifier>): ReadonlyArray<Identifier> =>
+    const emailIdentifiers = (
+      all: ReadonlyArray<Identifier.Identifier>,
+    ): ReadonlyArray<Identifier.Identifier> =>
       all.filter((identifier) => identifier.type === "email");
 
     /**
@@ -770,7 +767,7 @@ export const make = (
      */
     const toUserResource = (
       user: Types.User,
-      all: ReadonlyArray<Identifier>,
+      all: ReadonlyArray<Identifier.Identifier>,
       active: boolean = !isScimDeactivated(user),
     ): ScimUserResource => {
       const emails = emailIdentifiers(all);
@@ -778,7 +775,7 @@ export const make = (
       const userName =
         P.isString(pinned) && emails.some((e) => e.value === pinned)
           ? pinned
-          : Option.getOrElse(primaryEmailValue(all), () => emails[0]?.value ?? user.id);
+          : Option.getOrElse(Identifier.primaryEmailValue(all), () => emails[0]?.value ?? user.id);
       const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
       return {
         id: user.id,
@@ -886,7 +883,7 @@ export const make = (
       domains: ReadonlyArray<string>,
     ) =>
       Effect.gen(function* () {
-        const foundIdentifier = yield* lookupIdentifier(identifiers, "email", userName);
+        const foundIdentifier = yield* Identifier.lookupIdentifier(identifiers, "email", userName);
         if (Option.isNone(foundIdentifier)) return Option.none<ScimUserResource>();
         const identifier = foundIdentifier.value;
         const foundMember = yield* orgs.getMember(connection.organizationId, identifier.userId);
@@ -925,9 +922,9 @@ export const make = (
     const claimEmail = (userId: string, email: string) =>
       DateTime.nowAsDate.pipe(
         Effect.flatMap((verifiedAt) =>
-          claimIdentifier(
+          Identifier.claimIdentifier(
             identifiers,
-            makeIdentifier({
+            Identifier.makeIdentifier({
               userId,
               type: "email",
               value: email,
@@ -1161,7 +1158,7 @@ export const make = (
     /** Claim one email address for the user; another user's address is a `409`. */
     const addUserEmail = (target: ScimTarget, email: string) =>
       Effect.gen(function* () {
-        const foundExisting = yield* lookupIdentifier(identifiers, "email", email);
+        const foundExisting = yield* Identifier.lookupIdentifier(identifiers, "email", email);
         if (Option.isSome(foundExisting)) {
           const existing = foundExisting.value;
           if (existing.userId === target.user.id) return yield* Effect.void;
@@ -1422,7 +1419,7 @@ export const make = (
           discard: true,
         });
         const taken = yield* Effect.findFirst([userName, ...extras], (email) =>
-          Effect.map(lookupIdentifier(identifiers, "email", email), Option.isSome),
+          Effect.map(Identifier.lookupIdentifier(identifiers, "email", email), Option.isSome),
         );
         if (Option.isSome(taken)) {
           return yield* conflict(`The email "${taken.value}" is already in use`);

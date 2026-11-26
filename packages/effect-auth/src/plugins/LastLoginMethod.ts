@@ -9,7 +9,7 @@
 import * as Effect from "effect/Effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
 import { SessionService } from "../SessionService.ts";
-import { Hooks, makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 
 /**
  * Records the sign-in method into the issued session's `attributes.method` on
@@ -20,7 +20,7 @@ import { Hooks, makePlugin } from "../Hooks.ts";
  * with `isolateTaps: true`, so recording the method never breaks the sign-in
  * itself.
  */
-export const LastLoginMethodPlugin = makePlugin(
+export const LastLoginMethodPlugin = Hooks.makePlugin(
   Effect.gen(function* () {
     const sessionManager = yield* SessionService;
     const record = (result: AuthResult) =>
@@ -30,8 +30,8 @@ export const LastLoginMethodPlugin = makePlugin(
             .pipe(Effect.ignore)
         : Effect.void;
     return {
-      afterSignIn: Hooks.tap(record),
-      afterSignUp: Hooks.tap(record),
+      afterSignIn: Hooks.Hooks.tap(record),
+      afterSignUp: Hooks.Hooks.tap(record),
     };
   }),
   { isolateTaps: true },

@@ -61,7 +61,7 @@ import {
   rateLimitAddressKey,
 } from "../ClientIP.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
-import { type AuthenticateAttempt, Hooks, makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { recordClientAddressKeyed } from "../HooksClientAddress.ts";
 import { RateLimitError, RateLimiterConfigError } from "../Errors.ts";
 import {
@@ -110,7 +110,7 @@ export interface IPRateLimitPluginConfig {
 
 /** The plugin's hooks, before {@link IPRateLimitPlugin} records it on `Hooks`. */
 const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
-  makePlugin(
+  Hooks.makePlugin(
     Effect.gen(function* () {
       const rateLimiter = yield* RateLimiter;
       const store = yield* RateLimitStore;
@@ -145,7 +145,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
         });
 
       return {
-        beforeAuthenticate: (attempt: AuthenticateAttempt) =>
+        beforeAuthenticate: (attempt: Hooks.AuthenticateAttempt) =>
           (attempt.method === "second-factor"
             ? check("second-factor", config?.secondFactor ?? RateLimitPresets.totpVerification)
             : check("signin", config?.signIn ?? RateLimitPresets.login)
@@ -181,10 +181,10 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
  */
 export const IPRateLimitPlugin = (config?: IPRateLimitPluginConfig) =>
   Layer.effect(
-    Hooks,
+    Hooks.Hooks,
     // Record the plugin on the Hooks it builds, so Http.make can refuse it at
     // build when the handler has no client-address source.
     Effect.gen(function* () {
-      return recordClientAddressKeyed(yield* Hooks, "IPRateLimitPlugin");
+      return recordClientAddressKeyed(yield* Hooks.Hooks, "IPRateLimitPlugin");
     }),
   ).pipe(Layer.provide(ipRateLimitHooks(config)));

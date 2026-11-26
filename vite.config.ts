@@ -119,8 +119,6 @@ export default defineConfig({
       // under the rule's canonical aliases (`Arr`, `P`, `R`, `Str`, `Eq`,
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
-      // Exported `make*` constructors are the composition style here.
-      "effect/no-service-constructor-imports": "off",
       // Renaming these would change the published API or the wire format.
       "effect/require-is-prefix-for-boolean-schema-field": "off",
       "effect/no-shape-in-symbol-names": "off",

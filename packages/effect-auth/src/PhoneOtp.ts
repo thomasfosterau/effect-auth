@@ -14,14 +14,7 @@ import * as Arr from "effect/Array";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { sessionOrChallenge, type SessionOrChallenge } from "./email/EmailPassword.ts";
-import {
-  claimIdentifier,
-  IdentifierStore,
-  findIdentifierOwner,
-  lookupIdentifier,
-  makeIdentifier,
-  refusalAuthError,
-} from "./Identifier.ts";
+import * as Identifier from "./Identifier.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,
@@ -32,9 +25,9 @@ import * as OtpCode from "./OtpCode.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as RootSecret from "./RootSecret.ts";
 import type { RateLimitStore } from "./RateLimit.ts";
-import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
+import { buildRecipientSendGate } from "./RecipientSendLimit.ts";
 import type * as Types from "./Types.ts";
-import { makeDetachedSend } from "./DeliveryScheduler.ts";
+import * as DeliveryScheduler from "./DeliveryScheduler.ts";
 import { deliverCode } from "./CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import { SessionService } from "./SessionService.ts";
@@ -315,7 +308,7 @@ export class PhoneOtpService extends Context.Service<
  * one.
  */
 export const getPhoneNumber = (
-  identifierStore: typeof IdentifierStore.Service,
+  identifierStore: typeof Identifier.IdentifierStore.Service,
   userId: string,
 ): Effect.Effect<Option.Option<string>, Errors.AuthError> =>
   Effect.map(identifierStore.listByUser(userId), (all) => {
@@ -339,7 +332,7 @@ export const make = (
   never,
   | PhoneOtpStore
   | PhoneOtpUserStore
-  | IdentifierStore
+  | Identifier.IdentifierStore
   | UserStore
   | Hooks
   | SessionService
@@ -355,14 +348,14 @@ export const make = (
 
     const store = yield* PhoneOtpStore;
     const userStore = yield* PhoneOtpUserStore;
-    const identifiers = yield* IdentifierStore;
+    const identifiers = yield* Identifier.IdentifierStore;
     const users = yield* UserStore;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const hashCode = yield* RootSecret.pepperHasher;
-    const detached = yield* makeDetachedSend;
-    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
+    const recipientSendGate = yield* buildRecipientSendGate(config.recipientSendLimit);
 
     const normalize = (raw: string): Effect.Effect<string, Errors.AuthError> =>
       config.normalizePhoneNumber !== undefined
@@ -417,7 +410,7 @@ export const make = (
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
         const deliver = hidesAccount(purpose)
-          ? Option.isSome(yield* lookupIdentifier(identifiers, "phone", phoneNumber))
+          ? Option.isSome(yield* Identifier.lookupIdentifier(identifiers, "phone", phoneNumber))
           : true;
 
         // Resend cooldown and failure backoff. Both run for a number
@@ -461,7 +454,7 @@ export const make = (
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
-        const owned = yield* findIdentifierOwner(
+        const owned = yield* Identifier.findIdentifierOwner(
           identifiers,
           users.get,
           "phone",
@@ -532,15 +525,15 @@ export const make = (
         yield* verifyOtp(phoneNumber, otp, "phone-verification");
 
         // Attach (or verify) the phone identifier for this user.
-        const existing = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
+        const existing = yield* Identifier.lookupIdentifier(identifiers, "phone", phoneNumber);
         if (Option.exists(existing, (found) => found.userId !== userId)) {
           return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }
         if (Option.isNone(existing)) {
           const verifiedAt = yield* DateTime.nowAsDate;
-          yield* claimIdentifier(
+          yield* Identifier.claimIdentifier(
             identifiers,
-            makeIdentifier({
+            Identifier.makeIdentifier({
               userId,
               type: "phone",
               value: phoneNumber,
@@ -552,7 +545,7 @@ export const make = (
             Effect.catchTags({
               IdentifierTakenError: () =>
                 Effect.fail(new PhoneOtpError({ message: "This phone number is already in use" })),
-              IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+              IdentifierRefusedError: (error) => Effect.fail(Identifier.refusalAuthError(error)),
             }),
           );
         } else if (!existing.value.verified) {

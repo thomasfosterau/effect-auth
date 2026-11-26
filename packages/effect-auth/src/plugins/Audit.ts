@@ -9,13 +9,7 @@
 import * as Effect from "effect/Effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
 import * as Entity from "../Entity.ts";
-import {
-  type DeliveryFailure,
-  Hooks,
-  makePlugin,
-  type SessionRef,
-  type WriteEvent,
-} from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 
 /**
  * Logs `afterSignUp`, `afterSignIn` and `afterSignOut`, and `afterWrite` as
@@ -28,21 +22,21 @@ import {
  * logger). Configured with `isolateTaps: true` so audit failures never break
  * authentication.
  */
-export const AuditPlugin = makePlugin(
+export const AuditPlugin = Hooks.makePlugin(
   {
-    afterSignUp: Hooks.tap((result: AuthResult) =>
+    afterSignUp: Hooks.Hooks.tap((result: AuthResult) =>
       Effect.logInfo("auth.signUp", {
         userId: result.user.id,
         hasSession: result.session !== undefined,
       }),
     ),
-    afterSignIn: Hooks.tap((result: AuthResult) =>
+    afterSignIn: Hooks.Hooks.tap((result: AuthResult) =>
       Effect.logInfo("auth.signIn", { userId: result.user.id }),
     ),
-    afterSignOut: Hooks.tap((ref: SessionRef) =>
+    afterSignOut: Hooks.Hooks.tap((ref: Hooks.SessionRef) =>
       Effect.logInfo("auth.signOut", { sessionId: ref.sessionId }),
     ),
-    afterWrite: Hooks.tap((event: WriteEvent) =>
+    afterWrite: Hooks.Hooks.tap((event: Hooks.WriteEvent) =>
       Effect.logInfo("auth.write", {
         principal: Entity.formatRef(event.principal),
         system: event.principal.type === Entity.systemType,
@@ -50,7 +44,7 @@ export const AuditPlugin = makePlugin(
         resource: Entity.formatRef(event.resource),
       }),
     ),
-    afterDeliveryFailure: Hooks.tap((failure: DeliveryFailure) =>
+    afterDeliveryFailure: Hooks.Hooks.tap((failure: Hooks.DeliveryFailure) =>
       Effect.logWarning("auth.deliveryFailure", {
         purpose: failure.purpose,
         cause: failure.cause,

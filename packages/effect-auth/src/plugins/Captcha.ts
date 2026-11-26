@@ -17,12 +17,7 @@ import { HttpClientRequest } from "effect/http";
 import { ClientIP } from "../ClientIP.ts";
 import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
-import {
-  type AuthenticateAttempt,
-  makePlugin,
-  type PluginImpls,
-  type SendCodeAttempt,
-} from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { CaptchaError } from "../Errors.ts";
 
 /** The captcha services {@link CaptchaPlugin} can verify tokens with. */
@@ -51,7 +46,7 @@ export class CaptchaConfigError extends Schema.TaggedError<
 }) {}
 
 /** Whether an attempt is a password sign-in, the attempts a captcha token rides on. */
-const isPasswordSignIn = (attempt: AuthenticateAttempt): boolean =>
+const isPasswordSignIn = (attempt: Hooks.AuthenticateAttempt): boolean =>
   attempt.method === "email-password" || attempt.method === "username";
 
 const VERIFY_URLS: Record<CaptchaProvider, string> = {
@@ -167,7 +162,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
   ];
   const url = VERIFY_URLS[config.provider];
 
-  return makePlugin(
+  return Hooks.makePlugin(
     Effect.gen(function* () {
       const problem = configProblem(config);
       if (problem !== undefined) {
@@ -208,19 +203,19 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
           return yield* Effect.void;
         });
 
-      const impls: PluginImpls = {
+      const impls: Hooks.PluginImpls = {
         ...(Arr.contains(endpoints, "signUp") && {
           beforeSignUp: (input: SignUpInput) =>
             verify("signUp", input.captchaToken).pipe(Effect.as(input)),
         }),
         ...(Arr.contains(endpoints, "signIn") && {
-          beforeAuthenticate: (attempt: AuthenticateAttempt) =>
+          beforeAuthenticate: (attempt: Hooks.AuthenticateAttempt) =>
             isPasswordSignIn(attempt)
               ? verify("signIn", attempt.captchaToken).pipe(Effect.as(attempt))
               : Effect.succeed(attempt),
         }),
         ...(Arr.contains(endpoints, "sendCode") && {
-          beforeSendCode: (attempt: SendCodeAttempt) =>
+          beforeSendCode: (attempt: Hooks.SendCodeAttempt) =>
             verify("sendCode", attempt.captchaToken).pipe(Effect.as(attempt)),
         }),
       };

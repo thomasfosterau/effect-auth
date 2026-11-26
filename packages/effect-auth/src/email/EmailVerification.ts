@@ -15,11 +15,11 @@ import {
   type RateLimitError,
   ResendTooSoonError,
 } from "../Errors.ts";
-import { makeDetachedSend } from "../DeliveryScheduler.ts";
+import * as DeliveryScheduler from "../DeliveryScheduler.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
-import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
+import { buildRecipientSendGate } from "../RecipientSendLimit.ts";
 import type { RecipientSendLimit } from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -227,8 +227,8 @@ export const make = (
     const hashToken = yield* tokenHasher;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
-    const detached = yield* makeDetachedSend;
-    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
+    const recipientSendGate = yield* buildRecipientSendGate(config.recipientSendLimit);
 
     const createVerification = Effect.fn("EmailVerificationService.createVerification")(function* (
       rawUserId: string,

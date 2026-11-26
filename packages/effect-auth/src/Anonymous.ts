@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
-import { makeAmortizedPrune } from "./AmortizedPrune.ts";
+import { amortizedPrune } from "./AmortizedPrune.ts";
 import * as Option from "effect/Option";
 import { AccountManagementStore } from "./AccountManagement.ts";
 import * as Errors from "./Errors.ts";
@@ -123,7 +123,7 @@ const make = (
     // `done` forgets a link after an hour, pruned as it grows.
     const inFlight = MutableHashSet.empty<string>();
     const done = MutableHashMap.empty<string, number>();
-    const pruneDone = makeAmortizedPrune(done);
+    const pruneDone = amortizedPrune(done);
 
     return {
       signInAnonymous: Effect.fn("AnonymousService.signInAnonymous")(function* (
