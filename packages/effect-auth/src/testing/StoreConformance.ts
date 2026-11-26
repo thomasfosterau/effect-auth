@@ -2066,8 +2066,9 @@ const makeOAuthAccount = (userId: string): OAuthAccount => ({
  * The `OAuthAccountStore` contract: `create` is a plain insert, so a
  * provider account already linked is refused with `AuthError` and keeps its
  * user; `update` refreshes a link by its `id` without ever changing its user
- * or creating one; `deleteByUserId` removes every provider link of that user,
- * and only theirs.
+ * or creating one; `linkToUser` moves only an unlinked link (or one the user
+ * already holds), refusing another user's with `AuthError`; `deleteByUserId`
+ * removes every provider link of that user, and only theirs.
  *
  * @since 0.5.0
  * @category suites
@@ -2132,6 +2133,37 @@ export const oauthAccountStoreConformance = <E = never, R = never>(
             yield* store.get(unknown.provider, unknown.providerId),
             null,
           );
+        }),
+    },
+    {
+      name: "linkToUser links an unlinked account, and refuses one another user holds with AuthError",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* OAuthAccountStore;
+          const owner = yield* newUser();
+          const rival = yield* newUser();
+          const unlinked = makeOAuthAccount("");
+          yield* store.create(unlinked);
+          yield* store.linkToUser(owner, unlinked);
+          yield* expectEqual(
+            "the unlinked account after linkToUser",
+            (yield* store.get(unlinked.provider, unlinked.providerId))?.userId,
+            owner,
+          );
+          yield* store.linkToUser(owner, unlinked);
+          const held = makeOAuthAccount(owner);
+          yield* store.create(held);
+          yield* expectFailure(
+            "linkToUser of another user's link",
+            store.linkToUser(rival, held),
+            "AuthError",
+          );
+          yield* expectEqual(
+            "the held link after the refused linkToUser",
+            yield* store.get(held.provider, held.providerId),
+            held,
+          );
+          yield* expectEqual("the rival's links", yield* store.getByUserId(rival), []);
         }),
     },
     perUserDeleteCase<OAuthAccountStore, typeof OAuthAccountStore.Service, OAuthAccount, E, R>(

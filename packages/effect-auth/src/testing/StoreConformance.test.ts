@@ -257,6 +257,26 @@ describe("a broken store fails its suite", () => {
     ]);
   });
 
+  it("an OAuthAccountStore whose linkToUser moves another user's link fails its suite", async () => {
+    const failed = await failures(Testing.oauthAccountStoreConformance(), () => {
+      const accounts = MutableHashMap.empty<string, OAuthAccount>();
+      const key = (account: OAuthAccount) => `${account.provider}\u0000${account.providerId}`;
+      return Layer.succeed(OAuthAccountStore, {
+        ...Testing.memoryOAuthAccountStore(undefined, accounts),
+        linkToUser: (userId, account) =>
+          Effect.sync(() => {
+            const stored = MutableHashMap.get(accounts, key(account));
+            if (Option.isSome(stored)) {
+              MutableHashMap.set(accounts, key(account), { ...stored.value, userId });
+            }
+          }),
+      });
+    });
+    expect(failed.map((failure) => failure.name)).toEqual([
+      "linkToUser links an unlinked account, and refuses one another user holds with AuthError",
+    ]);
+  });
+
   it("a SessionStore whose update is a bare set fails the update-of-a-deleted-session case", async () => {
     const failed = await failures(Testing.sessionStoreConformance(), () => {
       const sessions = MutableHashMap.empty<string, Types.Session>();

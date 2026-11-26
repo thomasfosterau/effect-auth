@@ -1010,11 +1010,33 @@ export const makeOAuthAccountStore: Effect.Effect<
           WHERE id = ${account.id}
           RETURNING *`,
       ).pipe(Effect.map((row) => (row ? rowToOAuthAccount(row) : null))),
+    // Only an unlinked link (empty user_id) or one `userId` already holds
+    // moves; a link another user holds is refused, never reassigned.
     linkToUser: (userId, account) =>
-      asVoid(
+      firstRow(
         "oauthAccount.linkToUser",
-        sql`UPDATE auth_oauth_accounts SET user_id = ${userId}, updated_at = ${account.updatedAt}
-            WHERE provider = ${account.provider} AND provider_id = ${account.providerId}`,
+        sql<{
+          readonly id: string;
+        }>`UPDATE auth_oauth_accounts SET user_id = ${userId}, updated_at = ${account.updatedAt}
+            WHERE provider = ${account.provider} AND provider_id = ${account.providerId}
+              AND (user_id = '' OR user_id = ${userId})
+            RETURNING id`,
+      ).pipe(
+        Effect.flatMap((moved) =>
+          moved
+            ? Effect.void
+            : read(account.provider, account.providerId, "oauthAccount.linkToUser").pipe(
+                Effect.flatMap((held) =>
+                  held
+                    ? Effect.fail(
+                        new Auth.AuthError({
+                          message: "oauthAccount.linkToUser: the link belongs to another user",
+                        }),
+                      )
+                    : Effect.void,
+                ),
+              ),
+        ),
       ),
     unlinkFromUser: (userId, provider) =>
       asVoid(

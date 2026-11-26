@@ -613,16 +613,21 @@ export const memoryOAuthAccountStore = (
         return updated;
       }),
     linkToUser: (userId, account) =>
-      Effect.sync(() => {
+      Effect.suspend(() => {
         const key = accountKey(account.provider, account.providerId);
         const stored = MutableHashMap.get(accounts, key);
-        if (Option.isSome(stored)) {
-          MutableHashMap.set(accounts, key, {
-            ...stored.value,
-            userId,
-            updatedAt: account.updatedAt,
-          });
+        if (Option.isNone(stored)) return Effect.void;
+        if (stored.value.userId !== "" && stored.value.userId !== userId) {
+          return Effect.fail(
+            new Errors.AuthError({ message: "OAuth link belongs to another user" }),
+          );
         }
+        MutableHashMap.set(accounts, key, {
+          ...stored.value,
+          userId,
+          updatedAt: account.updatedAt,
+        });
+        return Effect.void;
       }),
     unlinkFromUser: (userId, provider) =>
       Effect.sync(() => {

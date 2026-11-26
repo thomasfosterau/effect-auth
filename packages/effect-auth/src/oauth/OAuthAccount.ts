@@ -56,7 +56,9 @@ export class OAuthAccountStore extends Context.Service<
      * Point the existing link for `(account.provider, account.providerId)` at
      * `userId`; a no-op when there is none. The one method that changes a
      * link's `userId`: the caller links an account `OAuthService.handleCallback`
-     * created unlinked, after creating the user, and checks ownership first.
+     * created unlinked, after creating the user. Only an unlinked link (empty
+     * `userId`) or one `userId` already holds may move; when another user
+     * holds the link it fails with `AuthError` and leaves the link as it is.
      */
     readonly linkToUser: (userId: string, account: OAuthAccount) => Effect.Effect<void, AuthError>;
     readonly unlinkFromUser: (userId: string, provider: string) => Effect.Effect<void, AuthError>;
