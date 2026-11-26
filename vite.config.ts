@@ -283,8 +283,10 @@ export default defineConfig({
         // The edge, where plain `fetch` is the API being adapted: the
         // browser client has no Effect runtime, the test `HttpClient` defers
         // to the global a suite swaps, and the workerd and Web-handler suites
-        // call the server they start. Core code goes through `HttpClient`.
+        // call the server they start, and the release script runs before
+        // anything is installed. Core code goes through `HttpClient`.
         files: [
+          "scripts/release.ts",
           "packages/effect-auth/src/client/Client.ts",
           "packages/effect-auth/src/testing/HttpClient.ts",
           "packages/effect-auth/src/http/DomainAttestation.test.ts",
