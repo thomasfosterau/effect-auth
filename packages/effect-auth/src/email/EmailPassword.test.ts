@@ -1,8 +1,8 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Order, Result, Struct } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { Hooks, makePlugin, composePlugins } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as Errors from "../Errors.ts";
@@ -17,9 +17,9 @@ import {
 import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
-import { hashToken } from "../TokenHash.ts";
 import { MultiAlgorithmVerifier, PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
+import * as Scrypt from "../password/Scrypt.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { UserService, UserServiceStore } from "../User.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
@@ -133,7 +133,7 @@ const makeTestContext = async (
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -149,10 +149,7 @@ const makeTestContext = async (
             Context.make(EmailPasswordStore, store),
             Context.make(PasswordHasher, hasher),
           ),
-          Context.merge(
-            Context.make(IdentifierStore, identifierStore),
-            Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-          ),
+          Context.merge(Context.make(IdentifierStore, identifierStore), PlatformCrypto.context()),
         ),
       ),
     ),
@@ -389,7 +386,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -406,7 +403,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     );
@@ -457,7 +454,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -474,7 +471,7 @@ describe("EmailPasswordService constant-work sign-in", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     );
@@ -692,7 +689,7 @@ describe("EmailPasswordService — migration and security hardening", () => {
     seedEmailIdentifier(user.id, "switch@example.com", true);
     MutableHashMap.set(passwordHashes, user.id, oldHash);
 
-    const scryptHasher = Password.scryptHasher({ cost: 1024 });
+    const scryptHasher = Scrypt.scryptHasher({ cost: 1024 });
     const verifier = Password.multiAlgorithmVerifier([
       Password.pbkdf2Hasher({ iterations: 1000 }),
       scryptHasher,
@@ -875,7 +872,7 @@ describe("EmailPasswordService - dangling session protection", () => {
             Context.make(SessionStore, localSessionStore),
             Context.make(UserStore, localUserStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -891,7 +888,7 @@ describe("EmailPasswordService - dangling session protection", () => {
             Context.make(UserStore, localUserStore),
             Context.make(IdentifierStore, localIdentifierStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     );
@@ -942,7 +939,7 @@ describe("EmailPasswordService - dangling session protection", () => {
       true,
     );
     // The record carries the stored id; the token travels beside it.
-    expect(signInResult.session?.id).toBe(hashToken(signInResult.token ?? ""));
+    expect(signInResult.session?.id).toBe(sha256Hex(signInResult.token ?? ""));
   });
 
   it("signUp succeeds and returns the session even when afterSignUp hook fails (no dangling session)", async () => {
@@ -971,7 +968,7 @@ describe("EmailPasswordService - dangling session protection", () => {
       true,
     );
     // The record carries the stored id; the token travels beside it.
-    expect(signUpResult.session?.id).toBe(hashToken(signUpResult.token ?? ""));
+    expect(signUpResult.session?.id).toBe(sha256Hex(signUpResult.token ?? ""));
   });
 });
 
@@ -1074,7 +1071,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
             Context.make(SessionStore, sessionStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ).pipe(Effect.provide(Hooks.Default)),
     );
@@ -1091,7 +1088,7 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
             Context.make(UserStore, userStore),
             Context.make(IdentifierStore, identifierStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     );

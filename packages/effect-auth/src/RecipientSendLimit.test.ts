@@ -6,6 +6,7 @@
  * window ends, counts nothing under `false`, and keys its count on the
  * recipient's digest only.
  */
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { DateTime, Duration, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Arr from "effect/Array";
@@ -36,11 +37,7 @@ import * as PasswordReset from "./password/PasswordReset.ts";
 import * as PhoneOtp from "./PhoneOtp.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
-import {
-  defaultRecipientSendLimit,
-  isRecipientSendCapped,
-  recipientSendKey,
-} from "./RecipientSendLimit.ts";
+import { defaultRecipientSendLimit, isRecipientSendCapped } from "./RecipientSendLimit.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
 import {
   memoryEmailPasswordStore,
@@ -48,7 +45,6 @@ import {
   memoryRateLimitStore,
 } from "./testing/MemoryStores.ts";
 import { sessionServiceLayer } from "./testing/ServiceLayers.ts";
-import { hashToken } from "./TokenHash.ts";
 import type { RecipientSendLimit, User } from "./Types.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -258,6 +254,10 @@ const sendTimes = (send: Send, recipient: string, count: number) =>
     { concurrency: 1 },
   );
 
+/** The documented store key: the recipient only as its SHA-256 digest. */
+const recipientSendKey = (purpose: string, recipient: string): string =>
+  `recipient-send:${purpose}:${sha256Hex(recipient)}`;
+
 const entryCount = (world: World, purpose: string, recipient: string): number | undefined =>
   Option.getOrUndefined(MutableHashMap.get(world.rateLimits, recipientSendKey(purpose, recipient)))
     ?.count;
@@ -373,8 +373,8 @@ describe.each(paths)("recipient send cap: $name", (path) => {
     const keys = Arr.fromIterable(MutableHashMap.keys(world.rateLimits));
     expect(keys.toSorted()).toEqual(
       [
-        `recipient-send:${path.purpose}:${hashToken(path.known)}`,
-        `recipient-send:${path.purpose}:${hashToken(path.unknown)}`,
+        `recipient-send:${path.purpose}:${sha256Hex(path.known)}`,
+        `recipient-send:${path.purpose}:${sha256Hex(path.unknown)}`,
       ].toSorted(),
     );
     const raw = [path.known, path.unknown, path.known.split("@")[0] ?? path.known];
@@ -410,7 +410,7 @@ describe("recipient send cap: email verification resend", () => {
     expect(result.first).toEqual([...ok5, capped]);
     expect(result.next).toEqual(["ok"]);
     expect(Arr.fromIterable(MutableHashMap.keys(world.rateLimits))).toEqual([
-      `recipient-send:email-verification:${hashToken(unverifiedEmail)}`,
+      `recipient-send:email-verification:${sha256Hex(unverifiedEmail)}`,
     ]);
   });
 

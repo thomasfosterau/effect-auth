@@ -3,7 +3,8 @@ import { DateTime, Effect } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { hashToken, type SessionWithUser } from "@thomasfosterau/effect-auth";
+import { createHash } from "node:crypto";
+import type { SessionWithUser } from "@thomasfosterau/effect-auth";
 import { makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
 import * as Http from "@thomasfosterau/effect-auth/http";
 import {
@@ -585,7 +586,7 @@ describe("against the real auth handler", () => {
     });
     const resolved = locals.auth?.session;
     assert(resolved !== null && resolved !== undefined, "the viewer is signed in");
-    expect(resolved.session.id).toBe(hashToken(token));
+    expect(resolved.session.id).toBe(createHash("sha256").update(token).digest("hex"));
     // A `load` that returns `locals.auth` serializes no credential into the page.
     expect(encodeUnknown(locals.auth)).not.toContain(token);
   });

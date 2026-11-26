@@ -10,10 +10,14 @@
 
 import { Context, Effect, Layer, Result } from "effect";
 import * as Arr from "effect/Array";
+import { Digest, Kdf, SecureRandom } from "effect/crypto";
+import { Hex } from "effect/encoding";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import type * as Types from "../Types.ts";
 import * as Errors from "../Errors.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
+import { timingSafeEqualBytes } from "../TokenHash.ts";
 
 /**
  * Tag for PasswordHasher service
@@ -58,16 +62,6 @@ export class PasswordHasher extends Context.Service<
    */
   static readonly layer = (options?: { readonly iterations?: number | undefined }) =>
     Layer.succeed(PasswordHasher, pbkdf2Hasher(options));
-
-  /**
-   * Layer providing the scrypt hasher (memory-hard; PHC-format output, see
-   * {@link scryptHasher}).
-   */
-  static readonly layerScrypt = (options?: {
-    readonly cost?: number;
-    readonly blockSize?: number;
-    readonly parallelization?: number;
-  }) => Layer.succeed(PasswordHasher, scryptHasher(options));
 }
 
 /**
@@ -127,9 +121,10 @@ const parseAlgorithm = (hash: string): Effect.Effect<string, Errors.HashingError
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
  * import { Password } from "@thomasfosterau/effect-auth"
+ * import { scryptHasher } from "@thomasfosterau/effect-auth/scrypt"
  *
  * // During a migration, one verifier accepts hashes from both algorithms.
- * const verifier = Password.multiAlgorithmVerifier([Password.pbkdf2Hasher(), Password.scryptHasher()])
+ * const verifier = Password.multiAlgorithmVerifier([Password.pbkdf2Hasher(), scryptHasher()])
  *
  * const program = Effect.gen(function* () {
  *   // A hash written by the old algorithm still verifies.
@@ -168,15 +163,17 @@ export const multiAlgorithmVerifier = (
   };
 };
 
-// Imported, never the global: `nodejs_compat` sets no `Buffer` global on
-// Workers dated before 2024-09-23.
-import { Buffer } from "node:buffer";
-import * as crypto from "node:crypto";
+const encoder = new TextEncoder();
+
+/** The UTF-8 byte length of `text`. */
+const utf8Length = (text: string): number => encoder.encode(text).length;
 
 // Anti-DoS: reject inputs longer than this before running any KDF.
 // Legitimate passwords are always well below this threshold.
 /** Parses a stored decimal parameter. Anything else (sign, hex, exponent, empty) is NaN. */
-const parseStoredParam = (text: string): number => (/^[0-9]+$/.test(text) ? Number(text) : NaN);
+/** @internal */
+export const parseStoredParam = (text: string): number =>
+  /^[0-9]+$/.test(text) ? Number(text) : NaN;
 const MAX_PASSWORD_BYTES = 1024;
 
 /** The `$`-separated fields of a stored hash, when there are exactly four. */
@@ -191,8 +188,12 @@ const hashFields4 = (hash: string): readonly [string, string, string, string] | 
     : undefined;
 };
 
-/** The `$`-separated fields of a stored hash, when there are exactly six. */
-const hashFields6 = (
+/**
+ * The `$`-separated fields of a stored hash, when there are exactly six.
+ *
+ * @internal
+ */
+export const hashFields6 = (
   hash: string,
 ): readonly [string, string, string, string, string, string] | undefined => {
   const [a, b, c, d, e, f, ...rest] = hash.split("$");
@@ -207,19 +208,6 @@ const hashFields6 = (
     : undefined;
 };
 
-const pbkdf2 = (
-  password: string,
-  salt: Buffer,
-  iterations: number,
-  keylen: number,
-  digest: string,
-): Promise<Buffer> =>
-  new Promise((resolve, reject) => {
-    crypto.pbkdf2(password, salt, iterations, keylen, digest, (err, derivedKey) =>
-      err ? reject(err) : resolve(derivedKey),
-    );
-  });
-
 /** Refuse a password `hash` will not hash: empty, not a string, or over the byte cap. */
 const refuseUnhashablePassword = (password: string): Effect.Effect<void, Errors.HashingError> => {
   if (!password || !P.isString(password)) {
@@ -229,7 +217,7 @@ const refuseUnhashablePassword = (password: string): Effect.Effect<void, Errors.
       }),
     );
   }
-  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+  if (utf8Length(password) > MAX_PASSWORD_BYTES) {
     return Effect.fail(
       new Errors.HashingError({
         message: "Password exceeds maximum length",
@@ -265,7 +253,7 @@ const verifiableFields = <Fields extends ReadonlyArray<string>>(
     }
 
     // Anti-DoS: bail out before the expensive KDF for absurdly long inputs.
-    if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) {
+    if (utf8Length(password) > MAX_PASSWORD_BYTES) {
       return undefined;
     }
 
@@ -285,14 +273,18 @@ const verifiableFields = <Fields extends ReadonlyArray<string>>(
   });
 
 /** Compare a derived key with the stored one in constant time. */
-const derivedKeyMatches = (derivedKey: Buffer, expectedHash: Buffer): boolean =>
-  derivedKey.length === expectedHash.length && crypto.timingSafeEqual(derivedKey, expectedHash);
+const derivedKeyMatches = (derivedKey: Uint8Array, expectedHash: Uint8Array): boolean =>
+  timingSafeEqualBytes(derivedKey, expectedHash);
+
+/** Hex-decoded bytes, or `undefined` when `text` is not hex. */
+const hexBytes = (text: string): Uint8Array | undefined => Result.getOrUndefined(Hex.decode(text));
 
 /**
  * A hasher's `hash`: refuse an unhashable password, then let `encode` derive
  * the key and format the stored hash string.
  */
-const kdfHash = (
+/** @internal */
+export const kdfHash = (
   algorithm: string,
   encode: (password: string) => Effect.Effect<string, Errors.HashingError>,
 ) =>
@@ -304,8 +296,12 @@ const kdfHash = (
     return { hash, algorithm };
   });
 
-/** What a `verify` reads from a stored hash's fields before running its KDF. */
-interface StoredHash<Params> {
+/**
+ * What a `verify` reads from a stored hash's fields before running its KDF.
+ *
+ * @internal
+ */
+export interface StoredHash<Params> {
   /** The KDF parameters the hash was written with. */
   readonly params: Params;
   /** Why the parameters are refused, or `undefined` when they are within the caps. */
@@ -319,16 +315,17 @@ interface StoredHash<Params> {
  * stored parameters before the KDF, re-derive the key with `deriveKey`, and
  * compare in constant time.
  */
-const kdfVerify = <Fields extends ReadonlyArray<string>, Params>(
+/** @internal */
+export const kdfVerify = <Fields extends ReadonlyArray<string>, Params>(
   algorithm: string,
   splitFields: (hash: string) => Fields | undefined,
   readStored: (fields: Fields) => StoredHash<Params>,
   deriveKey: (
     password: string,
-    salt: Buffer,
+    salt: Uint8Array,
     keyLength: number,
     params: Params,
-  ) => Effect.Effect<Buffer, Errors.HashingError>,
+  ) => Effect.Effect<Uint8Array, Errors.HashingError>,
 ) =>
   Effect.fn("effect-auth.password.verify", {
     attributes: { algorithm },
@@ -341,8 +338,11 @@ const kdfVerify = <Fields extends ReadonlyArray<string>, Params>(
         message: `Invalid hash parameters: ${stored.refused}`,
       });
     }
-    const salt = Buffer.from(stored.saltHex, "hex");
-    const expectedHash = Buffer.from(stored.hashHex, "hex");
+    const salt = hexBytes(stored.saltHex);
+    const expectedHash = hexBytes(stored.hashHex);
+    if (salt === undefined || expectedHash === undefined) {
+      return yield* new Errors.HashingError({ message: "Invalid hash format" });
+    }
     const derivedKey = yield* deriveKey(password, salt, expectedHash.length, stored.params);
     return derivedKeyMatches(derivedKey, expectedHash);
   });
@@ -352,7 +352,8 @@ export type {
   HashedPassword,
 } from "../Types.ts";
 
-// Node's crypto.pbkdf2 takes the iteration count as an int32 from 1 to 2^31 - 1.
+// The largest iteration count a hasher is configured with: an int32, as Node's
+// `crypto.pbkdf2` took, which every hash written before WebCrypto kept to.
 const PBKDF2_MAX_ITERATIONS = 2 ** 31 - 1;
 // Floor of the cap `verify` enforces on the iteration count read from a stored
 // hash (about 8x the 600,000 default). The effective cap is this or the
@@ -369,8 +370,8 @@ const PBKDF2_ITERATIONS_CAP = 5000000;
  *
  * `iterations` defaults to 600,000, the OWASP figure for PBKDF2-HMAC-SHA256.
  * Lower it only where the cost is not the point (such as in tests); the default
- * is the production setting. It must be an integer from 1 to 2147483647 (Node's
- * limit for `crypto.pbkdf2`). `hash` refuses any other value with a
+ * is the production setting. It must be an integer from 1 to 2147483647.
+ * `hash` refuses any other value with a
  * `HashingError`, so a hasher never writes a hash its own `verify` would refuse.
  *
  * `verify` refuses, with a `HashingError` and before running PBKDF2, a stored
@@ -384,10 +385,18 @@ const PBKDF2_ITERATIONS_CAP = 5000000;
  * `needsRehash` returns true for a stored hash with fewer iterations than the
  * configured count, so a hash made at a lower count is upgraded on the next
  * successful sign-in, and for a hash `verify` would refuse.
+ *
+ * The key is derived with `effect/crypto`'s `Kdf` (WebCrypto PBKDF2 by default,
+ * so it runs on Workers and in the browser) and the salt drawn from
+ * `SecureRandom`; `options.kdf` and `options.random` substitute either.
  */
 export const pbkdf2Hasher = (options?: {
   readonly iterations?: number | undefined;
+  readonly kdf?: typeof Kdf.Kdf.Service | undefined;
+  readonly random?: typeof SecureRandom.SecureRandom.Service | undefined;
 }): typeof PasswordHasher.Service => {
+  const kdf = options?.kdf ?? PlatformCrypto.kdf();
+  const random = options?.random ?? PlatformCrypto.instance;
   const ALGORITHM = "pbkdf2-sha256";
   // OWASP recommended minimum for SHA-256: 600,000 iterations (2023)
   const ITERATIONS = options?.iterations ?? 600000;
@@ -414,6 +423,28 @@ export const pbkdf2Hasher = (options?: {
     return undefined;
   };
 
+  const derive = (
+    password: string,
+    salt: Uint8Array,
+    iterations: number,
+    length: number,
+    operation: "hash" | "verify",
+  ): Effect.Effect<Uint8Array, Errors.HashingError> =>
+    kdf
+      .derive(Kdf.pbkdf2({ hash: Digest.sha256, iterations }), encoder.encode(password), {
+        salt,
+        length,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new Errors.HashingError({
+              message: `Failed to ${operation} password`,
+              cause,
+            }),
+        ),
+      );
+
   return {
     algorithm: ALGORITHM,
 
@@ -426,34 +457,25 @@ export const pbkdf2Hasher = (options?: {
       // verify refuses this hash, so it has to be replaced.
       if (refusedIterations(iters) !== undefined || iters < ITERATIONS) return true;
       // Stored key length must match current KEY_LENGTH.
-      const storedKeyLen = Buffer.from(hashHex, "hex").length;
+      const storedKeyLen = hexBytes(hashHex)?.length;
       if (storedKeyLen !== KEY_LENGTH) return true;
       return false;
     },
 
     hash: kdfHash(ALGORITHM, (password) =>
       Effect.gen(function* () {
-        // Never write a hash this hasher's own verify would refuse (Node rejects
-        // an out-of-range count only when it derives the key).
+        // Never write a hash this hasher's own verify would refuse.
         if (!iterationsUsable) {
           return yield* new Errors.HashingError({
             message: `Invalid PBKDF2 configuration: iterations must be an integer from 1 to ${PBKDF2_MAX_ITERATIONS}`,
           });
         }
 
-        const salt = crypto.randomBytes(SALT_LENGTH);
-
-        const derivedKey = yield* Effect.tryPromise({
-          try: () => pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, "sha256"),
-          catch: (error) =>
-            new Errors.HashingError({
-              message: "Failed to hash password",
-              cause: error,
-            }),
-        });
+        const salt = yield* random.randomBytes(SALT_LENGTH);
+        const derivedKey = yield* derive(password, salt, ITERATIONS, KEY_LENGTH, "hash");
 
         // Format: algorithm$iterations$salt$hash
-        return `${ALGORITHM}$${ITERATIONS}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
+        return `${ALGORITHM}$${ITERATIONS}$${Hex.encode(salt)}$${Hex.encode(derivedKey)}`;
       }),
     ),
 
@@ -470,194 +492,7 @@ export const pbkdf2Hasher = (options?: {
       // KEY_LENGTH value still verify correctly (needsRehash detects and
       // upgrades them on the next successful login).
       (password, salt, keyLength, iterCount) =>
-        Effect.tryPromise({
-          try: () => pbkdf2(password, salt, iterCount, keyLength, "sha256"),
-          catch: (error) =>
-            new Errors.HashingError({
-              message: "Failed to verify password",
-              cause: error,
-            }),
-        }),
-    ),
-  };
-};
-
-// Floors of the caps `verify` enforces on the N, r and p read from a stored
-// hash. The effective caps are these or the hasher's own configured values,
-// whichever is higher, so a hash the hasher itself writes always verifies.
-const SCRYPT_MIN_MEMORY_CAP = 256 * 1024 * 1024; // 256 MiB
-const SCRYPT_MAX_N_CAP = 2 ** 20;
-const SCRYPT_MAX_R_CAP = 32;
-const SCRYPT_MAX_P_CAP = 16;
-
-/** Bytes OpenSSL's scrypt allocates for N, r and p; also the `maxmem` passed to Node. */
-const scryptMemory = (N: number, r: number, p: number): number => 128 * r * (N + p + 2);
-
-/**
- * scrypt Password Hasher implementing the PasswordHasher trait.
- *
- * Uses Node's built-in `crypto.scrypt` (dependency-free) with OWASP-recommended
- * parameters (N=2^17, r=8, p=1). scrypt is memory-hard, making it more
- * resistant to GPU/ASIC attacks than PBKDF2.
- *
- * PHC-style format: `scrypt$N$r$p$salt$hash` (N/r/p are stored so parameters
- * can be tuned without breaking existing hashes).
- *
- * `verify` reads N, r and p from the stored hash and refuses, before running
- * the KDF, any set outside these limits. The refusal is a `HashingError`:
- * - N is a power of two with 2 ≤ N ≤ max(2^20, cost);
- * - r is an integer with 1 ≤ r ≤ max(32, blockSize);
- * - p is an integer with 1 ≤ p ≤ max(16, parallelization);
- * - the memory a derivation needs, 128 * r * (N + p + 2) bytes, is at most
- *   max(256 MiB, the memory the configured cost, blockSize and parallelization need).
- *
- * The defaults need about 128 MiB and pass. A hash written with valid
- * configured parameters always verifies, even above 256 MiB, but a crafted
- * stored hash cannot make verify allocate gigabytes. `hash` applies the same
- * checks to the configured parameters, so a hasher never writes a hash its own
- * `verify` would refuse (e.g. `blockSize: 0`, which Node itself accepts).
- *
- * `needsRehash` returns true for a hash that `verify` would refuse, and for one
- * whose N, r or p is below the configured value. A stored set that is at least
- * as strong in every parameter is kept; one that is weaker in any parameter is
- * replaced by the configured set, even where it was stronger in another.
- */
-export const scryptHasher = (options?: {
-  readonly cost?: number;
-  readonly blockSize?: number;
-  readonly parallelization?: number;
-}): typeof PasswordHasher.Service => {
-  const ALGORITHM = "scrypt";
-  const COST = options?.cost ?? 131072; // 2^17, OWASP recommended
-  const BLOCK_SIZE = options?.blockSize ?? 8;
-  const PARALLELIZATION = options?.parallelization ?? 1;
-  const KEY_LENGTH = 64;
-  const SALT_LENGTH = 16;
-  // Caps on the parameters `verify` accepts from a stored hash (see scryptHasher).
-  // Only a usable configured value may raise a cap: a NaN, Infinity or
-  // fractional option (which `hash` refuses anyway) must not turn a cap into
-  // NaN or Infinity and so disable it.
-  const usable = (n: number): number => (Number.isSafeInteger(n) && n > 0 ? n : 0);
-  const MAX_N = Math.max(SCRYPT_MAX_N_CAP, usable(COST));
-  const MAX_R = Math.max(SCRYPT_MAX_R_CAP, usable(BLOCK_SIZE));
-  const MAX_P = Math.max(SCRYPT_MAX_P_CAP, usable(PARALLELIZATION));
-  const MAX_MEMORY = Math.max(
-    SCRYPT_MIN_MEMORY_CAP,
-    scryptMemory(usable(COST), usable(BLOCK_SIZE), usable(PARALLELIZATION)),
-  );
-
-  /**
-   * Why a parameter set is refused, or `undefined` when it is within the caps.
-   * It runs before any allocation, so a crafted hash never makes Node allocate
-   * past the caps.
-   */
-  const refusedParams = (N: number, r: number, p: number): string | undefined => {
-    if (!Number.isSafeInteger(N) || N < 2 || 2 ** Math.round(Math.log2(N)) !== N) {
-      return "N must be a power of two, at least 2";
-    }
-    if (N > MAX_N) return `N exceeds ${MAX_N}`;
-    if (!Number.isSafeInteger(r) || r < 1 || r > MAX_R) {
-      return `r must be an integer from 1 to ${MAX_R}`;
-    }
-    if (!Number.isSafeInteger(p) || p < 1 || p > MAX_P) {
-      return `p must be an integer from 1 to ${MAX_P}`;
-    }
-    if (scryptMemory(N, r, p) > MAX_MEMORY) {
-      return `scrypt would need more than ${MAX_MEMORY} bytes`;
-    }
-    return undefined;
-  };
-
-  const scrypt = (
-    password: string,
-    salt: Buffer,
-    N: number,
-    r: number,
-    p: number,
-  ): Effect.Effect<Buffer, Errors.HashingError> =>
-    Effect.callback((resume) => {
-      const fail = (cause: unknown) =>
-        resume(
-          Effect.fail(
-            new Errors.HashingError({
-              message: "Failed to derive scrypt key",
-              cause,
-            }),
-          ),
-        );
-      const started = Result.try(() =>
-        crypto.scrypt(
-          password,
-          salt,
-          KEY_LENGTH,
-          // OpenSSL's scrypt allocates 128 * r * (N + p + 2) bytes and rejects
-          // a smaller maxmem (ERR_CRYPTO_INVALID_SCRYPT_PARAMS). The old
-          // 256 * N * r fell short whenever p + 2 > N.
-          { N, r, p, maxmem: scryptMemory(N, r, p) },
-          (error, derivedKey) => {
-            if (error) {
-              fail(error);
-            } else {
-              resume(Effect.succeed(derivedKey));
-            }
-          },
-        ),
-      );
-      if (Result.isFailure(started)) {
-        // Node rejects invalid parameters by throwing synchronously (a
-        // RangeError). That is a typed failure too, not a defect.
-        fail(started.failure);
-      }
-    });
-
-  return {
-    algorithm: ALGORITHM,
-
-    needsRehash: (hash: string): boolean => {
-      const fields = hashFields6(hash);
-      if (fields === undefined) return true;
-      const [algorithm, costStr, blockSizeStr, parallelizationStr] = fields;
-      if (algorithm !== ALGORITHM) return true;
-      const N = parseStoredParam(costStr);
-      const r = parseStoredParam(blockSizeStr);
-      const p = parseStoredParam(parallelizationStr);
-      // verify refuses this hash, so it has to be replaced.
-      if (refusedParams(N, r, p) !== undefined) return true;
-      // Each parameter raises the cost, so only a weaker stored set is upgraded.
-      return N < COST || r < BLOCK_SIZE || p < PARALLELIZATION;
-    },
-
-    hash: kdfHash(ALGORITHM, (password) =>
-      Effect.gen(function* () {
-        // Never write a hash this hasher's own verify would refuse: Node accepts
-        // some configurations (blockSize 0) that the stored-hash checks reject.
-        const misconfigured = refusedParams(COST, BLOCK_SIZE, PARALLELIZATION);
-        if (misconfigured !== undefined) {
-          return yield* new Errors.HashingError({
-            message: `Invalid scrypt configuration: ${misconfigured}`,
-          });
-        }
-
-        const salt = crypto.randomBytes(SALT_LENGTH);
-        const derivedKey = yield* scrypt(password, salt, COST, BLOCK_SIZE, PARALLELIZATION);
-
-        return `${ALGORITHM}$${COST}$${BLOCK_SIZE}$${PARALLELIZATION}$${salt.toString("hex")}$${derivedKey.toString("hex")}`;
-      }),
-    ),
-
-    verify: kdfVerify(
-      ALGORITHM,
-      hashFields6,
-      ([, costStr, blockSizeStr, parallelizationStr, saltHex, hashHex]) => {
-        const N = parseStoredParam(costStr);
-        const r = parseStoredParam(blockSizeStr);
-        const p = parseStoredParam(parallelizationStr);
-        // Refuse out-of-range parameters before the KDF. Node can still reject a
-        // set within the caps (OpenSSL's own limits); the scrypt helper maps that
-        // to a HashingError too.
-        return { params: { N, r, p }, refused: refusedParams(N, r, p), saltHex, hashHex };
-      },
-      (password, salt, _keyLength, { N, r, p }) => scrypt(password, salt, N, r, p),
+        derive(password, salt, iterCount, keyLength, "verify"),
     ),
   };
 };

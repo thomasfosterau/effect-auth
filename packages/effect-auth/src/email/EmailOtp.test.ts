@@ -1,3 +1,4 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
@@ -28,7 +29,6 @@ import {
   makeIdentifier,
   memoryIdentifierStore,
 } from "../Identifier.ts";
-import { hashToken } from "../TokenHash.ts";
 import { make, SessionService } from "../SessionService.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
@@ -224,7 +224,7 @@ const makeTestContext = async (
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -245,7 +245,7 @@ const makeTestContext = async (
             Context.make(IdentifierStore, identifierStore),
             Context.make(UserStore, userStore),
           ),
-          Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+          PlatformCrypto.context(),
         ),
       ),
     ),
@@ -293,7 +293,7 @@ describe("EmailOtpService", () => {
 
     const record = Option.getOrUndefined(MutableHashMap.get(otpRecords, "new@example.com:sign-in"));
     expect(record).toBeDefined();
-    expect(record?.otpHash).toBe(hashToken(sent.otp));
+    expect(record?.otpHash).toBe(sha256Hex(sent.otp));
     expect(record?.otpHash).not.toBe(sent.otp);
     expect(record?.attempts).toBe(0);
   });
@@ -322,7 +322,7 @@ describe("EmailOtpService", () => {
     expect(MutableHashMap.size(otpRecords)).toBe(1);
     expect(
       Option.getOrUndefined(MutableHashMap.get(otpRecords, "repeat@example.com:sign-in"))?.otpHash,
-    ).toBe(hashToken(recorded(sentOtps, 1).otp));
+    ).toBe(sha256Hex(recorded(sentOtps, 1).otp));
   });
 
   it("should sign in a new user with a valid OTP, creating a verified email identifier and session", async () => {
@@ -659,7 +659,7 @@ describe("EmailOtpService", () => {
 
     MutableHashMap.set(otpRecords, "late@example.com:sign-in", {
       email: "late@example.com",
-      otpHash: hashToken("123456"),
+      otpHash: sha256Hex("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10 * 60 * 1000,
@@ -769,7 +769,7 @@ describe("EmailOtpService", () => {
 
     MutableHashMap.set(otpRecords, "orphan@example.com:sign-in", {
       email: "orphan@example.com",
-      otpHash: hashToken("123456"),
+      otpHash: sha256Hex("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
@@ -907,7 +907,7 @@ describe("EmailOtpService", () => {
     // Seed an OTP record whose createdAt is older than the 60 s cooldown.
     MutableHashMap.set(otpRecords, "user@example.com:sign-in", {
       email: "user@example.com",
-      otpHash: hashToken("123456"),
+      otpHash: sha256Hex("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
@@ -933,7 +933,7 @@ describe("EmailOtpService", () => {
     // The new record has a fresh hash, not the seeded one.
     expect(
       Option.getOrUndefined(MutableHashMap.get(otpRecords, "user@example.com:sign-in"))?.otpHash,
-    ).toBe(hashToken(recorded(sentOtps).otp));
+    ).toBe(sha256Hex(recorded(sentOtps).otp));
   });
 
   it("should scope the cooldown to each purpose independently", async () => {
@@ -1105,7 +1105,7 @@ describe("EmailOtpService", () => {
       // The stub draws only the all-zero code, as the account holder's shows.
       expect(sentOtps).toEqual([{ email: "member@example.com", otp: guess, purpose }]);
       expect(marker).toBeDefined();
-      expect(marker?.otpHash).not.toBe(hashToken(guess));
+      expect(marker?.otpHash).not.toBe(sha256Hex(guess));
       expect(error).toMatchObject({ _tag: "EmailOtpError", message: "Invalid or expired OTP" });
       expect(MutableHashMap.size(users)).toBe(1);
       expect(createdWith).toEqual([]);
@@ -1194,7 +1194,7 @@ describe("EmailOtpService verification where send hides the account", () => {
       | EmailPasswordStore
       | Hooks
       | RateLimitStore
-      | SecureRandom.SecureRandom
+      | PlatformCrypto.Services
     >,
   ) =>
     makeTestContext().then((context) =>
@@ -1390,7 +1390,7 @@ const runInContext = <A, E>(
     | SessionService
     | EmailPasswordStore
     | RateLimitStore
-    | SecureRandom.SecureRandom
+    | PlatformCrypto.Services
     | Hooks
   >,
 ) =>

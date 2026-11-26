@@ -31,7 +31,9 @@ import { Base64Url } from "effect/encoding";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { aes256GcmCipher, hashToken, type JwsAlgorithm } from "./index.ts";
+import { aes256GcmCipher, type JwsAlgorithm } from "./index.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { sha256Hex } from "./testing/Sha256.ts";
 import { pbkdf2Hasher } from "./password/index.ts";
 import * as Rfc7515 from "./testing/Rfc7515.ts";
 
@@ -78,14 +80,17 @@ import {
   jwkToSpkiDer,
   sha256,
   signJws,
-  verifyDerSignature,
   verifyJws,
+  verifySpkiSignature,
 } from "./index.ts";
+import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { appleClientSecret } from "./oauth/index.ts";
-import { pbkdf2Hasher, scryptHasher } from "./password/index.ts";
+import { pbkdf2Hasher } from "./password/index.ts";
+import { scryptHasher } from "./password/Scrypt.ts";
 import { memoryJwtKeyStore } from "./testing/index.ts";
 
 const enc = (text) => new TextEncoder().encode(text);
+const runCrypto = (effect) => Effect.runPromise(PlatformCrypto.provide(effect));
 const b64 = (bytes) => Base64Url.encode(new Uint8Array(bytes));
 const unb64 = (text) => {
   const decoded = Base64Url.decode(text);
@@ -190,34 +195,35 @@ const password = (hasher) =>
   );
 
 const aes = () =>
-  Effect.runPromise(
+  runCrypto(
     Effect.gen(function* () {
-      const cipher = aes256GcmCipher("workerd-secret");
+      const cipher = yield* aes256GcmCipher("workerd-secret");
       const sealed = yield* cipher.encrypt("refresh-token-123");
       const opened = yield* cipher.decrypt(sealed);
       const tampered = yield* Effect.result(cipher.decrypt(tamper(sealed)));
-      const key = sha256("cookie-key");
-      const cookie = aes256GcmSeal(key, "cached-session");
+      const key = yield* sha256("cookie-key");
+      const cookie = yield* aes256GcmSeal(key, "cached-session");
       return {
         sealed,
         opened,
         rejectsTampered: tampered._tag === "Failure",
-        cookieOpened: aes256GcmOpen(key, cookie),
-        cookieRejectsWrongKey: aes256GcmOpen(sha256("other"), cookie) === null,
+        cookieOpened: yield* aes256GcmOpen(key, cookie),
+        cookieRejectsWrongKey: (yield* aes256GcmOpen(yield* sha256("other"), cookie)) === null,
       };
     }),
   );
 
-const der = () => {
+const der = async () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
-  const spki = jwkToSpkiDer(publicKey.export({ format: "jwk" }));
+  const spki = await runCrypto(jwkToSpkiDer("ES256", publicKey.export({ format: "jwk" })));
   const message = enc("authenticator-data");
   const signature = new Uint8Array(crypto.sign("sha256", message, privateKey));
   const ed = crypto.generateKeyPairSync("ed25519");
-  const edSpki = jwkToSpkiDer(ed.publicKey.export({ format: "jwk" }));
+  const edSpki = await runCrypto(jwkToSpkiDer("EdDSA", ed.publicKey.export({ format: "jwk" })));
+  const edSignature = new Uint8Array(crypto.sign(null, message, ed.privateKey));
   return {
-    es256: verifyDerSignature("sha256", spki, message, signature),
-    eddsa: verifyDerSignature(null, edSpki, message, new Uint8Array(crypto.sign(null, message, ed.privateKey))),
+    es256: await runCrypto(verifySpkiSignature("ES256", spki, message, signature)),
+    eddsa: await runCrypto(verifySpkiSignature("EdDSA", edSpki, message, edSignature)),
   };
 };
 
@@ -258,12 +264,14 @@ const run = async (probe) => ({
   apple: await attempt(apple),
   pbkdf2: await attempt(() => password(pbkdf2Hasher())),
   scrypt: await attempt(() => password(scryptHasher({ cost: 16384 }))),
-  tokenHash: await attempt(() => ({
-    digest: hashToken("raw-token"),
-    equal: constantTimeHashEqual(hashToken("a"), hashToken("a")),
-    unequal: !constantTimeHashEqual(hashToken("a"), hashToken("b")),
+  tokenHash: await attempt(async () => {
+    const [raw, a, b] = await runCrypto(Effect.forEach(["raw-token", "a", "b"], hashToken));
+    return { digest: raw, equal: constantTimeHashEqual(a, a), unequal: !constantTimeHashEqual(a, b) };
+  }),
+  hmac: await attempt(async () => ({
+    sha1: b64(await runCrypto(hmac("sha1", "key", "data"))),
+    sha256: b64(await runCrypto(sha256("data"))),
   })),
-  hmac: await attempt(() => ({ sha1: b64(hmac("sha1", "key", "data")), sha256: b64(sha256("data")) })),
   aes: await attempt(aes),
   der: await attempt(der),
   es256Malformed: await attempt(es256Malformed),
@@ -276,7 +284,7 @@ const check = async (input) => ({
     verifyJws(algorithm, unb64(data), unb64(signature), jwk),
   ),
   eddsaSignature: b64(signJws("EdDSA", unb64(input.eddsa.data), input.eddsa.privateKeyPem)),
-  decrypted: await Effect.runPromise(aes256GcmCipher(input.aes.secret).decrypt(input.aes.sealed)),
+  decrypted: await runCrypto(Effect.flatMap(aes256GcmCipher(input.aes.secret), (cipher) => cipher.decrypt(input.aes.sealed))),
   pbkdf2: await Effect.runPromise(pbkdf2Hasher().verify(input.pbkdf2.password, input.pbkdf2.hash)),
 });
 
@@ -610,7 +618,7 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
 
   it("hashes tokens, HMACs and digests as Node does", () => {
     const tokenHash = valueOf(run.tokenHash);
-    expect(tokenHash).toEqual({ digest: hashToken("raw-token"), equal: true, unequal: true });
+    expect(tokenHash).toEqual({ digest: sha256Hex("raw-token"), equal: true, unequal: true });
     expect(valueOf(run.hmac)).toEqual({
       sha1: Base64Url.encode(
         new Uint8Array(crypto.createHmac("sha1", "key").update("data").digest()),
@@ -627,7 +635,11 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
       cookieOpened: "cached-session",
       cookieRejectsWrongKey: true,
     });
-    const opened = await Effect.runPromise(aes256GcmCipher("workerd-secret").decrypt(aes.sealed));
+    const opened = await Effect.runPromise(
+      PlatformCrypto.provide(
+        Effect.flatMap(aes256GcmCipher("workerd-secret"), (cipher) => cipher.decrypt(aes.sealed)),
+      ),
+    );
     expect(opened).toBe("refresh-token-123");
   });
 
@@ -651,7 +663,11 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
   it("verifies what Node signed, sealed and hashed", async () => {
     const jws = (["ES256", "EdDSA", "RS256"] as const).map(nodeSigned);
     const eddsa = nodeSigned("EdDSA");
-    const sealed = await Effect.runPromise(aes256GcmCipher("node-secret").encrypt("from-node"));
+    const sealed = await Effect.runPromise(
+      PlatformCrypto.provide(
+        Effect.flatMap(aes256GcmCipher("node-secret"), (cipher) => cipher.encrypt("from-node")),
+      ),
+    );
     const { hash } = await Effect.runPromise(pbkdf2Hasher().hash("node password"));
     const body = encodeCheckInput({
       jws,

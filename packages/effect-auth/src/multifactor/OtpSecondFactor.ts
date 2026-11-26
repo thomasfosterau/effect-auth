@@ -17,14 +17,14 @@
  * @module otp-second-factor
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService } from "../SessionService.ts";
-import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import { constantTimeHashEqual, tokenHasher } from "../TokenHash.ts";
 import { TrustedDeviceService } from "../TrustedDevice.ts";
 import * as TrustedDevice from "../TrustedDevice.ts";
 import type * as Types from "../Types.ts";
@@ -55,7 +55,7 @@ export interface OtpSecondFactorRecord {
   /** Raw challenge token returned to the client; used as the store key. */
   readonly pendingToken: string;
   readonly userId: string;
-  /** SHA-256 hash of the plaintext OTP (`hashToken(otp)`). */
+  /** SHA-256 hash of the plaintext OTP (`(yield* hashToken(otp))`). */
   readonly otpHash: string;
   readonly attempts: number;
   readonly createdAt: number;
@@ -169,7 +169,7 @@ export const make = (
 ): Effect.Effect<
   typeof OtpSecondFactorService.Service,
   never,
-  OtpSecondFactorStore | SessionService | Hooks | SecureRandom.SecureRandom
+  OtpSecondFactorStore | SessionService | Hooks | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
@@ -177,6 +177,7 @@ export const make = (
     const maxAttempts = config.maxAttempts ?? 3;
 
     const store = yield* OtpSecondFactorStore;
+    const hashToken = yield* tokenHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -195,7 +196,7 @@ export const make = (
         const record: OtpSecondFactorRecord = {
           pendingToken,
           userId: user.id,
-          otpHash: hashToken(otp),
+          otpHash: yield* hashToken(otp),
           attempts: 0,
           createdAt: now,
           expiresAt: now + expiresIn,
@@ -254,7 +255,7 @@ export const make = (
           return yield* new OtpSecondFactorError({ message: "Too many attempts" });
         }
 
-        if (!constantTimeHashEqual(record.otpHash, hashToken(otp))) {
+        if (!constantTimeHashEqual(record.otpHash, yield* hashToken(otp))) {
           if (attempts >= maxAttempts) {
             yield* store.delete(pendingToken);
             return yield* new OtpSecondFactorError({ message: "Too many attempts" });

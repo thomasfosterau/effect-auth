@@ -33,7 +33,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitConfig } from "./RateLimit.ts";
 import { UserStore } from "./UserStore.ts";
 import { anyEmail, IdentifierStore } from "./Identifier.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual, hashToken, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
 
 /** Failure to register a client or process an authorization request. */
@@ -684,10 +684,6 @@ export class OidcProviderService extends Context.Service<
 /** SHA-256 hex digest used for every OIDC secret at rest (tokens, codes, secrets). */
 export const hashOidcSecret = hashToken;
 
-/** Constant-time equality of two strings via their SHA-256 digests. */
-const secretEquals = (a: string, b: string): boolean =>
-  constantTimeHashEqual(hashToken(a), hashToken(b));
-
 /** Append query parameters to a URL that may already carry a query string. */
 const buildRedirect = (base: string, params: Record<string, string | undefined>): string => {
   const url = new URL(base);
@@ -830,6 +826,10 @@ export const make = (
   | Digest.Digest
 > =>
   Effect.gen(function* () {
+    const hashSecret = yield* tokenHasher;
+    /** Constant-time equality of two strings via their SHA-256 digests. */
+    const secretEquals = (a: string, b: string): Effect.Effect<boolean> =>
+      Effect.zipWith(hashSecret(a), hashSecret(b), constantTimeHashEqual);
     const codeExpiresIn = config.codeExpiresIn ?? 10 * 60 * 1000;
     const accessTokenExpiresIn = config.accessTokenExpiresIn ?? 60 * 60 * 1000;
     const refreshTokenExpiresIn = config.refreshTokenExpiresIn ?? 30 * 24 * 60 * 60 * 1000;
@@ -859,23 +859,32 @@ export const make = (
 
     /** Trusted config clients, normalized to the stored shape (secret hashed). */
     const trustedClients = HashMap.fromIterable<string, OidcClient>(
-      (config.trustedClients ?? []).map((c) => [
-        c.clientId,
-        {
-          clientId: c.clientId,
-          ...(c.clientSecret !== undefined && {
-            clientSecretHash: hashOidcSecret(Redacted.value(c.clientSecret)),
+      yield* Effect.forEach(
+        config.trustedClients ?? [],
+        (c) =>
+          Effect.gen(function* () {
+            const clientSecretHash =
+              c.clientSecret === undefined
+                ? undefined
+                : yield* hashSecret(Redacted.value(c.clientSecret));
+            return [
+              c.clientId,
+              {
+                clientId: c.clientId,
+                ...(clientSecretHash !== undefined && { clientSecretHash }),
+                name: c.name,
+                redirectUris: c.redirectUris,
+                type: c.type ?? "web",
+                skipConsent: c.skipConsent ?? true,
+                disabled: false,
+                metadata: {},
+                createdAt: 0,
+                updatedAt: 0,
+              } satisfies OidcClient,
+            ] as const;
           }),
-          name: c.name,
-          redirectUris: c.redirectUris,
-          type: c.type ?? "web",
-          skipConsent: c.skipConsent ?? true,
-          disabled: false,
-          metadata: {},
-          createdAt: 0,
-          updatedAt: 0,
-        } satisfies OidcClient,
-      ]),
+        { concurrency: "unbounded" },
+      ),
     );
 
     const clientStore = yield* OidcClientStore;
@@ -916,7 +925,7 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         yield* codeStore.create({
           ...base,
-          codeHash: hashOidcSecret(value),
+          codeHash: yield* hashSecret(value),
           kind,
           expiresAt: now + codeExpiresIn,
           createdAt: now,
@@ -998,7 +1007,7 @@ export const make = (
 
         const accessToken = yield* randomToken();
         yield* tokenStore.create({
-          tokenHash: hashOidcSecret(accessToken),
+          tokenHash: yield* hashSecret(accessToken),
           kind: "access",
           clientId: grant.clientId,
           userId: grant.userId,
@@ -1013,7 +1022,7 @@ export const make = (
           const familyId = grant.familyId ?? (yield* randomToken());
           const absoluteExpiresAt = grant.absoluteExpiresAt ?? now + refreshTokenExpiresIn;
           yield* tokenStore.create({
-            tokenHash: hashOidcSecret(refreshToken),
+            tokenHash: yield* hashSecret(refreshToken),
             kind: "refresh",
             clientId: grant.clientId,
             userId: grant.userId,
@@ -1059,7 +1068,7 @@ export const make = (
         if (client.clientSecretHash !== undefined) {
           if (
             request.clientSecret === undefined ||
-            !secretEquals(hashOidcSecret(request.clientSecret), client.clientSecretHash)
+            !(yield* secretEquals(yield* hashSecret(request.clientSecret), client.clientSecretHash))
           ) {
             return yield* new OidcTokenError({
               error: "invalid_client",
@@ -1096,7 +1105,7 @@ export const make = (
         if (token === undefined) return yield* invalid;
         const ok = P.isFunction(required)
           ? yield* required(token)
-          : secretEquals(token, Redacted.value(required));
+          : yield* secretEquals(token, Redacted.value(required));
         if (!ok) return yield* invalid;
         return yield* Effect.void;
       });
@@ -1218,7 +1227,7 @@ export const make = (
         if (
           client === null ||
           client.registrationAccessTokenHash === undefined ||
-          !secretEquals(hashOidcSecret(token), client.registrationAccessTokenHash)
+          !(yield* secretEquals(yield* hashSecret(token), client.registrationAccessTokenHash))
         ) {
           return yield* new OidcRegistrationError({
             error: "invalid_token",
@@ -1272,7 +1281,7 @@ export const make = (
             const client = yield* clientStore.create({
               clientId,
               ...(clientSecret !== undefined && {
-                clientSecretHash: hashOidcSecret(clientSecret),
+                clientSecretHash: yield* hashSecret(clientSecret),
               }),
               name: normalized.clientName,
               redirectUris: normalized.redirectUris,
@@ -1284,7 +1293,7 @@ export const make = (
               metadata: {},
               createdAt: now,
               updatedAt: now,
-              registrationAccessTokenHash: hashOidcSecret(registrationAccessToken),
+              registrationAccessTokenHash: yield* hashSecret(registrationAccessToken),
               tokenEndpointAuthMethod: normalized.tokenEndpointAuthMethod,
               grantTypes: normalized.grantTypes,
               responseTypes: normalized.responseTypes,
@@ -1370,7 +1379,7 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         const client = yield* clientStore.create({
           clientId,
-          ...(clientSecret !== undefined && { clientSecretHash: hashOidcSecret(clientSecret) }),
+          ...(clientSecret !== undefined && { clientSecretHash: yield* hashSecret(clientSecret) }),
           name: input.name,
           redirectUris: input.redirectUris,
           type,
@@ -1540,7 +1549,7 @@ export const make = (
       consent: Effect.fn("OidcProviderService.consent")(
         (userId: string, consentCode: string, accept: boolean) =>
           Effect.gen(function* () {
-            const pending = yield* codeStore.get(hashOidcSecret(consentCode));
+            const pending = yield* codeStore.get(yield* hashSecret(consentCode));
             if (
               pending === null ||
               pending.kind !== "pending_consent" ||
@@ -1617,7 +1626,7 @@ export const make = (
                 description: "Missing code",
               });
             }
-            const record = yield* codeStore.get(hashOidcSecret(request.code));
+            const record = yield* codeStore.get(yield* hashSecret(request.code));
             if (
               record === null ||
               record.kind !== "authorization_code" ||
@@ -1651,7 +1660,7 @@ export const make = (
                   : undefined;
               if (
                 computedChallenge === undefined ||
-                !secretEquals(computedChallenge, record.codeChallenge)
+                !(yield* secretEquals(computedChallenge, record.codeChallenge))
               ) {
                 return yield* new OidcTokenError({
                   error: "invalid_grant",
@@ -1682,7 +1691,7 @@ export const make = (
             }
 
             yield* pruneConsumed;
-            const presentedHash = hashOidcSecret(request.refreshToken);
+            const presentedHash = yield* hashSecret(request.refreshToken);
             const record = yield* tokenStore.get(presentedHash);
 
             if (
@@ -1765,7 +1774,7 @@ export const make = (
 
       userinfo: Effect.fn("OidcProviderService.userinfo")((accessToken: string) =>
         Effect.gen(function* () {
-          const record = yield* tokenStore.get(hashOidcSecret(accessToken));
+          const record = yield* tokenStore.get(yield* hashSecret(accessToken));
           if (
             record === null ||
             record.kind !== "access" ||

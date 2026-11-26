@@ -13,6 +13,7 @@
     "src/testing/LooseCollation.ts",
     "src/testing/Passwordless.ts",
     "src/testing/Rfc7515.ts",
+    "src/testing/Sha256.ts",
     "src/testing/WireFormat.ts",
     "src/sql/testing"
   ]

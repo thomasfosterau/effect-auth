@@ -123,7 +123,7 @@ directories, each with its own `index.ts` barrel and matching
   `Session` record.
 - **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
-- **`password/` cluster**: `Password.ts` (PBKDF2/scrypt hashers,
+- **`password/` cluster**: `Password.ts` (the PBKDF2 hasher over `effect/crypto`'s `Kdf`,
   multi-algorithm verifier), `PasswordReset.ts`, `HaveIBeenPwned.ts`. Argon2id
   is `Argon2.ts`, over `effect/crypto`'s `Kdf`; the separate `effect-auth-argon2`
   package covers runtimes whose `Kdf` has no Argon2id, Workers among them.
@@ -269,7 +269,7 @@ Two mechanisms, by boundary (DESIGN.md D4):
 
 ### Password Security
 
-- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt also in core; Argon2id in core over `effect/crypto`'s `Kdf` (`NodeCrypto.layerKdf`: Node.js 24.7+, Bun 1.4+), and on Workers via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
+- PBKDF2-SHA256 with 600,000 iterations (OWASP) by default; scrypt as an opt-in Node-only verifier (`./scrypt`, `password/Scrypt.ts`); Argon2id in core over `effect/crypto`'s `Kdf` (`NodeCrypto.layerKdf`: Node.js 24.7+, Bun 1.4+), and on Workers via `@thomasfosterau/effect-auth-argon2` (WASM: the RustCrypto `argon2` crate as built by `@thomasfosterau/argon2`, compiled at module scope so it runs on Workers); a multi-algorithm verifier supports migration between algorithms.
 - Random salt per password; timing-safe comparison; plaintext never stored.
 
 ### Session Security

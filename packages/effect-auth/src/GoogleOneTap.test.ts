@@ -10,7 +10,7 @@ import * as Cipher from "./Cipher.ts";
 import { UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken } from "./TokenHash.ts";
+import { sha256Hex } from "./testing/Sha256.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
@@ -68,7 +68,7 @@ const signCredential = (claims: Schema.JsonObject): string => {
 };
 
 /** Hash a nonce the same way GoogleOneTap.ts does (SHA-256 hex). */
-const hashNonce = hashToken;
+const hashNonce = sha256Hex;
 
 const validClaims = (overrides: Schema.JsonObject = {}): Schema.JsonObject =>
   Object.assign(

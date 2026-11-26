@@ -1,7 +1,6 @@
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { type AuthenticateAttempt, Hooks } from "../Hooks.ts";
 import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -106,7 +105,7 @@ const makeTestContext = async () => {
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -116,7 +115,7 @@ const makeTestContext = async () => {
       Context.make(SessionService, sessionManager),
       Context.make(OtpSecondFactorStore, otpStore),
     ),
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+    PlatformCrypto.context(),
   );
 };
 

@@ -901,9 +901,13 @@ describe("OAuth.appleClientSecret", () => {
 
 const TEST_SECRET = "test-secret-for-aes-256-gcm-cipher";
 
+/** The default cipher over `secret`, its methods bound to the platform's WebCrypto. */
+const makeCipher = (secret: string) =>
+  Effect.runPromise(PlatformCrypto.provide(Cipher.aes256GcmCipher(secret)));
+
 describe("Cipher.aes256GcmCipher", () => {
   it("encrypts and decrypts round-trip", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const token = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
     const encrypted = await Effect.runPromise(cipher.encrypt(token));
     expect(encrypted).not.toBe(token);
@@ -911,14 +915,14 @@ describe("Cipher.aes256GcmCipher", () => {
   });
 
   it("produces a different ciphertext on each call (random IV)", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const e1 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     const e2 = await Effect.runPromise(cipher.encrypt("same-plaintext"));
     expect(e1).not.toBe(e2);
   });
 
   it("fails loudly on tampered ciphertext (GCM auth-tag)", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const encrypted = await Effect.runPromise(cipher.encrypt("hello"));
     const buf = Buffer.from(encrypted, "base64url");
     buf[buf.length - 1] ^= 0xff;
@@ -928,7 +932,7 @@ describe("Cipher.aes256GcmCipher", () => {
   });
 
   it("fails on ciphertext that is too short", async () => {
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
     const err = await Effect.runPromise(Effect.flip(cipher.decrypt("dG9vc2hvcnQ")));
     expect(err._tag).toBe("AuthError");
   });
@@ -1003,7 +1007,7 @@ describe("OAuthService encryptTokens", () => {
 
   it("stores encrypted tokens and refreshAccessToken returns plaintext", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const cipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const cipher = await makeCipher(TEST_SECRET);
 
     const PLAIN_ACCESS = "plain-access-token";
     const PLAIN_REFRESH = "plain-refresh-token";
@@ -1101,7 +1105,7 @@ describe("OAuthService encryptTokens", () => {
 
   it("accepts a custom TokenCipher via { cipher }", async () => {
     const { stored, layer: accountStoreLive } = makeAccountStore();
-    const customCipher = Cipher.aes256GcmCipher(TEST_SECRET);
+    const customCipher = await makeCipher(TEST_SECRET);
 
     const PLAIN_REFRESH = "custom-cipher-refresh-token";
     const NEW_ACCESS = "new-access-from-custom-cipher";

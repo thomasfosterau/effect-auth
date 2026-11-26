@@ -10,7 +10,7 @@ import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Aead, Digest, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
@@ -1062,6 +1062,7 @@ export const make = (
   | EmailPasswordStore
   | SessionService
   | SecureRandom.SecureRandom
+  | Aead.Aead
   | Digest.Digest
 > =>
   Effect.gen(function* () {
@@ -1073,7 +1074,7 @@ export const make = (
     const cipher: TokenCipher | null = options.encryptTokens
       ? "cipher" in options.encryptTokens
         ? options.encryptTokens.cipher
-        : Cipher.aes256GcmCipher(Redacted.value(options.encryptTokens.secret))
+        : yield* Effect.orDie(Cipher.aes256GcmCipher(Redacted.value(options.encryptTokens.secret)))
       : null;
 
     const stateStore = yield* OAuthStateStore;

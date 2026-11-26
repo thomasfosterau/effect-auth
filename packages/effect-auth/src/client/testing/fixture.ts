@@ -21,8 +21,8 @@ import * as Option from "effect/Option";
 
 const HOUR = 60 * 60 * 1000;
 
-// Low scrypt cost keeps the suite fast while exercising real hashing.
-const hasher = Auth.Password.scryptHasher({ cost: 16384 });
+// A low PBKDF2 count keeps the suite fast while exercising real hashing.
+const hasher = Auth.Password.pbkdf2Hasher({ iterations: 1000 });
 
 /**
  * Which optional modules the fixture's server mounts. Everything is off by

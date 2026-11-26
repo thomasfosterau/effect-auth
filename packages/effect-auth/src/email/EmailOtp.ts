@@ -9,7 +9,7 @@
  * @module email-otp
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
 import {
@@ -28,7 +28,7 @@ import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
-import { hashToken } from "../TokenHash.ts";
+import { hashToken, tokenHasher } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -367,6 +367,7 @@ export const make = (
   | Hooks
   | RateLimitStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const codes = OtpCode.resolveCodeConfig(config);
@@ -385,6 +386,7 @@ export const make = (
     });
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const hashCode = yield* tokenHasher;
     const detached = yield* makeDetachedSend;
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
@@ -413,6 +415,7 @@ export const make = (
         purpose,
         maxAttempts: codes.maxAttempts,
         reject: rejectOtp,
+        hash: hashCode,
       });
 
     return {
@@ -455,7 +458,12 @@ export const make = (
 
         // An address with no account gets a marker record that no code
         // redeems (see `issueCode`).
-        const { code: otp, record: fields } = yield* OtpCode.issueCode(crypto, codes, deliver);
+        const { code: otp, record: fields } = yield* OtpCode.issueCode(
+          crypto,
+          hashCode,
+          codes,
+          deliver,
+        );
         const record: EmailOtpRecord = { email, purpose, ...fields };
 
         // One active OTP per email + purpose: replaces any outstanding one.

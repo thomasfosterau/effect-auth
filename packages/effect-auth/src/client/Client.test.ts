@@ -1,3 +1,4 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect, vi } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -5,7 +6,6 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { type AuthResult, createAuthClient, AuthClientError, definePlugin } from "./Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "./testing/fixture.ts";
-import { hashToken } from "../TokenHash.ts";
 
 const EMAIL = "alice@client.test";
 const PW = "password-123";
@@ -84,7 +84,7 @@ describe("createAuthClient", () => {
     expect(tokens).toHaveLength(2);
     expect(bodies.filter((body) => tokens.some((token) => body.includes(token)))).toEqual([]);
     const token = tokens.at(-1) ?? "";
-    expect(current?.session.id).toBe(hashToken(token));
+    expect(current?.session.id).toBe(sha256Hex(token));
     expect(listed.map((session) => session.id)).toEqual([current?.session.id]);
 
     // The id the client holds signs the current session out.

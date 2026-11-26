@@ -15,7 +15,7 @@
 import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import { Hex } from "effect/encoding";
-import { SecureRandom } from "effect/crypto";
+import { Aead, Digest, SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
@@ -26,7 +26,7 @@ import { Hooks, type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import { constantTimeHashEqual, hashToken, tokenHasher } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
@@ -381,7 +381,8 @@ const normalizeBackupCode = (code: string): string => code.replace(/[\s-]/g, "")
 /**
  * sha256 hex digest of a normalized backup code
  */
-export const hashBackupCode = (code: string): string => hashToken(normalizeBackupCode(code));
+export const hashBackupCode = (code: string): Effect.Effect<string, never, Digest.Digest> =>
+  hashToken(normalizeBackupCode(code));
 
 /**
  * Find the index of a backup-code hash using timing-safe comparison.
@@ -409,6 +410,8 @@ export const make = (
   | SessionService
   | Hooks
   | SecureRandom.SecureRandom
+  | Aead.Aead
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const backupCodeCount = config.backupCodeCount ?? 10;
@@ -418,8 +421,10 @@ export const make = (
     const cipher: TokenCipher | null = config.encryptSecret
       ? "cipher" in config.encryptSecret
         ? config.encryptSecret.cipher
-        : Cipher.aes256GcmCipher(Redacted.value(config.encryptSecret.secret))
+        : yield* Effect.orDie(Cipher.aes256GcmCipher(Redacted.value(config.encryptSecret.secret)))
       : null;
+    const hashCode = yield* tokenHasher;
+    const hashBackup = (code: string): Effect.Effect<string> => hashCode(normalizeBackupCode(code));
 
     const store = yield* MultiFactorStore;
     const pendingStore = yield* PendingMultiFactorStore;
@@ -597,7 +602,7 @@ export const make = (
         const record: MultiFactorRecord = {
           userId,
           secret: storedSecret,
-          backupCodes: backupCodes.map((code) => hashBackupCode(code)),
+          backupCodes: yield* Effect.forEach(backupCodes, hashBackup, { concurrency: "unbounded" }),
           verified: skipVerificationOnEnable,
           createdAt: yield* Clock.currentTimeMillis,
         };
@@ -753,7 +758,7 @@ export const make = (
             const record = yield* getVerifiedRecord(pending.userId);
             const attempts = yield* countAttempt(pendingToken, invalidBackupCode);
 
-            const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
+            const index = findBackupCodeIndex(record.backupCodes, yield* hashBackup(code));
             if (index === -1) {
               return yield* rejectCode(pendingToken, attempts, invalidBackupCode);
             }
@@ -807,7 +812,7 @@ export const make = (
 
         yield* store.upsert({
           ...record,
-          backupCodes: backupCodes.map(hashBackupCode),
+          backupCodes: yield* Effect.forEach(backupCodes, hashBackup, { concurrency: "unbounded" }),
         });
 
         return backupCodes;

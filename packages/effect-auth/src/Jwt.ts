@@ -41,7 +41,7 @@ import {
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { SecureRandom } from "effect/crypto";
+import { Aead, Digest, SecureRandom } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
@@ -438,7 +438,11 @@ const verifySignedPayload = (
  */
 export const make = (
   config: JwtConfig,
-): Effect.Effect<typeof JwtService.Service, never, JwtKeyStore | SecureRandom.SecureRandom> =>
+): Effect.Effect<
+  typeof JwtService.Service,
+  never,
+  JwtKeyStore | SecureRandom.SecureRandom | Aead.Aead | Digest.Digest
+> =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
     const algorithm = config.algorithm ?? "ES256";
@@ -448,7 +452,9 @@ export const make = (
     const cipher: TokenCipher | null = config.encryptPrivateKey
       ? "cipher" in config.encryptPrivateKey
         ? config.encryptPrivateKey.cipher
-        : Cipher.aes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret))
+        : yield* Effect.orDie(
+            Cipher.aes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret)),
+          )
       : null;
 
     const store = yield* JwtKeyStore;

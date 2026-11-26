@@ -2,7 +2,6 @@ import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Clock, Context, DateTime, Effect, MutableHashMap, Redacted, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { SessionService, make as makeSessionService } from "../SessionService.ts";
@@ -161,7 +160,7 @@ const makeTestContext = async () => {
       makeSessionService(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(Hooks.Default)),
   );
@@ -184,7 +183,7 @@ const makeTestContext = async () => {
                 Context.make(PendingMultiFactorStore, pendingMultiFactorStore),
                 Context.make(PasswordHasher, Password.pbkdf2Hasher({ iterations: 1000 })),
               ),
-              Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+              PlatformCrypto.context(),
             ),
           ),
         ),
@@ -852,11 +851,10 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-2", "enc-cipher@example.com", "correct-password");
 
-    const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
-
     const { enableResult, verifyResult } = await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
+          const cipher = yield* Effect.orDie(Cipher.aes256GcmCipher("custom-cipher-secret"));
           const service = yield* MultiFactor.make({
             issuer: "TestApp",
             skipVerificationOnEnable: true,

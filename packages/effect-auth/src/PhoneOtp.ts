@@ -15,7 +15,7 @@
  */
 import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
@@ -32,6 +32,7 @@ import {
   UserStore,
 } from "./UserStore.ts";
 import * as OtpCode from "./OtpCode.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitStore } from "./RateLimit.ts";
 import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
@@ -342,6 +343,7 @@ export const make = (
   | SessionService
   | RateLimitStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const codes = OtpCode.resolveCodeConfig(config);
@@ -354,6 +356,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const hashCode = yield* tokenHasher;
     const detached = yield* makeDetachedSend;
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
@@ -382,6 +385,7 @@ export const make = (
         purpose,
         maxAttempts: codes.maxAttempts,
         reject: rejectOtp,
+        hash: hashCode,
       });
 
     return {
@@ -421,7 +425,12 @@ export const make = (
 
         // A number with no account gets a marker record that no code
         // redeems (see `issueCode`).
-        const { code: otp, record: fields } = yield* OtpCode.issueCode(crypto, codes, deliver);
+        const { code: otp, record: fields } = yield* OtpCode.issueCode(
+          crypto,
+          hashCode,
+          codes,
+          deliver,
+        );
         const record: PhoneOtpRecord = { phoneNumber, purpose, ...fields };
 
         yield* store.upsert(record);

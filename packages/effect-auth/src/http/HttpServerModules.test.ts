@@ -1,3 +1,4 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import * as Arr from "effect/Array";
@@ -9,7 +10,6 @@ import * as HttpServer from "./HttpServer.ts";
 import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { SessionService } from "../SessionService.ts";
-import { hashToken } from "../TokenHash.ts";
 import { UserServiceStore, UserService } from "../User.ts";
 import { Hooks } from "../Hooks.ts";
 import { AuthLifecycleService } from "../AuthLifecycle.ts";
@@ -103,7 +103,7 @@ const makeFixture = (admin?: AdminConfig) => {
     const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(16))).toString(
       "hex",
     );
-    const tokenHash = hashToken(rawToken);
+    const tokenHash = sha256Hex(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
@@ -797,7 +797,7 @@ describe("HTTP organization endpoints", () => {
     );
     expect(active.status).toBe(204);
     const activeOrganization = () =>
-      Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sid)))?.attributes[
+      Option.getOrUndefined(MutableHashMap.get(fx.sessions, sha256Hex(sid)))?.attributes[
         "activeOrganizationId"
       ];
     expect(activeOrganization()).toBe(org.id);
@@ -918,7 +918,7 @@ describe("HTTP organization endpoints", () => {
         ),
       );
     const activeOf = (sessionId: string) =>
-      Option.getOrUndefined(MutableHashMap.get(fx.sessions, hashToken(sessionId)))?.attributes[
+      Option.getOrUndefined(MutableHashMap.get(fx.sessions, sha256Hex(sessionId)))?.attributes[
         "activeOrganizationId"
       ];
 
@@ -1936,7 +1936,7 @@ describe("HTTP impersonation endpoints", () => {
       }),
     );
     // Named by the stored id, never the token itself.
-    expect(document.data.id).toBe(hashToken(token));
+    expect(document.data.id).toBe(sha256Hex(token));
     expect(document.data.relationships.user.data.id).toBe("u");
     expect(document.data.relationships.impersonator.data.id).toBe("admin");
     expect(document.included[0]?.id).toBe("u");
@@ -2067,7 +2067,7 @@ describe("HTTP JWT endpoints", () => {
     );
     const { token } = document.data.attributes;
     // The resource is named by the token's digest, never the token.
-    expect(document.data.id).toBe(hashToken(token));
+    expect(document.data.id).toBe(sha256Hex(token));
     expect(document.data.attributes.expiresAt).toBeGreaterThan(0);
 
     const jwksRes = await fx.handler(req("GET", "/jwks"));

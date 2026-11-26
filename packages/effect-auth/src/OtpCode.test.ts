@@ -1,10 +1,10 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { Clock, Effect, Result } from "effect";
 import * as Arr from "effect/Array";
 import { verifyCode, type VerifyFailure } from "./OtpCode.ts";
 import type { PhoneOtpPurpose, PhoneOtpStore } from "./PhoneOtp.ts";
 import { memoryPhoneOtpStore } from "./testing/MemoryStores.ts";
-import { hashToken } from "./TokenHash.ts";
 
 const phoneNumber = "+15550100";
 const purpose: PhoneOtpPurpose = "sign-in";
@@ -26,6 +26,7 @@ const verify = (store: typeof PhoneOtpStore.Service, guess: string) =>
     code: guess,
     purpose,
     maxAttempts: 3,
+    hash: (code) => Effect.succeed(sha256Hex(code)),
     reject: (_purpose, reason): Effect.Effect<never, VerifyFailure> => Effect.fail(reason),
   }).pipe(Effect.result);
 
@@ -38,7 +39,7 @@ describe("verifyCode under concurrency", () => {
         yield* store.upsert({
           phoneNumber,
           purpose,
-          otpHash: hashToken(code),
+          otpHash: sha256Hex(code),
           attempts: 0,
           createdAt: now,
           expiresAt: now + 60_000,
@@ -72,7 +73,7 @@ describe("verifyCode under concurrency", () => {
         yield* store.upsert({
           phoneNumber,
           purpose,
-          otpHash: hashToken(code),
+          otpHash: sha256Hex(code),
           attempts: 2,
           createdAt: now,
           expiresAt: now + 60_000,

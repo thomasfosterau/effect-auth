@@ -5,7 +5,6 @@ import { Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { SecureRandom } from "effect/crypto";
 import { generateKeyPair, JwtKeyStore, type JwtConfig, type JwtKeyPair } from "./Jwt.ts";
 import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
@@ -38,7 +37,7 @@ const jwtKeyStore = {
 
 const storeContext = Context.merge(
   Context.make(JwtKeyStore, jwtKeyStore),
-  Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+  PlatformCrypto.context(),
 );
 
 const user: User = {
@@ -55,7 +54,7 @@ const baseConfig: JwtConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | PlatformCrypto.Services>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JwtService", () => {
@@ -449,10 +448,9 @@ describe("JwtService with private key encryption", () => {
   });
 
   it("should sign and verify with a custom { cipher }", async () => {
-    const cipher = Cipher.aes256GcmCipher("custom-cipher-secret");
-
     const result = await run(
       Effect.gen(function* () {
+        const cipher = yield* Cipher.aes256GcmCipher("custom-cipher-secret");
         const service = yield* Jwt.make({
           ...baseConfig,
           encryptPrivateKey: { cipher },
@@ -528,9 +526,9 @@ describe("RemoteJwksVerifier", () => {
   };
   const remoteContext = Context.merge(
     Context.make(JwtKeyStore, remoteStore),
-    Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+    PlatformCrypto.context(),
   );
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | SecureRandom.SecureRandom>) =>
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | PlatformCrypto.Services>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
   let server: Server;

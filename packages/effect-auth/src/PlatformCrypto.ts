@@ -2,15 +2,14 @@
  * Default crypto service layer for effect-auth, backed by the platform Web
  * Crypto API (`globalThis.crypto`).
  *
- * Every service that needs secure randomness yields
- * `SecureRandom.SecureRandom` (`effect/crypto`) at Layer construction, and the
- * few that hash yield `Digest.Digest`; this module supplies the concrete
- * implementations those layers are composed with.
+ * Every service resolves the `effect/crypto` services it needs (`SecureRandom`,
+ * `Digest`, `Mac`, `Aead`, `Kdf`, `Signature`) at Layer construction; this
+ * module supplies the WebCrypto implementations those layers are composed with.
  *
  * @module platform-crypto
  */
-import { Layer } from "effect";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Context, Effect, Layer } from "effect";
+import { Aead, Digest, Kdf, Mac, SecureRandom, Signature } from "effect/crypto";
 
 /**
  * The default `SecureRandom.SecureRandom` implementation, backed by
@@ -23,13 +22,46 @@ export const instance: typeof SecureRandom.SecureRandom.Service = SecureRandom.m
   SecureRandom.randomBytesUnsafe,
 );
 
+/** Every service {@link layer} provides. */
+export type Services =
+  | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Mac.Mac
+  | Aead.Aead
+  | Kdf.Kdf
+  | Signature.Signature;
+
+const random = Layer.succeed(SecureRandom.SecureRandom, instance);
+
 /**
- * Default crypto layer, backed by `globalThis.crypto`: `SecureRandom.SecureRandom`
- * (the {@link instance} above) and `Digest.Digest` over `crypto.subtle`. Compose
- * this into every `static layer` that yields either so the requirement does not
- * leak to consumers.
+ * Default crypto layer, backed by `globalThis.crypto`: `SecureRandom` (the
+ * {@link instance} above), and `Digest`, `Mac`, `Aead`, `Kdf` and `Signature`
+ * over `crypto.subtle`. Compose this into every `static layer` that yields one
+ * of them so the requirement does not leak to consumers.
  */
-export const layer: Layer.Layer<SecureRandom.SecureRandom | Digest.Digest> = Layer.mergeAll(
-  Layer.succeed(SecureRandom.SecureRandom, instance),
+export const layer: Layer.Layer<Services> = Layer.mergeAll(
+  random,
   Digest.layerWebCrypto,
+  Kdf.layerWebCrypto,
+  Layer.mergeAll(Mac.layerWebCrypto, Aead.layerWebCrypto, Signature.layerWebCrypto).pipe(
+    Layer.provide(random),
+  ),
 );
+
+let built: Context.Context<Services> | undefined;
+
+/**
+ * {@link layer}'s services, built once on first use, for code with no layer of
+ * its own to resolve them in (the HTTP tier's request helpers, a hasher
+ * constructed as a plain value). Its layers hold no resources.
+ */
+export const context = (): Context.Context<Services> =>
+  (built ??= Effect.runSync(Effect.scoped(Layer.build(layer))));
+
+/** Provide {@link context} to `self`. */
+export const provide = <A, E, R>(
+  self: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, Exclude<R, Services>> => Effect.provideContext(self, context());
+
+/** The default `Kdf.Kdf` implementation, from {@link context}. */
+export const kdf = (): typeof Kdf.Kdf.Service => Context.get(context(), Kdf.Kdf);

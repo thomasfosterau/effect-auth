@@ -3,7 +3,7 @@
  */
 
 import { Clock, Context, Duration, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import {
   AuthError,
   EmailVerificationError,
@@ -80,7 +80,7 @@ export interface EmailVerificationConfig {
  *
  * @module email-verification
  */
-import { hashToken } from "../TokenHash.ts";
+import { tokenHasher } from "../TokenHash.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
 
 /**
@@ -211,12 +211,13 @@ export const make = (
 ): Effect.Effect<
   typeof EmailVerificationService.Service,
   never,
-  EmailVerificationStore | Hooks | RateLimitStore | SecureRandom.SecureRandom
+  EmailVerificationStore | Hooks | RateLimitStore | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 24 * 60 * 60 * 1000; // 24 hours default
     const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
     const store = yield* EmailVerificationStore;
+    const hashToken = yield* tokenHasher;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const detached = yield* makeDetachedSend;
@@ -236,7 +237,7 @@ export const make = (
 
       const verification: EmailVerification = {
         // Store the hash — the raw token is delivered to the user via sendEmail.
-        token: hashToken(rawToken),
+        token: yield* hashToken(rawToken),
         userId,
         email,
         createdAt: yield* Clock.currentTimeMillis,
@@ -274,7 +275,7 @@ export const make = (
         // Hook receives the raw token from the URL; hash after any hook transform.
         const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
 
-        const tokenHash = hashToken(token);
+        const tokenHash = yield* hashToken(token);
 
         const verification = yield* store.get(tokenHash);
 
@@ -311,7 +312,7 @@ export const make = (
 
       peekToken: Effect.fn("EmailVerificationService.peekToken")(function* (rawToken: string) {
         const { token } = yield* hooks.beforeVerifyEmail({ token: rawToken });
-        const tokenHash = hashToken(token);
+        const tokenHash = yield* hashToken(token);
         const verification = yield* store.get(tokenHash);
         if (!verification) {
           return yield* new EmailVerificationError({

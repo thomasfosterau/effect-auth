@@ -9,6 +9,7 @@
  * Each flow must then fail, leave the owner's identifier as it was, and mint no
  * session.
  */
+import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import {
@@ -33,7 +34,6 @@ import {
 } from "./Identifier.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
-import { hashToken } from "./TokenHash.ts";
 import { type CreateUserResult, UserStore } from "./UserStore.ts";
 import * as MagicLink from "./MagicLink.ts";
 import * as EmailOtp from "./email/EmailOtp.ts";
@@ -188,7 +188,7 @@ const signGoogleCredential = (nonce: string): string => {
     sub: "google-owner",
     email: EMAIL,
     email_verified: true,
-    nonce: hashToken(nonce),
+    nonce: sha256Hex(nonce),
     exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
     iat: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000),
   };
@@ -503,7 +503,7 @@ const cases: ReadonlyArray<Case> = [
           const connection: Scim.ScimConnection = {
             id: "conn-1",
             organizationId: "org-1",
-            tokenHash: hashToken("token"),
+            tokenHash: sha256Hex("token"),
             createdAt: yield* Clock.currentTimeMillis,
           };
           const error = yield* Effect.flip(scim.createUser(connection, { userName: EMAIL }));
