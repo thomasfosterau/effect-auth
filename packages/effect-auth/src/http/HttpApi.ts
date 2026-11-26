@@ -1656,18 +1656,14 @@ export const authGroup = HttpApiGroup.make("auth").add(
     ],
   }),
   // SAML assertion consumer service: the form POST the IdP makes on the user's
-  // behalf. Same session-issuing tail as `ssoCallback`.
+  // behalf, a top-level navigation. Answers a 303 (to the app, with the
+  // session cookie, or to its error page with an `error` code), never a body:
+  // declared NoContent, the handler returns the raw redirect.
   HttpApiEndpoint.post("samlAcs", "/sso/saml/acs/:providerId", {
     params: { providerId: Schema.String },
     payload: S.SamlAcsPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
+    success: HttpApiSchema.NoContent,
+    error: [S.NotFoundError, S.TooManyRequestsError],
   }),
   // This SP's `EntityDescriptor` for a SAML connection, as XML.
   HttpApiEndpoint.get("samlMetadata", "/sso/saml/metadata/:providerId", {

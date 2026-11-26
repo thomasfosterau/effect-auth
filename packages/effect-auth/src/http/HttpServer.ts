@@ -149,7 +149,7 @@ import {
   SignUpAttributesConfigError,
 } from "../Errors.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken } from "../TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
   decodeSessionCacheCookie,
@@ -421,6 +421,58 @@ const sessionOnlyCookieOptions = (cfg: ResolvedCookieConfig) =>
     secure: cfg.secure,
     path: cfg.path,
   }) as const;
+
+/**
+ * Name of the pre-login cookie that binds an SSO sign-in to the browser that
+ * started it (`<name>_sso_state`).
+ */
+const ssoStateCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_sso_state`;
+
+/** How long the pre-login cookie lives: as long as the SAML request and OAuth state do. */
+const SSO_STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
+
+/**
+ * Options for the pre-login cookie. The IdP posts the SAML response to the
+ * ACS from its own site, a cross-site request, so the cookie is
+ * `SameSite=None`, which browsers accept only on a `Secure` cookie: it is
+ * `Secure` whatever `cfg.secure` says (browsers treat `http://localhost` as
+ * secure).
+ */
+const ssoStateCookieOptions = (cfg: ResolvedCookieConfig, maxAge: number) =>
+  ({
+    httpOnly: true,
+    sameSite: "none",
+    secure: true,
+    path: cfg.path,
+    maxAge,
+  }) as const;
+
+/** The pre-login cookie the request carries, if any. */
+const readSsoStateCookie = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+): string | undefined => {
+  const value = request.cookies[ssoStateCookieName(cfg)];
+  return value === undefined || value === "" ? undefined : value;
+};
+
+/** Whether the pre-login cookie names exactly `state`, compared in constant time. */
+const ssoStateMatches = (cookie: string | undefined, state: string): Effect.Effect<boolean> =>
+  cookie === undefined
+    ? Effect.succeed(false)
+    : Effect.zipWith(digestToken(cookie), digestToken(state), constantTimeHashEqual);
+
+/** `response` clearing the pre-login cookie: a finished sign-in leaves none behind. */
+const clearSsoStateCookie = (
+  response: HttpServerResponse.HttpServerResponse,
+  cfg: ResolvedCookieConfig,
+) =>
+  HttpServerResponse.setCookie(
+    response,
+    ssoStateCookieName(cfg),
+    "",
+    ssoStateCookieOptions(cfg, 0),
+  ).pipe(Effect.orDie);
 
 const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
   ({
@@ -3933,11 +3985,20 @@ export const ssoProvidersGroupLayer = (
 /**
  * Layer implementing the `sso-authorizations` group: start an SSO sign-in
  * (see `ssoAuthorizationsGroup` in `HttpApi.ts`).
+ *
+ * The answer sets the pre-login cookie (`<name>_sso_state`, `HttpOnly`,
+ * `SameSite=None; Secure`, ten minutes) holding the round-trip state, which
+ * `POST /sso/callback` and the SAML ACS require: a sign-in finishes only in
+ * the browser that started it. Pass the same `config` as `authGroupLayer`'s,
+ * so both name the same cookie.
  */
-export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
-  AuthApi,
-  "sso-authorizations",
-  (handlers) =>
+export const ssoAuthorizationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "sso-authorizations", (handlers) =>
     handlers.handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const sso = yield* resolveSso;
@@ -3947,12 +4008,18 @@ export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
         const result = yield* asSsoRequest(
           sso.service.signIn(ssoSelector(payload.data.attributes)),
         );
+        yield* setResponseCookie(
+          ssoStateCookieName(cfg),
+          result.state,
+          ssoStateCookieOptions(cfg, SSO_STATE_COOKIE_MAX_AGE_SECONDS),
+        );
         return Handlers.data(
           R.SsoAuthorization.make({ id: result.state, attributes: { url: result.url } }),
         );
       }).pipe(JsonApiErrors.mapHttpErrors),
     ),
-);
+  );
+};
 
 /**
  * Layer implementing the `tokens` group: sign a JWT for the signed-in user
@@ -4054,7 +4121,8 @@ export const deviceAuthorizationsGroupLayer = (
  * the contract from your own `HttpApiBuilder` (the SCIM group is always
  * mounted and answers `404` until `ScimService` is provided).
  * `signUpAttributes` is {@link AuthWebHandlerOptions.signUpAttributes}: the
- * attribute keys `POST /users` accepts (default none).
+ * attribute keys `POST /users` accepts (default none). `ssoRedirect` is
+ * {@link AuthWebHandlerOptions.sso}: where the SAML ACS sends the browser.
  *
  * @since 0.1.0
  * @category layers
@@ -4063,9 +4131,10 @@ export const groupLayers = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
   signUpAttributes?: ReadonlyArray<string>,
+  ssoRedirect?: SsoRedirectConfig,
 ) =>
   Layer.mergeAll(
-    authGroupLayer(config, multiSession),
+    authGroupLayer(config, multiSession, ssoRedirect),
     sessionsGroupLayer(config, multiSession),
     identifiersGroupLayer(config, multiSession),
     usersGroupLayer(config, multiSession, signUpAttributes),
@@ -4092,7 +4161,7 @@ export const groupLayers = (
     apiKeysGroupLayer(config, multiSession),
     oauthClientsGroupLayer(config, multiSession),
     ssoProvidersGroupLayer(config, multiSession),
-    ssoAuthorizationsGroupLayer,
+    ssoAuthorizationsGroupLayer(config, multiSession),
     tokensGroupLayer(config, multiSession),
     deviceAuthorizationsGroupLayer(config, multiSession),
     scimGroupLayer(),
@@ -4119,9 +4188,63 @@ const oauthError = (error: string, description?: string): Effect.Effect<never, S
 const scopeList = (scope: string | undefined): ReadonlyArray<string> =>
   scope === undefined ? [] : Arr.filter(Str.split(scope, " "), Str.isNonEmpty);
 
+/**
+ * Where the SAML assertion consumer service sends the browser once it has
+ * judged the IdP's response. The ACS is a top-level form POST, so it answers
+ * with a `303` redirect, never a body.
+ */
+export interface SsoRedirectConfig {
+  /** Where a signed-in browser goes: an absolute URL or a root-relative path. Default `"/"`. */
+  readonly redirectTo?: string | undefined;
+  /**
+   * Where a refused response sends the browser, with an `error` query
+   * parameter: `access_denied` (the response was refused),
+   * `temporarily_unavailable` (rate limited) or `server_error`. Default
+   * {@link redirectTo}.
+   */
+  readonly errorRedirectTo?: string | undefined;
+  /**
+   * Where a sign-in that needs a second factor sends the browser, with no
+   * session cookie. The challenge rides in the URL fragment, which the browser
+   * never sends to a server or in a `Referer`: `#second_factor=<token>&expires_at=<ms>`.
+   * Redeem the token with a code at `POST /second-factor-challenges/verifications`
+   * (the client's second-factor continuation). Default {@link redirectTo}.
+   */
+  readonly secondFactorRedirectTo?: string | undefined;
+}
+
+/** `target` with a second-factor challenge in its fragment, replacing any fragment it had. */
+const withSecondFactorFragment = (
+  target: string,
+  challenge: { readonly token: string; readonly expiresAt: number },
+): string =>
+  `${target.split("#")[0]}#${new URLSearchParams({
+    second_factor: challenge.token,
+    expires_at: String(challenge.expiresAt),
+  }).toString()}`;
+
+/** `target` with `error` set in its query; a root-relative target stays root-relative. */
+const withErrorParam = (target: string, error: string): string => {
+  if (URL.canParse(target)) {
+    const url = new URL(target);
+    url.searchParams.set("error", error);
+    return url.toString();
+  }
+  const url = new URL(target, "http://relative.invalid");
+  url.searchParams.set("error", error);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+
 /** Layer implementing the `auth` group handlers. */
-export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+export const authGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+  ssoRedirect?: SsoRedirectConfig,
+) => {
   const cfg = resolveCookieConfig(config, multiSession);
+  const ssoRedirectTo = ssoRedirect?.redirectTo ?? "/";
+  const ssoErrorRedirectTo = ssoRedirect?.errorRedirectTo ?? ssoRedirectTo;
+  const ssoSecondFactorRedirectTo = ssoRedirect?.secondFactorRedirectTo ?? ssoRedirectTo;
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
@@ -4200,9 +4323,16 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           };
         }),
       )
-      .handle("ssoCallback", ({ payload }) =>
+      .handle("ssoCallback", ({ payload, request }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
+          // Login CSRF: the state must be the one this browser was handed when
+          // it started the sign-in, not one an attacker started for themselves.
+          if (!(yield* ssoStateMatches(readSsoStateCookie(request, cfg), payload.state))) {
+            return yield* new S.BadRequest({
+              message: "SSO sign-in was not started in this browser",
+            });
+          }
           const result = yield* sso.service.handleCallback(payload.state, payload.code).pipe(
             Effect.catchTags({
               SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -4234,49 +4364,68 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ),
             }),
           );
-          return yield* answerIdpSignIn(result, cfg, "sso");
+          return yield* clearSsoStateCookie(yield* answerIdpSignIn(result, cfg, "sso"), cfg);
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
-      // user's browser, so the tail is the same session-issuing one the OIDC
-      // callback uses — cookie, last-login-method hint, bearer header and all.
-      .handle("samlAcs", ({ params, payload }) =>
+      // user's browser as a top-level navigation, so it answers with a
+      // redirect: to `redirectTo` with the session cookie (and the
+      // last-login-method hint and bearer header) set, or to
+      // `errorRedirectTo` with an `error` code. The reason a response was
+      // refused goes to the log, never into the URL.
+      .handle("samlAcs", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
-          const result = yield* sso.service
-            .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState)
+          const refused = (error: string) => (cause: Cause.YieldableError) =>
+            Effect.logWarning("[effect-auth] SAML response refused", cause).pipe(
+              Effect.as(
+                HttpServerResponse.redirect(withErrorParam(ssoErrorRedirectTo, error), {
+                  status: 303,
+                }),
+              ),
+            );
+          return yield* sso.service
+            .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState, {
+              browserState: readSsoStateCookie(request, cfg),
+            })
             .pipe(
+              Effect.flatMap((result) =>
+                (result.session === undefined
+                  ? Effect.as(
+                      noStore,
+                      HttpServerResponse.redirect(
+                        withSecondFactorFragment(ssoSecondFactorRedirectTo, result.secondFactor),
+                        { status: 303 },
+                      ),
+                    )
+                  : decorateSessionResponse(
+                      HttpServerResponse.redirect(ssoRedirectTo, { status: 303 }),
+                      result,
+                      cfg,
+                      "sso",
+                    )
+                ).pipe(Effect.flatMap((response) => clearSsoStateCookie(response, cfg))),
+              ),
               Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                SsoError: refused("access_denied"),
+                AccountLockedError: refused("access_denied"),
+                UserBannedError: refused("access_denied"),
+                CaptchaError: refused("access_denied"),
+                PwnedPasswordError: refused("access_denied"),
+                RateLimitError: refused("temporarily_unavailable"),
+                AuthError: (e) =>
+                  Effect.logError("[effect-auth] internal error", e).pipe(
+                    Effect.as(
+                      HttpServerResponse.redirect(
+                        withErrorParam(ssoErrorRedirectTo, "server_error"),
+                        {
+                          status: 303,
+                        },
+                      ),
                     ),
                   ),
               }),
             );
-          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -5600,6 +5749,12 @@ export interface AuthWebHandlerOptions {
    */
   readonly clientHiddenAttributes?: ReadonlyArray<string> | undefined;
   /**
+   * Where the SAML assertion consumer service (`POST /sso/saml/acs/:providerId`)
+   * redirects the browser after a sign-in (default `"/"`) or a refused
+   * response (default the same, with an `error` query parameter).
+   */
+  readonly sso?: SsoRedirectConfig | undefined;
+  /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
@@ -5615,6 +5770,12 @@ export interface AuthWebHandlerOptions {
    * (e.g. a plain HTML form submission), the `Referer` origin is used as a
    * fallback. Requests with neither header (curl, server-to-server) are
    * allowed through.
+   *
+   * Three protocol endpoints skip the check, since cross-site callers post to
+   * them by design and each carries its own proof: `POST /oauth2/token`,
+   * `POST /register` and the SAML ACS (`POST /sso/saml/acs/:providerId`),
+   * which needs the pre-login cookie `POST /sso-authorizations` sets. Don't
+   * list an IdP's origin here: that would trust it on every endpoint.
    *
    * **Host trust**: the request URL's origin is derived from the `Host` header
    * as seen by the application. When deployed behind a reverse proxy you MUST
@@ -5846,6 +6007,31 @@ const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string
 };
 
 /**
+ * The protocol endpoints a cross-site caller posts to by design, which the
+ * Origin gate leaves alone (paths inside the mount `prefix`). Each carries its
+ * own proof and never acts on the session cookie: the token endpoint and
+ * dynamic registration authenticate the client in the request itself, and the
+ * SAML ACS, which the IdP's page form-POSTs from the IdP's origin, needs the
+ * pre-login cookie (`SameSite=None`) and a signed response. Listing the IdP in
+ * `trustedOrigins` instead would open every endpoint to it.
+ *
+ * Only these exact spellings are exempt: another spelling the router also
+ * matches still meets the gate, which only fails closed.
+ */
+const isOriginExempt = (method: string, path: string): boolean =>
+  method.toUpperCase() === "POST" &&
+  (path === "/oauth2/token" || path === "/register" || /^\/sso\/saml\/acs\/[^/]+$/.test(path));
+
+/** The Origin gate: an exempt protocol endpoint, or a trusted request. */
+const isOriginAllowed = (
+  request: Request,
+  inner: string | null,
+  trustedOrigins: ReadonlyArray<string>,
+): boolean =>
+  (inner !== null && isOriginExempt(request.method, inner)) ||
+  isTrustedRequest(request, trustedOrigins);
+
+/**
  * A mounted auth handler, as {@link make} and {@link makeAsync} return it.
  */
 export interface AuthWebHandler {
@@ -5997,7 +6183,9 @@ const serve = (
       ),
     ),
     Layer.provide(tokenEndpointsNoStore),
-    Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
+    Layer.provide(
+      groupLayers(options.cookie, options.multiSession, options.signUpAttributes, options.sso),
+    ),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom
@@ -6049,7 +6237,7 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Not Found" }, { status: 404 }));
     }
 
-    if (!isTrustedRequest(request, trustedOrigins)) {
+    if (!isOriginAllowed(request, inner, trustedOrigins)) {
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 

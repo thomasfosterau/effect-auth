@@ -130,6 +130,7 @@ export {
   SsoProviderStore,
   type RegisterProviderInput,
   type RegisterSamlProviderInput,
+  type SamlCallbackOptions,
   type SsoSignInResult,
   type SsoSignInSelector,
   SsoService,
