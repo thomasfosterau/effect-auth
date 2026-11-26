@@ -240,8 +240,13 @@ export const memorySessionStore = (
   create: (session) =>
     Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
   get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  // Never creates: a session deleted since the caller read it stays deleted.
   update: (session) =>
-    Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    Effect.sync(() => {
+      if (MutableHashMap.has(sessions, session.id))
+        MutableHashMap.set(sessions, session.id, session);
+      return session;
+    }),
   touch: (sessionId, touch) =>
     Effect.sync(() =>
       Option.getOrNull(
@@ -570,7 +575,15 @@ export const memoryOAuthAccountStore = (
   const put = (account: OAuthAccount) =>
     void MutableHashMap.set(accounts, accountKey(account.provider, account.providerId), account);
   return {
-    create: (account) => Effect.sync(() => (put(account), account)),
+    // A plain insert: a pair already linked is refused, as a unique index would.
+    create: (account) =>
+      MutableHashMap.has(accounts, accountKey(account.provider, account.providerId))
+        ? Effect.fail(
+            new Errors.AuthError({
+              message: `OAuth account (${account.provider}) is already linked`,
+            }),
+          )
+        : Effect.sync(() => (put(account), account)),
     get: (provider, providerId) =>
       Effect.sync(() =>
         Option.getOrNull(MutableHashMap.get(accounts, accountKey(provider, providerId))),
@@ -581,8 +594,41 @@ export const memoryOAuthAccountStore = (
           (account) => account.userId === userId,
         ),
       ),
-    update: (account) => Effect.sync(() => (put(account), account)),
-    linkToUser: (userId, account) => Effect.sync(() => put({ ...account, userId })),
+    update: (account) =>
+      Effect.sync(() => {
+        const stored = Arr.findFirst(
+          MutableHashMap.values(accounts),
+          (candidate) => candidate.id === account.id,
+        );
+        if (Option.isNone(stored)) return null;
+        // Every field from `account` but the link's identity and owner.
+        const updated: OAuthAccount = {
+          ...account,
+          userId: stored.value.userId,
+          provider: stored.value.provider,
+          providerId: stored.value.providerId,
+          createdAt: stored.value.createdAt,
+        };
+        put(updated);
+        return updated;
+      }),
+    linkToUser: (userId, account) =>
+      Effect.suspend(() => {
+        const key = accountKey(account.provider, account.providerId);
+        const stored = MutableHashMap.get(accounts, key);
+        if (Option.isNone(stored)) return Effect.void;
+        if (stored.value.userId !== "" && stored.value.userId !== userId) {
+          return Effect.fail(
+            new Errors.AuthError({ message: "OAuth link belongs to another user" }),
+          );
+        }
+        MutableHashMap.set(accounts, key, {
+          ...stored.value,
+          userId,
+          updatedAt: account.updatedAt,
+        });
+        return Effect.void;
+      }),
     unlinkFromUser: (userId, provider) =>
       Effect.sync(() => {
         removeWhere(

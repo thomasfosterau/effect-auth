@@ -40,6 +40,7 @@ import { PasswordHasher } from "../password/Password.ts";
 import {
   layer as memoryStores,
   memoryEmailPasswordStore,
+  memoryOAuthAccountStore,
   memoryUserTable,
 } from "../testing/MemoryStores.ts";
 import { SessionService } from "../SessionService.ts";
@@ -2272,6 +2273,41 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       expect(stored).toEqual({ ...result.account, accessToken: expect.stringMatching(/^v2\./) });
       // The state is single-use.
       expect(MutableHashMap.has(states, stateKey("st-1"))).toBe(false);
+    });
+
+    it("reports a provider account linked concurrently as OAuthAccountConflictError and keeps its user", async () => {
+      const { store } = makeStateStore(liveState());
+      const rival: OAuthAccount = {
+        id: "acc-rival",
+        userId: "u-rival",
+        provider: "github",
+        providerId: "gh-9",
+        accessToken: "rival-at",
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const accounts = memoryOAuthAccountStore();
+      await Effect.runPromise(accounts.create(rival));
+      // The concurrent callback links the account after this one's lookup missed.
+      let lookups = 0;
+      const racing: typeof OAuthAccountStore.Service = {
+        ...accounts,
+        get: (provider, providerId) =>
+          lookups++ === 0 ? Effect.succeed(null) : accounts.get(provider, providerId),
+      };
+      const service = await makeService(store, racing);
+
+      const err = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9", email: "new@example.com" },
+        () =>
+          Effect.runPromise(
+            Effect.flip(service.handleCallback("st-1", "code", { linkToUserId: "u-7" })),
+          ),
+      );
+
+      expect(err._tag).toBe("OAuthAccountConflictError");
+      expect(await Effect.runPromise(accounts.get("github", "gh-9"))).toEqual(rival);
     });
 
     it("links a new account to linkToUserId and reports the user", async () => {

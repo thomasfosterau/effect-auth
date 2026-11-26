@@ -826,7 +826,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
     });
 
-    it("OAuthAccountStore upserts, links, unlinks and reports hasPassword", async () => {
+    it("OAuthAccountStore creates, updates, links, unlinks and reports hasPassword", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const account: Auth.OAuth.OAuthAccount = {
         id: "acc-1",
@@ -847,6 +847,8 @@ const storeContract = (engine: StoreEngine): void => {
           const loaded = yield* store.get("github", "gh-123");
           yield* store.update({ ...account, accessToken: "token-2", updatedAt: now + 1 });
           const updated = yield* store.get("github", "gh-123");
+          yield* store.unlinkFromUser("user-1", "github");
+          yield* store.create({ ...account, userId: "" });
           yield* store.linkToUser("user-2", account);
           const linked = yield* store.getByUserId("user-2");
           yield* store.unlinkFromUser("user-2", "github");

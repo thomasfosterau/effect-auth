@@ -981,28 +981,15 @@ export const makeOAuthAccountStore: Effect.Effect<
       sql<OAuthAccountRow>`SELECT * FROM auth_oauth_accounts WHERE provider = ${provider} AND provider_id = ${providerId}`,
     );
 
-  /**
-   * Atomic upsert keyed by the (provider, provider_id) unique index — a
-   * single statement, so concurrent upserts can't lose each other's writes.
-   */
-  const upsert = (account: Auth.OAuth.OAuthAccount, label: string) =>
-    asVoid(
-      label,
-      sql`INSERT INTO auth_oauth_accounts (id, user_id, provider, provider_id, email, name, picture, access_token, refresh_token, expires_at, created_at, updated_at)
-          VALUES (${account.id}, ${account.userId}, ${account.provider}, ${account.providerId}, ${account.email ?? null}, ${account.name ?? null}, ${account.picture ?? null}, ${account.accessToken}, ${account.refreshToken ?? null}, ${account.expiresAt ?? null}, ${account.createdAt}, ${account.updatedAt})
-          ON CONFLICT(provider, provider_id) DO UPDATE SET
-            user_id = ${account.userId},
-            email = ${account.email ?? null},
-            name = ${account.name ?? null},
-            picture = ${account.picture ?? null},
-            access_token = ${account.accessToken},
-            refresh_token = ${account.refreshToken ?? null},
-            expires_at = ${account.expiresAt ?? null},
-            updated_at = ${account.updatedAt}`,
-    );
-
   return {
-    create: (account) => upsert(account, "oauthAccount.create").pipe(Effect.as(account)),
+    // A plain insert: the (provider, provider_id) unique index refuses a
+    // second link, and the service reports it as a conflict.
+    create: (account) =>
+      asVoid(
+        "oauthAccount.create",
+        sql`INSERT INTO auth_oauth_accounts (id, user_id, provider, provider_id, email, name, picture, access_token, refresh_token, expires_at, created_at, updated_at)
+            VALUES (${account.id}, ${account.userId}, ${account.provider}, ${account.providerId}, ${account.email ?? null}, ${account.name ?? null}, ${account.picture ?? null}, ${account.accessToken}, ${account.refreshToken ?? null}, ${account.expiresAt ?? null}, ${account.createdAt}, ${account.updatedAt})`,
+      ).pipe(Effect.as(account)),
     get: (provider, providerId) =>
       read(provider, providerId, "oauthAccount.get").pipe(
         Effect.map((row) => (row ? rowToOAuthAccount(row) : null)),
@@ -1012,8 +999,48 @@ export const makeOAuthAccountStore: Effect.Effect<
         "oauthAccount.getByUserId",
         sql<OAuthAccountRow>`SELECT * FROM auth_oauth_accounts WHERE user_id = ${userId}`,
       ).pipe(Effect.map((rows) => rows.map(rowToOAuthAccount))),
-    update: (account) => upsert(account, "oauthAccount.update").pipe(Effect.as(account)),
-    linkToUser: (userId, account) => upsert({ ...account, userId }, "oauthAccount.linkToUser"),
+    update: (account) =>
+      firstRow(
+        "oauthAccount.update",
+        sql<OAuthAccountRow>`UPDATE auth_oauth_accounts SET
+            email = ${account.email ?? null},
+            name = ${account.name ?? null},
+            picture = ${account.picture ?? null},
+            access_token = ${account.accessToken},
+            refresh_token = ${account.refreshToken ?? null},
+            expires_at = ${account.expiresAt ?? null},
+            updated_at = ${account.updatedAt}
+          WHERE id = ${account.id}
+          RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToOAuthAccount(row) : null))),
+    // Only an unlinked link (empty user_id) or one `userId` already holds
+    // moves; a link another user holds is refused, never reassigned.
+    linkToUser: (userId, account) =>
+      firstRow(
+        "oauthAccount.linkToUser",
+        sql<{
+          readonly id: string;
+        }>`UPDATE auth_oauth_accounts SET user_id = ${userId}, updated_at = ${account.updatedAt}
+            WHERE provider = ${account.provider} AND provider_id = ${account.providerId}
+              AND (user_id = '' OR user_id = ${userId})
+            RETURNING id`,
+      ).pipe(
+        Effect.flatMap((moved) =>
+          moved
+            ? Effect.void
+            : read(account.provider, account.providerId, "oauthAccount.linkToUser").pipe(
+                Effect.flatMap((held) =>
+                  held
+                    ? Effect.fail(
+                        new Auth.AuthError({
+                          message: "oauthAccount.linkToUser: the link belongs to another user",
+                        }),
+                      )
+                    : Effect.void,
+                ),
+              ),
+        ),
+      ),
     unlinkFromUser: (userId, provider) =>
       asVoid(
         "oauthAccount.unlinkFromUser",

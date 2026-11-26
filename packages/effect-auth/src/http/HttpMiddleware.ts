@@ -56,7 +56,8 @@
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     update: (session) =>
+ *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
@@ -467,7 +468,8 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     update: (session) =>
+ *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
@@ -653,7 +655,8 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     update: (session) =>
+ *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)

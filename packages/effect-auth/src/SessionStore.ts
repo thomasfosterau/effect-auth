@@ -39,7 +39,11 @@ export class SessionStore extends Context.Service<
     readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
 
     /**
-     * Update a session
+     * Write `expiresAt`, `lastActivityAt` and `attributes` of the stored
+     * session with `session.id`. It must never create a session: when none
+     * has that id (signed out or revoked since the caller read it), write
+     * nothing, so a revoked session is never brought back. An `UPDATE …
+     * WHERE id`, never an upsert or a bare `set`.
      */
     readonly update: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
