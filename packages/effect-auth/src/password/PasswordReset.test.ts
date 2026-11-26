@@ -350,7 +350,7 @@ describe("PasswordResetService", () => {
           // Were the marker's token known, redeeming it still finds no account.
           const [marker] = MutableHashMap.values(resetTokens);
           assert(marker !== undefined);
-          yield* passwordResetStore.create({ ...marker, token: yield* hashToken("guessed") });
+          yield* passwordResetStore.create({ ...marker, token: sha256Hex("guessed") });
           return yield* Effect.flip(service.resetPassword("guessed", "new-password-123"));
         }),
         testContext,

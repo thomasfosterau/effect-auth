@@ -140,7 +140,6 @@ const validatePasswordLength = (
 /** The prefix of a marker's owner: no user id starts with it. */
 const UNKNOWN_ADDRESS_OWNER = "password-reset-unknown-address:";
 
-
 /**
  * Build a {@link PasswordResetService} from its config, for embedding in a custom layer inside the package. The `password` barrel doesn't re-export it, so it never reads as `Password.make`; use {@link PasswordResetService.layer} from the public API.
  */
