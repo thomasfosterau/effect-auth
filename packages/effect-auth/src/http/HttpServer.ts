@@ -42,7 +42,14 @@ import {
   type SignInDocument,
 } from "./HttpApi.ts";
 import * as SessionCookies from "../SessionCookies.ts";
-import { ClientIP, resolveClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
+import {
+  ClientIP,
+  DEFAULT_IPV6_RATE_LIMIT_PREFIX,
+  isIpv6RateLimitPrefix,
+  rateLimitAddressKey,
+  resolveClientIP,
+  type TrustedProxyConfig,
+} from "../ClientIP.ts";
 import { RateLimiter, type RateLimitConfig } from "../RateLimit.ts";
 import { isRecipientSendCapped } from "../RecipientSendLimit.ts";
 import { mergeNoStore, noStoreWithSetCookie } from "./CacheControl.ts";
@@ -1083,7 +1090,7 @@ const refuseWithoutRateLimiter = (limit: string): Effect.Effect<never, S.TooMany
  *
  * A caller with no resolvable client address (or no `ClientIP` service in
  * scope) is refused, never keyed under a shared bucket and never let through
- * uncounted.
+ * uncounted. An IPv6 caller is keyed on its /64.
  */
 const applyRegistrationRateLimit = (
   limit: RateLimitConfig,
@@ -1096,7 +1103,11 @@ const applyRegistrationRateLimit = (
     const clientIp = yield* Effect.serviceOption(ClientIP);
     const ip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
     if (ip === undefined) return yield* new S.TooManyRequests({ message: NO_CLIENT_ADDRESS });
-    return yield* consumeRateLimitToken(rateLimiterOpt.value, `oidc-register:${ip}`, limit);
+    return yield* consumeRateLimitToken(
+      rateLimiterOpt.value,
+      `oidc-register:${rateLimitAddressKey(ip)}`,
+      limit,
+    );
   });
 
 /**
@@ -5108,6 +5119,14 @@ export interface HttpIPRateLimitConfig {
    * (availability over abuse protection), as `AccountLockoutPlugin`'s option.
    */
   readonly onStoreError?: "fail-closed" | "fail-open" | undefined;
+  /**
+   * How many leading bits of an IPv6 address make one client: every address
+   * in that prefix counts in one bucket, so a customer's /64 cannot mint a
+   * fresh budget per address. An integer from 1 to 128; `128` keys each
+   * address on its own. IPv4 addresses are keyed as they are. Default `64`.
+   * Any other value makes `make` throw `RateLimiterConfigError`.
+   */
+  readonly ipv6PrefixLength?: number | undefined;
 }
 
 const MINUTE_MS = 60 * 1000;
@@ -5256,6 +5275,7 @@ const noRateLimiterResponse = (): Effect.Effect<HttpServerResponse.HttpServerRes
 const consumeEndpointLimit = (
   rule: EndpointRateLimitRule,
   failOpen: boolean,
+  ipv6PrefixLength: number,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse | undefined> =>
   Effect.gen(function* () {
     const limiter = yield* Effect.serviceOption(RateLimiter);
@@ -5266,7 +5286,7 @@ const consumeEndpointLimit = (
       return HttpServerResponse.jsonUnsafe({ message: NO_CLIENT_ADDRESS }, { status: 429 });
     }
     const denied = yield* limiter.value
-      .consumeToken(`ip:${ruleKey(rule)}:${ip}`, {
+      .consumeToken(`ip:${ruleKey(rule)}:${rateLimitAddressKey(ip, ipv6PrefixLength)}`, {
         maxRequests: rule.maxRequests,
         windowMs: rule.windowMs,
         ...(rule.blockDurationMs !== undefined && { blockDurationMs: rule.blockDurationMs }),
@@ -5305,14 +5325,21 @@ const limiterStoreFaultResponse = (): HttpServerResponse.HttpServerResponse =>
  * request or runs any auth logic, and finds its rule by the matched endpoint's
  * path template and method, so no spelling of the path escapes it.
  */
-const endpointRateLimit = (rules: ReadonlyArray<EndpointRateLimitRule>, failOpen: boolean) =>
+const endpointRateLimit = (
+  rules: ReadonlyArray<EndpointRateLimitRule>,
+  failOpen: boolean,
+  ipv6PrefixLength: number,
+) =>
   HttpRouter.middleware((effect) =>
     Effect.gen(function* () {
       const { route } = yield* HttpRouter.RouteContext;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const method = route.method === "*" ? request.method.toUpperCase() : route.method;
       const rule = findEndpointRule(rules, openApiTemplate(route.path), method);
-      const refused = rule === undefined ? undefined : yield* consumeEndpointLimit(rule, failOpen);
+      const refused =
+        rule === undefined
+          ? undefined
+          : yield* consumeEndpointLimit(rule, failOpen, ipv6PrefixLength);
       return refused ?? (yield* effect);
     }),
   ).layer;
@@ -5334,6 +5361,11 @@ const tokenEndpointsNoStore = HttpRouter.middleware((effect) =>
     return yield* effect;
   }),
 ).layer;
+
+/** The IPv6 prefix `ipRateLimit` groups a client by: its own, else /64. */
+const ipv6PrefixLength = (ipRateLimit: HttpIPRateLimitConfig | false | undefined): number =>
+  (ipRateLimit === false ? undefined : ipRateLimit?.ipv6PrefixLength) ??
+  DEFAULT_IPV6_RATE_LIMIT_PREFIX;
 
 /** The rules `ipRateLimit` puts in force: none for `false`, else its own or the defaults. */
 const endpointRules = (
@@ -5675,12 +5707,13 @@ export interface AuthWebHandler {
  * keyed by client address needs an address source. A Web Request has no socket
  * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
  * without it would refuse every request to a limited endpoint, so it is
- * refused too.
+ * refused too. Its IPv6 prefix length must be one it can key on.
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
-): ClientAddressConfigError | undefined =>
+): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   trustedProxyError(options) ??
+  ipv6PrefixError(options) ??
   (options.ipRateLimit !== false && options.trustedProxy === undefined
     ? new ClientAddressConfigError({
         message:
@@ -5690,6 +5723,16 @@ const ipRateLimitAddressError = (
           allowMissingClientIpNote(options),
       })
     : undefined);
+
+/** An `ipRateLimit.ipv6PrefixLength` that is not an integer from 1 to 128. */
+const ipv6PrefixError = (options: AuthWebHandlerOptions): RateLimiterConfigError | undefined => {
+  const length = ipv6PrefixLength(options.ipRateLimit);
+  return isIpv6RateLimitPrefix(length)
+    ? undefined
+    : new RateLimiterConfigError({
+        message: `ipRateLimit.ipv6PrefixLength must be an integer from 1 to 128, got ${String(length)}.`,
+      });
+};
 
 /**
  * A `trustedProxy` that can never resolve an address: a `hopCount` that is not
@@ -5794,6 +5837,7 @@ const serve = (
       endpointRateLimit(
         endpointRules(options.ipRateLimit),
         options.ipRateLimit !== false && options.ipRateLimit?.onStoreError === "fail-open",
+        ipv6PrefixLength(options.ipRateLimit),
       ),
     ),
     Layer.provide(tokenEndpointsNoStore),

@@ -626,6 +626,10 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
  * checked: the handler's build fails with this error instead, and every request
  * rejects with it. `Http.makeAsync` rejects with it at startup, so the app fails
  * to start, however `services` is composed.
+ *
+ * It is also the error for an `ipv6PrefixLength` that is not an integer from 1
+ * to 128: `Http.make` throws it for `ipRateLimit.ipv6PrefixLength`, and the
+ * `IPRateLimitPlugin` layer build dies with it.
  */
 export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigError")<{
   readonly message: string;

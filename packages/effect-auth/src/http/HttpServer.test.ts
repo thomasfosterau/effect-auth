@@ -4178,6 +4178,40 @@ const ipLimitedHandler = (ipRateLimit?: HttpServer.HttpIPRateLimitConfig): Handl
     ...(ipRateLimit !== undefined && { ipRateLimit }),
   }).handler;
 
+describe("the IP limit groups IPv6 clients by prefix", () => {
+  const signInOnce = (ipv6PrefixLength?: number) =>
+    ipLimitedHandler({
+      rules: [{ path: "/sessions", methods: ["POST"], maxRequests: 1, windowMs: HOUR }],
+      ...(ipv6PrefixLength !== undefined && { ipv6PrefixLength }),
+    });
+
+  it("counts every address of one /64 in one bucket by default", async () => {
+    const handler = signInOnce();
+    expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:1::1"))).status).not.toBe(
+      429,
+    );
+    expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:1::d"))).status).toBe(429);
+    expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:2::1"))).status).not.toBe(
+      429,
+    );
+  });
+
+  it("keys each address on its own with ipv6PrefixLength: 128", async () => {
+    const handler = signInOnce(128);
+    expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:1::1"))).status).not.toBe(
+      429,
+    );
+    expect((await handler(fromAddress("POST", "/sessions", "2001:db8:1:1::d"))).status).not.toBe(
+      429,
+    );
+  });
+
+  it("refuses to start with an ipv6PrefixLength outside 1 to 128", () => {
+    expect(() => signInOnce(0)).toThrow(RateLimiterConfigError);
+    expect(() => signInOnce(129)).toThrow(RateLimiterConfigError);
+  });
+});
+
 describe("the IP limit holds for every spelling of a limited path", () => {
   // The default rules, each allowing one request, so every case is two requests.
   const oncePerRule = {
