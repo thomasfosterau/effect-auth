@@ -170,10 +170,13 @@ describe("empty environment variables", () => {
     it("guards the assumption: Config.schema runs the Record key filter for every key, empty leaves included", async () => {
       const seen = MutableHashSet.empty<string>();
       const key = Schema.String.check(
-        Schema.makeFilter((k: string) => {
-          MutableHashSet.add(seen, k);
-          return true;
-        }),
+        Schema.makeFilter(
+          (k: string) => {
+            MutableHashSet.add(seen, k);
+            return true;
+          },
+          { identifier: "KeyProbe", title: "key probe", description: "Records every key it sees" },
+        ),
       );
       const probe = Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), ["P"]);
       await Effect.runPromise(probe.parse(env({ P_A: "1", P_B: "", P_C_D: "2" })));

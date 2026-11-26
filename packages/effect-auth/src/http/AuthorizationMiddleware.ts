@@ -341,7 +341,7 @@ type GuardName<Id extends string, All extends string = Id> = Id extends string
   ? 0 extends 1 & Id
     ? never
     : [All] extends [Id]
-      ? {} extends Record<Id, 1>
+      ? { readonly [key: string]: 1 } extends Record<Id, 1>
         ? GuardNameError
         : Id extends ""
           ? GuardNameError

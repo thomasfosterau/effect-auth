@@ -34,10 +34,18 @@ const recordKeys = (path: ConfigProvider.Path): Config.Config<ReadonlyArray<stri
   Config.flatMap(Config.succeed(undefined), () => {
     const seen: Array<string> = [];
     const key = Schema.String.check(
-      Schema.makeFilter((k: string) => {
-        seen.push(k);
-        return true;
-      }),
+      Schema.makeFilter(
+        (k: string) => {
+          seen.push(k);
+          return true;
+        },
+        {
+          identifier: "RecordKeyProbe",
+          title: "record key probe",
+          description:
+            "Accepts every key, recording it, so the caller can list a Record node's keys",
+        },
+      ),
     );
     return Config.schema(Schema.Record(key, Schema.UndefinedOr(Schema.String)), path).pipe(
       Config.map((): ReadonlyArray<string> => seen),

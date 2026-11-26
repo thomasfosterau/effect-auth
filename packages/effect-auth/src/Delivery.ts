@@ -87,7 +87,7 @@ export type DeliveryPurpose =
   | "delete-account"
   | `phone-otp:${PhoneOtpPurpose}`
   | "second-factor-otp"
-  | (string & {});
+  | (string & Record<never, never>);
 
 /** An email to deliver. `params` carries the flow's payload (token, otp, ...). */
 export interface EmailMessage {
