@@ -4,7 +4,7 @@
  * as strong in every parameter is kept.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { hashWasmFixtures } from "./HashWasm.fixtures.ts";
 import * as Argon2 from "./index.ts";
 

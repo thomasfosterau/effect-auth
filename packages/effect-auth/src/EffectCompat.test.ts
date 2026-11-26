@@ -1,6 +1,11 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import { testRootSecretLayer } from "./testing/RootSecret.ts";
-import { ConfigProvider, Context, Effect, Layer, Redacted, Struct } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
+import * as Struct from "effect/Struct";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";

@@ -30,7 +30,14 @@
  * @since 0.6.0
  * @module cloudflare-access
  */
-import { Clock, Context, Data, DateTime, Effect, Formatter, Layer, SynchronizedRef } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Formatter from "effect/Formatter";
+import * as Layer from "effect/Layer";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

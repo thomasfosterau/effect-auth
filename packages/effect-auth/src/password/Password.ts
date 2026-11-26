@@ -8,7 +8,10 @@
  * - Extensible design for custom algorithms
  */
 
-import { Context, Effect, Layer, Result } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import { Digest, Kdf, SecureRandom } from "effect/crypto";
 import { Hex } from "effect/encoding";

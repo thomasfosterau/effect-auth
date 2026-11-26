@@ -48,7 +48,9 @@
  *
  * @module rate-limit-persistence
  */
-import { Duration, Effect, Layer } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import { AuthError, RateLimitError } from "./Errors.ts";

@@ -6,7 +6,9 @@
  *
  * @module policy
  */
-import { Data, Effect, Match } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";

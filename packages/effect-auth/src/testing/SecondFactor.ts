@@ -5,7 +5,8 @@
  *
  * Internal test support: the `./testing` barrel does not export it.
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
 
 /** The challenge the stand-in answers with. */

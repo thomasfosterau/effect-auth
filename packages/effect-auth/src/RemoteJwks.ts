@@ -4,7 +4,10 @@
  * kept when a refetch fails, so neither forged `kid`s nor a stalled endpoint
  * turn every verification into a fetch. Refetches are serialised.
  */
-import { Clock, Context, Effect, SynchronizedRef } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as HashMap from "effect/HashMap";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";

@@ -1,4 +1,7 @@
-import { Context, DateTime, Effect, MutableHashMap } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { describe, expect, it } from "vite-plus/test";

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Deferred, Effect, Fiber, Ref } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";
 import * as RemoteJwks from "./RemoteJwks.ts";
 import type * as Types from "./Types.ts";

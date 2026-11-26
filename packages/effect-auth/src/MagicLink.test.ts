@@ -9,7 +9,14 @@ import {
 } from "./testing/MemoryStores.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
-import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Order, Result } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Order from "effect/Order";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

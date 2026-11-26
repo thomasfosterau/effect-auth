@@ -4,7 +4,7 @@
  * `RateLimiter`, keyed by the address's digest. An unknown address is capped
  * exactly as a known one. Internal.
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import type { Digest } from "effect/crypto";
 import { type AuthError, RateLimitError } from "./Errors.ts";
 import * as RateLimit from "./RateLimit.ts";

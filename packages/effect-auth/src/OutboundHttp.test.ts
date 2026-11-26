@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import * as OutboundHttp from "./OutboundHttp.ts";

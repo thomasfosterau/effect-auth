@@ -10,7 +10,11 @@
  * covered with a recording `fetch` instead.
  */
 import * as Auth from "../index.ts";
-import { DateTime, Effect, MutableHashMap, MutableHashSet, Order } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

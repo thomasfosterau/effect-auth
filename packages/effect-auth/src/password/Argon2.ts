@@ -3,7 +3,9 @@
  * the PHC strings. Only a `Kdf` with Argon2id (`NodeCrypto.layerKdf`, Node.js
  * 24.7+ or Bun 1.4+) derives it; on Workers use effect-auth-argon2.
  */
-import { Effect, Exit, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import { CryptoError, Kdf, Password as CryptoPassword, SecureRandom } from "effect/crypto";
 import * as Option from "effect/Option";

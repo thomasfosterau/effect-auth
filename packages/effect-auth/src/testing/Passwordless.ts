@@ -5,7 +5,11 @@
  * Never published (`tsconfig.json` excludes this file; the rest of `src/testing/`
  * is the public `./testing` subpath).
  */
-import { DateTime, Duration, Effect, type MutableHashMap, Result } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import type * as MutableHashMap from "effect/MutableHashMap";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";

@@ -7,7 +7,9 @@
  *
  * @module testing
  */
-import { Effect, Layer, MutableHashMap } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import { type ApiKey, type ApiKeyConfig, ApiKeyService, ApiKeyStore } from "../ApiKey.ts";
 import { Hooks } from "../Hooks.ts";

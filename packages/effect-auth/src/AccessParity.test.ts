@@ -16,7 +16,10 @@
  * row or viewer the rules say must not ask, is collected and fails the test.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

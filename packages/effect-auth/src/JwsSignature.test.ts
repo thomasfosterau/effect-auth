@@ -3,7 +3,8 @@
  * and RFC 7515's published ES256 example.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { Base64Url } from "effect/encoding";

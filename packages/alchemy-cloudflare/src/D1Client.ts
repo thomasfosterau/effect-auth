@@ -10,7 +10,9 @@ import type {
   QueryDatabaseClient,
 } from "@alchemy.run/cloudflare/D1/QueryDatabase";
 import { RuntimeContext } from "alchemy/RuntimeContext";
-import { Effect, Layer, Stream } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Reactivity } from "effect/reactivity";

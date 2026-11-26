@@ -4,7 +4,7 @@
  */
 import * as crypto from "node:crypto";
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Cipher from "./Cipher.ts";

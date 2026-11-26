@@ -5,7 +5,8 @@
  *
  * @internal
  */
-import { Context, type Effect } from "effect";
+import * as Context from "effect/Context";
+import type * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Errors from "./Errors.ts";
 

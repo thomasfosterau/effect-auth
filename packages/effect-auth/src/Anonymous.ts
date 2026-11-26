@@ -5,7 +5,12 @@
  * AnonymousService.linkAccount}, whose callback migrates their data before the
  * anonymous user is deleted.
  */
-import { Clock, Context, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
 import { makeAmortizedPrune } from "./AmortizedPrune.ts";
 import * as Option from "effect/Option";
 import { AccountManagementStore } from "./AccountManagement.ts";

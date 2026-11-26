@@ -2,7 +2,7 @@
  * A {@link DeliveryScheduler} for tests that runs each detached send in place.
  * Never use it in production: it puts the send back on the response path.
  */
-import { Layer } from "effect";
+import * as Layer from "effect/Layer";
 import { DeliveryScheduler } from "../DeliveryScheduler.ts";
 
 /**

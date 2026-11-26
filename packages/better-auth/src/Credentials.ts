@@ -5,7 +5,9 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { BetterAuthInstance, type SignInAnswer, type WithHeaders } from "./BetterAuth.ts";

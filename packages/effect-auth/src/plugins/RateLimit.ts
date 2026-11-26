@@ -6,7 +6,7 @@
  *
  * @module plugins/rate-limit
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { type AuthenticateAttempt, authenticationSubject, makePlugin } from "../Hooks.ts";
 import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.ts";
 

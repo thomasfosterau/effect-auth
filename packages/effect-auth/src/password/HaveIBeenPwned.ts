@@ -6,7 +6,8 @@
  *
  * @module plugins/hibp
  */
-import { Duration, Effect } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest } from "effect/crypto";

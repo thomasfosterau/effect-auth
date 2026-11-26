@@ -3,7 +3,8 @@
  * own key selection and claim checks (OIDC `id_token`s, Cloudflare Access
  * tokens, the Apple client secret). Internal.
  */
-import { Effect, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import type { Signature } from "effect/crypto";
 import { JoseError, Jwk, Jws } from "effect/jose";

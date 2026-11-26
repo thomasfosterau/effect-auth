@@ -1,5 +1,12 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Config, Effect, FileSystem, Layer, Order, Path, PlatformError, Redacted } from "effect";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Order from "effect/Order";
+import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

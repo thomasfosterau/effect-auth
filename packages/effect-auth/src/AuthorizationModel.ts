@@ -7,7 +7,8 @@
  *
  * @module authorization-model
  */
-import { Match, Result } from "effect";
+import * as Match from "effect/Match";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";

@@ -3,7 +3,7 @@
  * it; provide it alongside when wanted.
  */
 
-import { Layer } from "effect";
+import * as Layer from "effect/Layer";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import type { SchemaInput } from "./Columns.ts";
 import type { DrizzleDatabase } from "./Database.ts";

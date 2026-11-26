@@ -4,7 +4,8 @@
  * gate and stops before checking the credential. Internal; not in the
  * `./testing` barrel.
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { DeliveryScheduler } from "../DeliveryScheduler.ts";
 import { RateLimitError } from "../Errors.ts";
 import { type AuthenticateAttempt, Hooks, makePlugin } from "../Hooks.ts";

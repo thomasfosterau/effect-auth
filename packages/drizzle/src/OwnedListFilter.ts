@@ -41,7 +41,9 @@
  * @module owned-list-filter
  */
 import { and, eq, inArray, or, type SQL, type SQLWrapper } from "drizzle-orm";
-import { Effect, Layer, Match } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as P from "effect/Predicate";
 import * as Auth from "@thomasfosterau/effect-auth";
 

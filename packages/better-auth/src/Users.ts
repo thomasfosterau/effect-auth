@@ -5,7 +5,8 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Eq from "effect/Equal";
 import * as HashSet from "effect/HashSet";
 import * as Arr from "effect/Array";

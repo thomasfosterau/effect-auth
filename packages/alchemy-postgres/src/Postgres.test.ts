@@ -11,7 +11,10 @@
  * binding-shaped source is exercised as such.
  */
 
-import { Config, DateTime, Effect, Redacted } from "effect";
+import * as Config from "effect/Config";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Option from "effect/Option";
 import { assert, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";

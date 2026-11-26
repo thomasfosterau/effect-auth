@@ -51,7 +51,8 @@
  *
  * @module plugins/ip-rate-limit
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import {
   ClientIP,

@@ -6,7 +6,7 @@
  * digests.
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { SqlClient } from "effect/sql";
 import * as Auth from "../index.ts";
 

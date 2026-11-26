@@ -53,7 +53,10 @@
  *
  * @module delivery
  */
-import { Context, Effect, Layer, Match } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Connect from "@thomasfosterau/effect-connect";

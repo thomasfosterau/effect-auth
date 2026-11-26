@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, assert } from "vite-plus/test";
-import { Effect, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { PasswordHasher, pbkdf2Hasher } from "./Password.ts";

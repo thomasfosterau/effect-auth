@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Clock, Context, DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";

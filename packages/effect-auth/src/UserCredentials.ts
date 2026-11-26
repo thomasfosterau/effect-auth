@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { ApiKeyStore } from "./ApiKey.ts";
 import { definedKeys } from "./DefinedKeys.ts";

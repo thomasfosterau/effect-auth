@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Logger } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as Entity from "../Entity.ts";
 import { Hooks, recordWrite, type WriteEvent } from "../Hooks.ts";
 import * as System from "../System.ts";

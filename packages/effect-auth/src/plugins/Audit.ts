@@ -6,7 +6,7 @@
  *
  * @module plugins/audit
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import type { AuthResult } from "../email/EmailPassword.ts";
 import * as Entity from "../Entity.ts";
 import {

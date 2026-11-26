@@ -7,7 +7,12 @@
  */
 
 import { and, asc, eq, inArray, or } from "drizzle-orm";
-import { Effect, Exit, HashMap, Layer, Request, RequestResolver } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as HashMap from "effect/HashMap";
+import * as Layer from "effect/Layer";
+import * as Request from "effect/Request";
+import * as RequestResolver from "effect/RequestResolver";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";

@@ -4,7 +4,11 @@
  * client and scopes on another device and approves. The session records the
  * client and scopes.
  */
-import { Clock, Context, Data, Effect, Layer } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

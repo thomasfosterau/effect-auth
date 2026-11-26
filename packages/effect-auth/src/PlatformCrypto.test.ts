@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import { Hex } from "effect/encoding";
 import { Digest, SecureRandom } from "effect/crypto";
 import { layer } from "./PlatformCrypto.ts";

@@ -1,5 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Duration, Effect, Layer } from "effect";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
 import { TestClock } from "effect/testing";

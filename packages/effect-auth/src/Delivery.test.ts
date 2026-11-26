@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vite-plus/test";
-import { DateTime, Effect, Layer, Logger, MutableHashMap } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

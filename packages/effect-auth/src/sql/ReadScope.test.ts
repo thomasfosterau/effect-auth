@@ -9,7 +9,8 @@
 
 import type { PGlite } from "@electric-sql/pglite";
 import * as PgliteClient from "@effect/sql-pglite/PgliteClient";
-import { Effect, Order } from "effect";
+import * as Effect from "effect/Effect";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import { SqlClient } from "effect/sql";

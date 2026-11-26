@@ -5,7 +5,8 @@
  * domain and the release of any claim. Runs the real `Http.make`
  * handler of the `./client/testing` fixture.
  */
-import { MutableHashMap, MutableHashSet } from "effect";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { assert, describe, expect, it } from "vite-plus/test";

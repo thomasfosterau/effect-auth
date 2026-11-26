@@ -10,7 +10,9 @@
  * needs — and every representation it refuses is hidden from someone.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

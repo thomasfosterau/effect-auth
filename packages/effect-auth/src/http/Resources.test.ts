@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Order } from "effect";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import { Resource } from "@thomasfosterau/effect-jsonapi";

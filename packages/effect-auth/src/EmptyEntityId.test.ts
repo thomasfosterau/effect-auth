@@ -9,7 +9,9 @@
  * empty-id reference equals nothing, itself included.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Exit } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";

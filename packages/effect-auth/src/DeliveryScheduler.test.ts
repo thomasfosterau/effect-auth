@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Deferred, Effect, Layer, Metric } from "effect";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Metric from "effect/Metric";
 import { DeliveryScheduler, makeDetachedSend } from "./DeliveryScheduler.ts";
 import { AuthError } from "./Errors.ts";
 import { type DeliveryFailure, Hooks, makePlugin } from "./Hooks.ts";

@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Order } from "effect";
+import * as Effect from "effect/Effect";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";

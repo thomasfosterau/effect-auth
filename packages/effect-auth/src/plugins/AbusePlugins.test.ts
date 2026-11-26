@@ -1,5 +1,8 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Layer, Redacted, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
 import { Digest } from "effect/crypto";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ClientIP } from "../ClientIP.ts";

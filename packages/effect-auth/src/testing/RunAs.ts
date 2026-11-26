@@ -7,7 +7,11 @@
  *
  * @module testing
  */
-import { type Context, DateTime, Effect, Layer, type Option } from "effect";
+import type * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import type * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "../Authorizer.ts";

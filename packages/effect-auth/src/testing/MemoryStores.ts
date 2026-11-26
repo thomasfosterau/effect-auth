@@ -9,7 +9,11 @@
  */
 import type { RootSecret } from "../RootSecret.ts";
 import { testRootSecretLayer } from "./RootSecret.ts";
-import { Clock, DateTime, Effect, Layer, MutableHashMap } from "effect";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import type { KeyValueStore } from "effect/persistence";

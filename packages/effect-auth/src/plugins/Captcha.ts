@@ -7,7 +7,9 @@
  *
  * @module plugins/captcha
  */
-import { Data, Effect, Redacted } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

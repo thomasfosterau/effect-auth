@@ -4,7 +4,7 @@
  * stores, policies, tests and application code.
  */
 
-import { Data } from "effect";
+import * as Data from "effect/Data";
 
 /** Thrown by {@link parsePermission} for a malformed permission string. */
 class InvalidPermissionStringError extends Data.TaggedError("InvalidPermissionStringError")<{

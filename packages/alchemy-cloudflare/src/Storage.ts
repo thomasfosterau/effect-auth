@@ -6,7 +6,8 @@
 
 import type { QueryDatabaseClient } from "@alchemy.run/cloudflare/D1/QueryDatabase";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Sql from "@thomasfosterau/effect-auth/sql";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import * as D1Client from "./D1Client.ts";

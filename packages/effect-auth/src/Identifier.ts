@@ -4,7 +4,11 @@
  * login handle. Every flow that asks who owns a value goes through the {@link
  * IdentifierStore}.
  */
-import { Context, Data, Effect, MutableHashMap, Order } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Order from "effect/Order";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";

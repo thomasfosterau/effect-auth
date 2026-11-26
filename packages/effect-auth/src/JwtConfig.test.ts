@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ConfigProvider, Effect, Exit } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import { jwtServiceConfig } from "./Jwt.ts";
 
 const resolve = (env: Record<string, string>) =>

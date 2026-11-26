@@ -8,7 +8,8 @@
  * is held to the same corpus in effect-auth/sql's `ReadScope.test.ts`.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Context, Match } from "effect";
+import * as Context from "effect/Context";
+import * as Match from "effect/Match";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

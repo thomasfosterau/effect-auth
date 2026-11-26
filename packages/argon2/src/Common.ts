@@ -8,7 +8,7 @@
  *
  * @module argon2/common
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
 import * as Str from "effect/String";
 import { HashingError } from "@thomasfosterau/effect-auth";

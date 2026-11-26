@@ -148,7 +148,9 @@
  * @module http/authorization-middleware
  */
 
-import { Context, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import { HttpApiMiddleware } from "effect/http-api";
 import { HttpRouter, HttpServerRequest } from "effect/http";

@@ -3,7 +3,7 @@
  * (`EmailPassword`, `Username`). Internal: not exported from any barrel.
  */
 
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Errors from "../Errors.ts";
 import { MultiAlgorithmVerifier, type PasswordHasher } from "./Password.ts";

@@ -1,6 +1,10 @@
 import { createHash, createHmac } from "node:crypto";
 import { assert, describe, expect, it } from "vite-plus/test";
-import { ConfigProvider, Effect, Exit, Layer, Redacted } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import { Hex } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";

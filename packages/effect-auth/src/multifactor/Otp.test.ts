@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Effect, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Otp from "./Otp.ts";

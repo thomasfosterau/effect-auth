@@ -6,7 +6,8 @@
  *
  * @module user-standing
  */
-import { Clock, Effect } from "effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";

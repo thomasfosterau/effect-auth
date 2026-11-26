@@ -4,7 +4,7 @@
  * would. Never published.
  */
 
-import { DateTime } from "effect";
+import * as DateTime from "effect/DateTime";
 
 /** A MySQL `DATETIME` / `TIMESTAMP` wire value, `"YYYY-MM-DD hh:mm:ss.fff"` in UTC. */
 const fromWireDateTime = (value: string): Date =>

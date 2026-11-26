@@ -8,7 +8,9 @@
  */
 
 import * as crypto from "node:crypto";
-import { Effect, Layer, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import { Hex } from "effect/encoding";
 import * as Errors from "../Errors.ts";
 import { hashFields6, kdfHash, kdfVerify, parseStoredParam, PasswordHasher } from "./Password.ts";

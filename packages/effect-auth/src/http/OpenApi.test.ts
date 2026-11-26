@@ -1,5 +1,8 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { HashSet, Layer, Order, Struct } from "effect";
+import * as HashSet from "effect/HashSet";
+import * as Layer from "effect/Layer";
+import * as Order from "effect/Order";
+import * as Struct from "effect/Struct";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";

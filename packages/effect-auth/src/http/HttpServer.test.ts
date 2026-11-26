@@ -10,23 +10,21 @@ import {
   afterEach,
   onTestFinished,
 } from "vite-plus/test";
-import {
-  Clock,
-  Data,
-  DateTime,
-  Deferred,
-  Effect,
-  Fiber,
-  FileSystem,
-  Layer,
-  Logger,
-  MutableHashMap,
-  MutableHashSet,
-  Order,
-  Path,
-  Redacted,
-  Result,
-} from "effect";
+import * as Clock from "effect/Clock";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Order from "effect/Order";
+import * as Path from "effect/Path";
+import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

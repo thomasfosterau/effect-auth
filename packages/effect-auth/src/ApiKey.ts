@@ -7,7 +7,12 @@
  * @module api-key
  */
 
-import { Clock, Context, Data, Effect, Layer, type Duration } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import type * as Duration from "effect/Duration";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";

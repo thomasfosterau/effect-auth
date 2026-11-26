@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vite-plus/test";
-import { Cause, DateTime, Effect, Exit } from "effect";
+import * as Cause from "effect/Cause";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpServerRequest } from "effect/http";

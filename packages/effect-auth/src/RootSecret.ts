@@ -6,7 +6,12 @@
  *
  * @module root-secret
  */
-import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as R from "effect/Record";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64Url, Hex } from "effect/encoding";

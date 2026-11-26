@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";

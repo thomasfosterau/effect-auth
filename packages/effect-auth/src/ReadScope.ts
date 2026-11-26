@@ -6,7 +6,9 @@
  *
  * @module read-scope
  */
-import { Match, Order, Struct } from "effect";
+import * as Match from "effect/Match";
+import * as Order from "effect/Order";
+import * as Struct from "effect/Struct";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Condition from "./Condition.ts";

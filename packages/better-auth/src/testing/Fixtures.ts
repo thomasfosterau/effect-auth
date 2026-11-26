@@ -4,7 +4,9 @@
  * imports `vitest` directly and defaults to `node:sqlite`.
  */
 import { assert } from "vite-plus/test";
-import { DateTime, Effect, Layer } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { admin, bearer, username } from "better-auth/plugins";

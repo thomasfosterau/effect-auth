@@ -15,7 +15,8 @@
 import type { Database } from "@alchemy.run/cloudflare/D1/Database";
 import { QueryDatabase } from "@alchemy.run/cloudflare/D1/QueryDatabase";
 import { Action } from "alchemy/Action";
-import { Clock, Effect } from "effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
 import { SqlClient, type SqlError } from "effect/sql";
 import * as Sql from "@thomasfosterau/effect-auth/sql";
 import * as D1Client from "./D1Client.ts";

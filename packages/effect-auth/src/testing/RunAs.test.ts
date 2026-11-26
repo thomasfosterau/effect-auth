@@ -1,5 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Context, DateTime, Effect, Exit } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import * as Authorizer from "../Authorizer.ts";

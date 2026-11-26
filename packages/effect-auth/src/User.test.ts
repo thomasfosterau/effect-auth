@@ -1,5 +1,9 @@
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
-import { Context, DateTime, Effect, MutableHashMap, Result } from "effect";
+import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Result from "effect/Result";
 import * as Option from "effect/Option";
 import { AccountDeletion } from "./AccountDeletion.ts";
 import { UserServiceStore } from "./User.ts";

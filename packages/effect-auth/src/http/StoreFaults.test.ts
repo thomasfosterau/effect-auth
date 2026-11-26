@@ -7,7 +7,12 @@
  * `Http.make`'s own handlers.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, FileSystem, Layer, Logger, Path } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";

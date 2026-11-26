@@ -9,7 +9,7 @@
  * not have is a test failure rather than a passing refactor.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";

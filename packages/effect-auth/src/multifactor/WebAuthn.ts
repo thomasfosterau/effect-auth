@@ -3,7 +3,12 @@
  * Following Copenhagen/Oslo guidelines for WebAuthn implementation.
  */
 
-import { Clock, Context, Data, Effect, Layer, Result } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";

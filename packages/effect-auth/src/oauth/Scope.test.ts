@@ -1,5 +1,6 @@
 import { describe, it, expect, assert } from "vite-plus/test";
-import { Effect, Result } from "effect";
+import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import {
   parseScopes,
   formatScopes,

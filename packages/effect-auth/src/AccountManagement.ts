@@ -3,7 +3,12 @@
  * deletion, each through a single-use, expiring token sent out of band and
  * confirmed to apply the change. Sensitive changes invalidate sessions.
  */
-import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { type Digest, SecureRandom } from "effect/crypto";

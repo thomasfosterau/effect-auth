@@ -1,4 +1,5 @@
-import { Context, Effect } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";

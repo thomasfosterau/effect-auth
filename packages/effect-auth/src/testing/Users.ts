@@ -6,7 +6,7 @@
  * @module testing
  */
 import type * as Types from "../Types.ts";
-import { DateTime } from "effect";
+import * as DateTime from "effect/DateTime";
 import { definedKeys } from "../DefinedKeys.ts";
 
 /**

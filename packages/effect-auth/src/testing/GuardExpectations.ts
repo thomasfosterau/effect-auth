@@ -7,7 +7,10 @@
  *
  * @module testing
  */
-import { type Context, Data, Effect, Exit } from "effect";
+import type * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";

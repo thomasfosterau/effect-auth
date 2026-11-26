@@ -8,7 +8,10 @@
  *
  * @module email-otp
  */
-import { Context, Data, Effect, Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
