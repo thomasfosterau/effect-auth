@@ -36,6 +36,11 @@ updates:
           - "svelte"
           - "@sveltejs/*"
           - "svelte-check"
+      better-auth:
+        applies-to: version-updates
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
       alchemy:
         applies-to: version-updates
         patterns:

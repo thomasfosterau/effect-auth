@@ -16,7 +16,7 @@
     "packages/effect-auth/src/sql/index.ts",
     "packages/effect-auth/src/saml/index.ts",
     "packages/effect-auth/src/password/Scrypt.ts",
-    "packages/{alchemy-cloudflare,alchemy-postgres,argon2,drizzle,resend,svelte,sveltekit,twilio}/src/index.ts",
+    "packages/{alchemy-cloudflare,alchemy-postgres,argon2,better-auth,drizzle,resend,svelte,sveltekit,twilio}/src/index.ts",
     "packages/*/src/**/PgliteTemplate.setup.ts",
     "packages/*/src/**/*.test.ts",
     "packages/svelte/scripts/postbuild.mjs",
@@ -93,6 +93,14 @@
         "patterns": ["packages/argon2/**"]
       },
       {
+        "name": "backend-adapter-integration-tests",
+        "patterns": ["packages/better-auth/src/SvelteKit.test.ts"]
+      },
+      {
+        "name": "backend-adapters",
+        "patterns": ["packages/better-auth/**"]
+      },
+      {
         "name": "server-bindings",
         "patterns": ["packages/sveltekit/**"]
       },
@@ -116,6 +124,14 @@
       },
       {
         "from": "vendor-adapters",
+        "allow": ["core", "ladder"]
+      },
+      {
+        "from": "backend-adapter-integration-tests",
+        "allow": ["backend-adapters", "server-bindings", "core", "ladder"]
+      },
+      {
+        "from": "backend-adapters",
         "allow": ["core", "ladder"]
       },
       {

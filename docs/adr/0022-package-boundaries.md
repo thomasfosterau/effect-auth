@@ -59,6 +59,9 @@ Applied:
   `effect-auth-sveltekit` stay as they are, by the owner's decision.
   [ADR-0025](0025-delivery-through-effect-connect.md) later removed `effect-auth-resend` and
   `effect-auth-twilio`: the core sends through effect-connect's providers instead.
+- `effect-auth-better-auth` brings `better-auth` and is a package, of a new archetype: a
+  **backend adapter**, which implements the core's service contracts (not its stores) over another
+  auth library's runtime. Its fallow zone `backend-adapters` may import `core` and `ladder`.
 
 ## Consequences
 

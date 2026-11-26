@@ -177,6 +177,7 @@ export default defineConfig({
           "packages/effect-auth/src/sql/Stores.test.ts",
           "packages/effect-auth/src/testing/MemoryStores.test.ts",
           "packages/effect-auth/src/testing/StoreConformance.test.ts",
+          "packages/better-auth/src/Users.test.ts",
         ],
         rules: { "vitest/valid-title": "off" },
       },
@@ -262,7 +263,8 @@ export default defineConfig({
         // guard (`Admin`), the cache-safety predicate over wire attributes
         // (`Cacheability.publiclyServeable`), the OAuth userinfo readers
         // (`str`, `nested`), SCIM patch values (`Scim`), the conformance
-        // suite's record comparison (`StoreConformance`), the Svelte binding's
+        // suite's record comparison (`StoreConformance`), BetterAuth's thrown
+        // `APIError` (`better-auth`'s `Convert.fromApiError`), the Svelte binding's
         // `onError(cause)` and the client plugin's `request` body.
         files: [
           "packages/effect-auth/src/PolicyStore.ts",
@@ -272,6 +274,7 @@ export default defineConfig({
           "packages/effect-auth/src/oauth/OAuth.ts",
           "packages/effect-auth/src/Scim.ts",
           "packages/effect-auth/src/testing/StoreConformance.ts",
+          "packages/better-auth/src/Convert.ts",
           "packages/svelte/src/forms/internal.ts",
           "packages/svelte/src/forms/submission.svelte.ts",
           "packages/effect-auth/src/client/Client.ts",
@@ -338,6 +341,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-alchemy-cloudflare#check",
           "@thomasfosterau/effect-auth-alchemy-postgres#check",
           "@thomasfosterau/effect-auth-argon2#check",
+          "@thomasfosterau/effect-auth-better-auth#check",
           "@thomasfosterau/effect-auth-drizzle#check",
           "@thomasfosterau/effect-auth-svelte#check",
           "@thomasfosterau/effect-auth-sveltekit#check",
@@ -351,6 +355,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-alchemy-cloudflare#docs",
           "@thomasfosterau/effect-auth-alchemy-postgres#docs",
           "@thomasfosterau/effect-auth-argon2#docs",
+          "@thomasfosterau/effect-auth-better-auth#docs",
           "@thomasfosterau/effect-auth-drizzle#docs",
           "@thomasfosterau/effect-auth-svelte#docs",
           "@thomasfosterau/effect-auth-sveltekit#docs",
@@ -391,6 +396,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-alchemy-cloudflare#build",
           "@thomasfosterau/effect-auth-alchemy-postgres#build",
           "@thomasfosterau/effect-auth-argon2#build",
+          "@thomasfosterau/effect-auth-better-auth#build",
           "@thomasfosterau/effect-auth-drizzle#build",
           "@thomasfosterau/effect-auth-svelte#build",
           "@thomasfosterau/effect-auth-sveltekit#build",
