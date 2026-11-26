@@ -1,5 +1,6 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -1170,16 +1171,16 @@ describe("OrganizationService", () => {
     expect(result.required._tag).toBe("Failure");
   });
 
-  it("supports custom roles and creatorRole", async () => {
+  it("supports custom roles and a custom owner role (OrganizationOwnerRole)", async () => {
     const config: OrganizationConfig = {
-      creatorRole: "founder",
       roles: {
         founder: [...defaultOrganizationRoles["owner"]],
         collaborator: ["invitation:create"],
       },
     };
 
-    const result = await runService(config, (service) =>
+    const founders = Context.add(testContext, OrganizationModule.OrganizationOwnerRole, "founder");
+    const result = await runServiceIn(founders, config, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("founder-1", {
           name: "Startup",
@@ -1209,6 +1210,26 @@ describe("OrganizationService", () => {
     expect(result.collaboratorInvites.status).toBe("pending");
     expect(result.collaboratorRemoves._tag).toBe("Failure");
     expect(result.demoteLastFounder._tag).toBe("Failure");
+  });
+
+  it("dies at build when the deprecated creatorRole disagrees with OrganizationOwnerRole", async () => {
+    const build = (context: Context.Context<BaseServices>) =>
+      Effect.runPromiseExit(
+        OrganizationModule.make({ creatorRole: "founder" }).pipe(
+          Effect.provide(Layer.merge(Layer.succeedContext(context), proofLayer())),
+          Effect.provideService(UserStore, userStore),
+        ),
+      );
+
+    const disagreeing = await build(testContext);
+    assert(Exit.isFailure(disagreeing));
+    expect(Cause.squash(disagreeing.cause)).toBeInstanceOf(
+      OrganizationModule.OrganizationConfigError,
+    );
+    const agreeing = await build(
+      Context.add(testContext, OrganizationModule.OrganizationOwnerRole, "founder"),
+    );
+    expect(Exit.isSuccess(agreeing)).toBe(true);
   });
 
   it("creates teams and lists them in both directions", async () => {
