@@ -12,7 +12,7 @@ import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
-import { makeAmortizedPrune } from "./AmortizedPrune.ts";
+import { amortizedPrune } from "./AmortizedPrune.ts";
 import type { AuthError } from "./Errors.ts";
 
 /** Failure to build, parse, or verify a SAML message. */
@@ -254,7 +254,7 @@ export class SamlReplayStore extends Context.Service<
 export const memorySamlReplayStore = (
   records: MutableHashMap.MutableHashMap<string, SamlReplayRecord> = MutableHashMap.empty(),
 ): typeof SamlReplayStore.Service => {
-  const prune = makeAmortizedPrune(records);
+  const prune = amortizedPrune(records);
   return {
     create: (record) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) =>

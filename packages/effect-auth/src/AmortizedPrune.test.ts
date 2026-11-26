@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
-import { makeAmortizedPrune } from "./AmortizedPrune.ts";
+import { amortizedPrune } from "./AmortizedPrune.ts";
 
-describe("makeAmortizedPrune", () => {
+describe("amortizedPrune", () => {
   it("prunes only once the map reaches its floor, then once it has doubled again", () => {
     const map = MutableHashMap.empty<number, boolean>();
-    const prune = makeAmortizedPrune(map, 4);
+    const prune = amortizedPrune(map, 4);
     let scans = 0;
     const isStale = (stale: boolean) => {
       scans++;

@@ -7,7 +7,7 @@
  * @module plugins/rate-limit
  */
 import * as Effect from "effect/Effect";
-import { type AuthenticateAttempt, authenticationSubject, makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.ts";
 
 /**
@@ -22,14 +22,14 @@ import { RateLimitPresets, RateLimitStore, RateLimiter } from "../RateLimit.ts";
  * `Layer<Hooks, never, Hooks | RateLimiterTag | RateLimitStoreTag>` - the
  * limiter and its store are acquired when the layer is built.
  */
-export const RateLimitPlugin = makePlugin(
+export const RateLimitPlugin = Hooks.makePlugin(
   Effect.gen(function* () {
     const rateLimiter = yield* RateLimiter;
     const store = yield* RateLimitStore;
 
     return {
-      beforeAuthenticate: (attempt: AuthenticateAttempt) => {
-        const subject = authenticationSubject(attempt);
+      beforeAuthenticate: (attempt: Hooks.AuthenticateAttempt) => {
+        const subject = Hooks.authenticationSubject(attempt);
         if (subject === undefined) return Effect.succeed(attempt);
         return (
           attempt.method === "second-factor"

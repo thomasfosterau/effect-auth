@@ -10,7 +10,7 @@
  */
 import * as Effect from "effect/Effect";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
-import { makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { normalizeEmail } from "../utils.ts";
 
 /**
@@ -19,7 +19,7 @@ import { normalizeEmail } from "../utils.ts";
  *
  * `Layer<Hooks, never, Hooks>` - no dependencies.
  */
-export const NormalizeEmailPlugin = makePlugin({
+export const NormalizeEmailPlugin = Hooks.makePlugin({
   beforeSignUp: (input: SignUpInput) =>
     Effect.succeed({ ...input, email: normalizeEmail(input.email) }),
   beforeSignIn: (input: SignInInput) =>

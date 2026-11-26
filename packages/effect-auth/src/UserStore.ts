@@ -4,16 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
-import {
-  claimIdentifier,
-  type Identifier,
-  IdentifierStore,
-  lookupIdentifier,
-  IdentifierTakenError,
-  type IdentifierType,
-  makeIdentifier,
-  refusalAuthError,
-} from "./Identifier.ts";
+import * as Identifier from "./Identifier.ts";
 
 /**
  * User store interface for managing user persistence
@@ -43,7 +34,7 @@ export class UserStore extends Context.Service<
  * a table of their own ignores the field.
  */
 export interface NewUserIdentifier {
-  readonly type: IdentifierType;
+  readonly type: Identifier.IdentifierType;
   /** Normalised, as for every identifier. */
   readonly value: string;
   readonly verified: boolean;
@@ -78,8 +69,8 @@ export interface CreateUserResult {
   readonly created: boolean;
 }
 
-const takenError = (identifier: NewUserIdentifier): IdentifierTakenError =>
-  new IdentifierTakenError({
+const takenError = (identifier: NewUserIdentifier): Identifier.IdentifierTakenError =>
+  new Identifier.IdentifierTakenError({
     message: `This ${identifier.type} is already in use`,
     identifierType: identifier.type,
   });
@@ -89,12 +80,12 @@ const takenError = (identifier: NewUserIdentifier): IdentifierTakenError =>
  * `identifier`. A failed lookup keeps `error`.
  */
 const takenOr = <E>(
-  store: typeof IdentifierStore.Service,
+  store: typeof Identifier.IdentifierStore.Service,
   identifier: NewUserIdentifier,
   error: E,
-): Effect.Effect<never, E | IdentifierTakenError> =>
+): Effect.Effect<never, E | Identifier.IdentifierTakenError> =>
   Effect.gen(function* () {
-    const held = yield* lookupIdentifier(store, identifier.type, identifier.value).pipe(
+    const held = yield* Identifier.lookupIdentifier(store, identifier.type, identifier.value).pipe(
       Effect.orElseSucceed(() => Option.none()),
     );
     if (Option.isNone(held)) return yield* Effect.fail(error);
@@ -127,12 +118,12 @@ const takenOr = <E>(
  * created before the claim fails is left without the handle.
  */
 export const createUserWithIdentifier = <E, R>(
-  store: typeof IdentifierStore.Service,
+  store: typeof Identifier.IdentifierStore.Service,
   identifier: NewUserIdentifier,
   create: (identifier: NewUserIdentifier) => Effect.Effect<CreateUserResult, E, R>,
 ): Effect.Effect<
-  { readonly user: Types.User; readonly identifier: Identifier },
-  E | Errors.AuthError | IdentifierTakenError,
+  { readonly user: Types.User; readonly identifier: Identifier.Identifier },
+  E | Errors.AuthError | Identifier.IdentifierTakenError,
   R
 > =>
   Effect.gen(function* () {
@@ -145,9 +136,9 @@ export const createUserWithIdentifier = <E, R>(
     // Only a fresh insert may treat the address it holds as its own.
     if (!created) return yield* takenError(identifier);
     const now = yield* DateTime.nowAsDate;
-    const claimed = yield* claimIdentifier(
+    const claimed = yield* Identifier.claimIdentifier(
       store,
-      makeIdentifier({
+      Identifier.makeIdentifier({
         userId: user.id,
         type: identifier.type,
         value: identifier.value,
@@ -159,7 +150,11 @@ export const createUserWithIdentifier = <E, R>(
       Effect.catchTags({
         IdentifierTakenError: (taken) =>
           Effect.gen(function* () {
-            const found = yield* lookupIdentifier(store, identifier.type, identifier.value);
+            const found = yield* Identifier.lookupIdentifier(
+              store,
+              identifier.type,
+              identifier.value,
+            );
             if (Option.isNone(found) || found.value.userId !== user.id) return yield* taken;
             const held = found.value;
             if (!identifier.verified || held.verified) return held;
@@ -171,7 +166,7 @@ export const createUserWithIdentifier = <E, R>(
           }),
         // A store that cannot hold the first identifier cannot serve this
         // sign-up at all: a wiring fault, not a request the client can fix.
-        IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+        IdentifierRefusedError: (error) => Effect.fail(Identifier.refusalAuthError(error)),
       }),
     );
     return { user, identifier: claimed };

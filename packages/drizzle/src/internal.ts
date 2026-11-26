@@ -66,7 +66,7 @@ export const run = <A>(
  *
  * @internal
  */
-export const makeQuery =
+export const queryRunner =
   (handle: DrizzleHandle) =>
   <A>(
     label: string,
@@ -74,8 +74,8 @@ export const makeQuery =
   ): Effect.Effect<A, Auth.AuthError> =>
     Effect.flatMap(handle.database, (db) => run(label, () => build(db)));
 
-/** The per-query runner {@link makeQuery} produces. @internal */
-export type Query = ReturnType<typeof makeQuery>;
+/** The per-query runner {@link queryRunner} produces. @internal */
+export type Query = ReturnType<typeof queryRunner>;
 
 /**
  * The first row of `table` matching `where`, projected onto `fields`, or

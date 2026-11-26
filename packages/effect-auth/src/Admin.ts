@@ -20,7 +20,7 @@ import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
-import { Hooks, makePlugin, type HookError } from "./Hooks.ts";
+import * as Hooks from "./Hooks.ts";
 import { IdentifierStore, type IdentifierType, refusalAuthError } from "./Identifier.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -317,7 +317,7 @@ export class AdminService extends Context.Service<
       userId: string,
     ) => Effect.Effect<
       Types.IssuedSession,
-      AdminError | Errors.AuthError | Errors.UserNotFoundError | HookError
+      AdminError | Errors.AuthError | Errors.UserNotFoundError | Hooks.HookError
     >;
 
     /**
@@ -694,4 +694,4 @@ export const make = (
  *
  * @deprecated Drop it from your hook stack; the ban is enforced without it.
  */
-export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});
+export const BannedUserPlugin: Layer.Layer<Hooks.Hooks, never, Hooks.Hooks> = Hooks.makePlugin({});

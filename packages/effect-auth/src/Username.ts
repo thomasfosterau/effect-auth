@@ -19,18 +19,10 @@ import {
   secondFactorChallenge,
   type AuthResult,
 } from "./email/EmailPassword.ts";
-import {
-  anyEmailValue,
-  claimIdentifier,
-  IdentifierStore,
-  lookupIdentifier,
-  makeIdentifier,
-  primaryEmail,
-  refusalAuthError,
-} from "./Identifier.ts";
+import * as Identifier from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import { PasswordHasher } from "./password/Password.ts";
-import { makeDecoyHash, verifyPasswordOrDecoy } from "./password/DecoyVerify.ts";
+import { lazyDecoyHash, verifyPasswordOrDecoy } from "./password/DecoyVerify.ts";
 import { normalizeUsername } from "./utils.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -157,7 +149,7 @@ const make = (
 ): Effect.Effect<
   typeof UsernameService.Service,
   never,
-  | IdentifierStore
+  | Identifier.IdentifierStore
   | UserStore
   | EmailPasswordService
   | EmailPasswordStore
@@ -170,7 +162,7 @@ const make = (
     const maxLength = config.maxUsernameLength ?? 30;
     const requireEmailVerification = config.requireEmailVerification ?? false;
 
-    const identifiers = yield* IdentifierStore;
+    const identifiers = yield* Identifier.IdentifierStore;
     const users = yield* UserStore;
     const emailPassword = yield* EmailPasswordService;
     const emailPasswordStore = yield* EmailPasswordStore;
@@ -180,7 +172,7 @@ const make = (
 
     // Cached decoy hash — computed on first signIn call so that unknown-username
     // attempts always perform the same hashing work as known-username ones.
-    const getDecoyHash = makeDecoyHash(passwordHasher, "UsernameService.getDecoyHash");
+    const getDecoyHash = lazyDecoyHash(passwordHasher, "UsernameService.getDecoyHash");
 
     const validate = (raw: string): Effect.Effect<string, UsernameError> =>
       Effect.gen(function* () {
@@ -205,7 +197,7 @@ const make = (
       signUp: Effect.fn("UsernameService.signUp")(function* (input: UsernameSignUpInput) {
         const username = yield* validate(input.username);
 
-        if (Option.isSome(yield* lookupIdentifier(identifiers, "username", username))) {
+        if (Option.isSome(yield* Identifier.lookupIdentifier(identifiers, "username", username))) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
 
@@ -228,7 +220,9 @@ const make = (
         // silently leave a fresh sign-up's username unclaimed.
         const standIn = yield* answeredByStandIn(identifiers, users, result, input.email);
         if (standIn) {
-          if (Option.isSome(yield* lookupIdentifier(identifiers, "username", username))) {
+          if (
+            Option.isSome(yield* Identifier.lookupIdentifier(identifiers, "username", username))
+          ) {
             return yield* new UsernameError({ message: "Username is already taken" });
           }
           return result;
@@ -237,9 +231,9 @@ const make = (
         // Usernames carry no external proof-of-ownership, so the identifier
         // is created verified.
         const now = yield* DateTime.nowAsDate;
-        yield* claimIdentifier(
+        yield* Identifier.claimIdentifier(
           identifiers,
-          makeIdentifier({
+          Identifier.makeIdentifier({
             userId: result.user.id,
             type: "username",
             value: username,
@@ -250,7 +244,7 @@ const make = (
           Effect.catchTags({
             IdentifierTakenError: () =>
               Effect.fail(new UsernameError({ message: "Username is already taken" })),
-            IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+            IdentifierRefusedError: (error) => Effect.fail(Identifier.refusalAuthError(error)),
           }),
         );
 
@@ -268,7 +262,7 @@ const make = (
           return yield* invalid();
         }
 
-        const identifier = yield* lookupIdentifier(identifiers, "username", username);
+        const identifier = yield* Identifier.lookupIdentifier(identifiers, "username", username);
         const found = Option.isNone(identifier)
           ? Option.none<Types.User>()
           : yield* users.get(identifier.value.userId);
@@ -300,10 +294,10 @@ const make = (
 
         if (requireEmailVerification) {
           const userIdentifiers = yield* identifiers.listByUser(user.id);
-          if (Option.isNone(primaryEmail(userIdentifiers))) {
+          if (Option.isNone(Identifier.primaryEmail(userIdentifiers))) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
-              email: Option.getOrElse(anyEmailValue(userIdentifiers), () => ""),
+              email: Option.getOrElse(Identifier.anyEmailValue(userIdentifiers), () => ""),
             });
           }
         }
@@ -349,7 +343,7 @@ const make = (
       ) {
         const username = yield* validate(rawUsername);
 
-        const existing = yield* lookupIdentifier(identifiers, "username", username);
+        const existing = yield* Identifier.lookupIdentifier(identifiers, "username", username);
         if (Option.exists(existing, (held) => held.userId !== userId)) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
@@ -365,14 +359,20 @@ const make = (
           { concurrency: 1, discard: true },
         );
         const now = yield* DateTime.nowAsDate;
-        return yield* claimIdentifier(
+        return yield* Identifier.claimIdentifier(
           identifiers,
-          makeIdentifier({ userId, type: "username", value: username, verified: true, now }),
+          Identifier.makeIdentifier({
+            userId,
+            type: "username",
+            value: username,
+            verified: true,
+            now,
+          }),
         ).pipe(
           Effect.catchTags({
             IdentifierTakenError: () =>
               Effect.fail(new UsernameError({ message: "Username is already taken" })),
-            IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
+            IdentifierRefusedError: (error) => Effect.fail(Identifier.refusalAuthError(error)),
           }),
           Effect.asVoid,
         );

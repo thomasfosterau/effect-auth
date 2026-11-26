@@ -8,12 +8,12 @@ import * as Errors from "../Errors.ts";
 import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
 import { tokenHasher } from "../TokenHash.ts";
-import { makeDetachedSend } from "../DeliveryScheduler.ts";
+import * as DeliveryScheduler from "../DeliveryScheduler.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
-import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
+import { buildRecipientSendGate } from "../RecipientSendLimit.ts";
 import type { RecipientSendLimit } from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
 import { normalizeEmail } from "../utils.ts";
@@ -192,8 +192,8 @@ export const make = (
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
     const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
-    const detached = yield* makeDetachedSend;
-    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
+    const recipientSendGate = yield* buildRecipientSendGate(config.recipientSendLimit);
 
     const generateResetToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 

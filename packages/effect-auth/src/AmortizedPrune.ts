@@ -7,7 +7,7 @@ import * as Arr from "effect/Array";
  * entries). Called on every write, it costs amortized O(1) and keeps an
  * in-process store bounded by its live entries.
  */
-export const makeAmortizedPrune = <K, V>(
+export const amortizedPrune = <K, V>(
   map: MutableHashMap.MutableHashMap<K, V>,
   floor = 1024,
 ): ((isStale: (value: V, key: K) => boolean) => void) => {

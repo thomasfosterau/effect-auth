@@ -25,7 +25,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { makeQuery, type Query } from "./internal.ts";
+import { queryRunner, type Query } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ export const make = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
     const column = identifiers.columns;
     const table = identifiers.table;
@@ -207,7 +207,7 @@ const withIdentifierTable = <A>(
   build: (query: Query, identifiers: IdentifierSchema) => A,
 ): Effect.Effect<A, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) =>
-    build(makeQuery(handle), resolveSchema(schema).identifiers),
+    build(queryRunner(handle), resolveSchema(schema).identifiers),
   );
 
 /** `${type} ${value}` — the composite key, flattened for `Map` lookups. */

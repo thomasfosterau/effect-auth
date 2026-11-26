@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { DeliveryScheduler } from "../DeliveryScheduler.ts";
 import { RateLimitError } from "../Errors.ts";
-import { type AuthenticateAttempt, Hooks, makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { inlineDeliveryScheduler } from "./Delivery.ts";
 
 /**
@@ -17,11 +17,11 @@ import { inlineDeliveryScheduler } from "./Delivery.ts";
  * inline delivery scheduler the passwordless suites run their sends on.
  */
 export const authenticateGate = (
-  seen: Array<AuthenticateAttempt>,
+  seen: Array<Hooks.AuthenticateAttempt>,
   refuse: boolean,
-): Layer.Layer<Hooks | DeliveryScheduler> =>
+): Layer.Layer<Hooks.Hooks | DeliveryScheduler> =>
   Layer.merge(
-    makePlugin({
+    Hooks.makePlugin({
       beforeAuthenticate: (attempt) =>
         Effect.suspend(() => {
           seen.push(attempt);
@@ -29,6 +29,6 @@ export const authenticateGate = (
             ? Effect.fail(new RateLimitError({ message: "refused by the gate", key: "gate" }))
             : Effect.succeed(attempt);
         }),
-    }).pipe(Layer.provide(Hooks.Default)),
+    }).pipe(Layer.provide(Hooks.Hooks.Default)),
     inlineDeliveryScheduler,
   );

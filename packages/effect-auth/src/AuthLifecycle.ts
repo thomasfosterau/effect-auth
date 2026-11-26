@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
-import { makeDetachedSend } from "./DeliveryScheduler.ts";
+import * as DeliveryScheduler from "./DeliveryScheduler.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { isRecipientSendCapped } from "./RecipientSendLimit.ts";
 import {
@@ -233,7 +233,7 @@ export const make = (
       passwords: { clearPasswordHash: emailPassword.clearPassword },
       sessions: sessionManager,
     });
-    const detached = yield* makeDetachedSend;
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
     const serverOnly = userService.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES;
 
     return {

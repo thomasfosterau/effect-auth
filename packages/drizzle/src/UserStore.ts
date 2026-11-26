@@ -21,7 +21,7 @@ import {
   type UserSchema,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { completeById, makeQuery } from "./internal.ts";
+import { completeById, queryRunner } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ type PromotedFields = { readonly [key: PromotedKey]: PromotedValue | undefined }
  * per promoted attribute column.
  *
  * The promoted entries ride along under {@link promotedKey}s the row type does
- * not name, and {@link makeToUser} reads them back out.
+ * not name, and {@link userFromRow} reads them back out.
  *
  * @internal Also read back by `EmailPasswordStore.createUser`.
  */
@@ -62,7 +62,7 @@ export const selection = (users: UserSchema): UserColumns => {
  * it replaces any value the `jsonb` bag holds under the same key, and a `NULL`
  * column leaves the key absent.
  */
-export const makeToUser =
+export const userFromRow =
   (users: UserSchema) =>
   (row: UserRow): Auth.User => {
     // A users table with no mapped attribute bag reads back `undefined` here.
@@ -102,12 +102,12 @@ export const make = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.UserStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const users: UserSchema = resolveSchema(schema).users;
     const column = users.columns;
     const table = users.table;
     const projection = selection(users);
-    const toUser = makeToUser(users);
+    const toUser = userFromRow(users);
 
     const byId = (
       userId: string,
@@ -159,12 +159,12 @@ export const makeResolver = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<RequestResolver.RequestResolver<UserRequest>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
-    const query = makeQuery(handle);
+    const query = queryRunner(handle);
     const users: UserSchema = resolveSchema(schema).users;
     const column = users.columns;
     const table = users.table;
     const projection = selection(users);
-    const toUser = makeToUser(users);
+    const toUser = userFromRow(users);
 
     return RequestResolver.make<UserRequest>((entries) =>
       completeById(

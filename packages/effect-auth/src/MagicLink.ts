@@ -18,11 +18,11 @@ import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "./Identifier.ts";
 import { type CreateUserResult, type NewUserIdentifier, UserStore } from "./UserStore.ts";
-import { makeDetachedSend } from "./DeliveryScheduler.ts";
+import * as DeliveryScheduler from "./DeliveryScheduler.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { RateLimitStore } from "./RateLimit.ts";
-import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
+import { buildRecipientSendGate } from "./RecipientSendLimit.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
 import {
@@ -255,7 +255,7 @@ export const make = (
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const disableSignUp = config.disableSignUp ?? false;
     const resendCooldown = config.resendCooldown ?? 60 * 1000; // 60 s default; 0 turns it off
-    const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
+    const recipientSendGate = yield* buildRecipientSendGate(config.recipientSendLimit);
     const hashToken = yield* tokenHasher;
 
     const store = yield* MagicLinkStore;
@@ -271,7 +271,7 @@ export const make = (
     });
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
-    const detached = yield* makeDetachedSend;
+    const detached = yield* DeliveryScheduler.makeDetachedSend;
 
     return {
       send: Effect.fn("MagicLinkService.send")(function* (

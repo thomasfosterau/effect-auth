@@ -22,9 +22,9 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { DrizzleDatabase } from "./Database.ts";
-import { makeQuery, type Query, selectOne } from "./internal.ts";
+import { queryRunner, type Query, selectOne } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import { makeToUser, selection } from "./UserStore.ts";
+import { userFromRow, selection } from "./UserStore.ts";
 
 /**
  * Each promoted attribute's column, by the key it has on the table object
@@ -103,12 +103,12 @@ export const make = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.Email.EmailPasswordStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const users = resolveSchema(schema).users;
     const password = yield* passwordColumn(users);
     const column = users.columns;
     const projection = selection(users);
-    const toUser = makeToUser(users);
+    const toUser = userFromRow(users);
     const keys = promotedKeys(users);
 
     const readUser = (userId: string) =>

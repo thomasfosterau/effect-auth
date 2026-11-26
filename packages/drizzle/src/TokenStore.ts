@@ -20,7 +20,7 @@ import {
   writeValues,
 } from "./Columns.ts";
 import { type DrizzleSelected, DrizzleDatabase } from "./Database.ts";
-import { affectedRows, makeQuery } from "./internal.ts";
+import { affectedRows, queryRunner } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import type { TokenPurpose } from "./Schema.ts";
 
@@ -66,7 +66,7 @@ const makeFor = (
   tables: TokenTableInput,
 ): Effect.Effect<TokenStoreShape<TokenRecord>, never, DrizzleDatabase> =>
   Effect.map(DrizzleDatabase, (handle) => {
-    const query = makeQuery(handle);
+    const query = queryRunner(handle);
     const schema = resolveTokenTable(tables);
     const table = schema.table;
     const column = schema.columns;

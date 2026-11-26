@@ -14,20 +14,20 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import { resolveSchema, type SchemaInput, type UserSchema, writeValues } from "./Columns.ts";
 import { DrizzleDatabase } from "./Database.ts";
 import { promotedKeys, splitAttributes } from "./EmailPasswordStore.ts";
-import { makeQuery, selectOne } from "./internal.ts";
+import { queryRunner, selectOne } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
-import { makeToUser, selection } from "./UserStore.ts";
+import { userFromRow, selection } from "./UserStore.ts";
 
 /** Build a `UserServiceStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   schema: SchemaInput = defaultTables,
 ): Effect.Effect<typeof Auth.UserServiceStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const users: UserSchema = resolveSchema(schema).users;
     const column = users.columns;
     const projection = selection(users);
-    const toUser = makeToUser(users);
+    const toUser = userFromRow(users);
     const keys = promotedKeys(users);
     // Every promoted column, cleared: what a user without that attribute writes.
     const cleared = R.fromEntries(R.values(keys).map((key) => [key, null] as const));

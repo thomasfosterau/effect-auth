@@ -28,7 +28,7 @@ import {
   resolveRateLimitTable,
   writeValues,
 } from "./Columns.ts";
-import { makeQuery } from "./internal.ts";
+import { queryRunner } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 
 /** What a counter read projects, under the store's own field names. */
@@ -86,7 +86,7 @@ export const make = (
   tables: RateLimitTableInput = defaultTables,
 ): Effect.Effect<typeof Auth.RateLimitStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const schema = resolveRateLimitTable(tables);
     const table = schema.table;
     const column = schema.columns;
@@ -191,7 +191,7 @@ export const purgeExpired = (
   Effect.gen(function* () {
     const limit = options?.limit;
     yield* checkLimit(limit);
-    const query = makeQuery(yield* DrizzleDatabase);
+    const query = queryRunner(yield* DrizzleDatabase);
     const schema = resolveRateLimitTable(tables);
     const table = schema.table;
     const column = schema.columns;
