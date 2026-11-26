@@ -122,6 +122,8 @@ export interface CreateVerificationOptions {
    * a failed send does not fail the call. Sign-up sets it: under
    * `antiEnumeration` an address another user holds is answered without this
    * send, so an inline one would make a fresh sign-up slower than a duplicate.
+   * `POST /email-verifications` sets it too: only an unverified account gets a
+   * message there, so an inline send would answer it later, or with a `500`.
    */
   readonly offResponsePath?: boolean | undefined;
 }
