@@ -308,10 +308,7 @@ export class PolicyStore extends Context.Service<
     ) => Effect.Effect<Policy.DeclarativePolicy | null, Errors.AuthError>;
 
     /** Every stored policy (excluding template-linked ones). */
-    readonly listPolicies: () => Effect.Effect<
-      ReadonlyArray<Policy.DeclarativePolicy>,
-      Errors.AuthError
-    >;
+    readonly listPolicies: Effect.Effect<ReadonlyArray<Policy.DeclarativePolicy>, Errors.AuthError>;
 
     /** Persist a new policy. Fails when `policy.id` is already taken. */
     readonly createPolicy: (
@@ -330,7 +327,7 @@ export class PolicyStore extends Context.Service<
     readonly getTemplate: (id: string) => Effect.Effect<PolicyTemplate | null, Errors.AuthError>;
 
     /** Every stored template. */
-    readonly listTemplates: () => Effect.Effect<ReadonlyArray<PolicyTemplate>, Errors.AuthError>;
+    readonly listTemplates: Effect.Effect<ReadonlyArray<PolicyTemplate>, Errors.AuthError>;
 
     /** Persist a new template. Fails when `template.id` is already taken. */
     readonly createTemplate: (
@@ -387,11 +384,11 @@ export const effectivePolicies = (
   store: typeof PolicyStore.Service,
 ): Effect.Effect<ReadonlyArray<Policy.DeclarativePolicy>, Errors.AuthError> =>
   Effect.gen(function* () {
-    const stored = yield* store.listPolicies();
+    const stored = yield* store.listPolicies;
     const links = yield* store.listLinks();
     // One `listTemplates` for every link, not a `getTemplate` per link.
     const templates = MutableHashMap.fromIterable(
-      Arr.map(yield* store.listTemplates(), (found) => [found.id, found] as const),
+      Arr.map(yield* store.listTemplates, (found) => [found.id, found] as const),
     );
     const linked = yield* Effect.forEach(
       links,
@@ -484,13 +481,13 @@ export const memoryPolicyStore = (
 
   return {
     getPolicy: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(policies, id))),
-    listPolicies: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(policies))),
+    listPolicies: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(policies))),
     createPolicy: (policy) => bounded("Policy", policy, insert(policies, "Policy", policy)),
     updatePolicy: (policy) => bounded("Policy", policy, replace(policies, policy)),
     deletePolicy: (id) => Effect.sync(() => void MutableHashMap.remove(policies, id)),
 
     getTemplate: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(templates, id))),
-    listTemplates: () => Effect.sync(() => Arr.fromIterable(MutableHashMap.values(templates))),
+    listTemplates: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(templates))),
     createTemplate: (value) =>
       bounded("Policy template", value, insert(templates, "Policy template", value)),
     updateTemplate: (value) => bounded("Policy template", value, replace(templates, value)),

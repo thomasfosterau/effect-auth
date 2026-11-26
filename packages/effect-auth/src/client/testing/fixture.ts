@@ -243,7 +243,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   }> = [];
 
   const anonymousUserStore: typeof Auth.AnonymousUserStore.Service = {
-    createAnonymousUser: () => Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
+    createAnonymousUser: Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
     deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 

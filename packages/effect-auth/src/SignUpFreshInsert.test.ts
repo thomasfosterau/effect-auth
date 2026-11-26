@@ -385,7 +385,7 @@ const cases: ReadonlyArray<Case> = [
               clientId: ONE_TAP_CLIENT,
               jwksEndpoint: ONE_TAP_JWKS,
             });
-            const nonce = yield* service.createNonce();
+            const nonce = yield* service.createNonce;
             const error = yield* Effect.flip(service.signIn(signGoogleCredential(nonce), nonce));
             return error._tag;
           }).pipe(Effect.provide(layer)),
@@ -412,7 +412,7 @@ const cases: ReadonlyArray<Case> = [
               Arr.fromIterable(MutableHashMap.values(providers)).find((p) => p.domain === domain) ??
                 null,
             ),
-          list: () => Effect.succeed(Arr.fromIterable(MutableHashMap.values(providers))),
+          list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(providers))),
         }),
         Layer.succeed(OAuthStateStore)({
           create: (state) =>

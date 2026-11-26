@@ -148,7 +148,7 @@ const jwtService = (algorithm) =>
       const { token } = yield* jwt.sign({ id: "u-1", createdAt: now, updatedAt: now, attributes: {} });
       const claims = yield* jwt.verify(token);
       const tampered = yield* Effect.result(jwt.verify(tamper(token)));
-      return { token, sub: claims.sub, rejectsTampered: tampered._tag === "Failure", jwks: yield* jwt.getJwks() };
+      return { token, sub: claims.sub, rejectsTampered: tampered._tag === "Failure", jwks: yield* jwt.getJwks };
     }).pipe(
       Effect.provide(
         JwtService.layer({ issuer: "https://app.example.com", algorithm }).pipe(

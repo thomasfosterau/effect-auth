@@ -71,15 +71,14 @@ const sent = (box: MutableHashMap.MutableHashMap<string, string>, key: string): 
 const anonymousUsers = Layer.effect(
   AnonymousUserStore,
   Effect.map(UserServiceStore, (users) => ({
-    createAnonymousUser: () =>
-      Effect.flatMap(DateTime.nowAsDate, (now) =>
-        users.update({
-          id: globalThis.crypto.randomUUID(),
-          createdAt: now,
-          updatedAt: now,
-          attributes: { isAnonymous: true },
-        }),
-      ),
+    createAnonymousUser: Effect.flatMap(DateTime.nowAsDate, (now) =>
+      users.update({
+        id: globalThis.crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+        attributes: { isAnonymous: true },
+      }),
+    ),
     deleteUser: users.delete,
   })),
 );

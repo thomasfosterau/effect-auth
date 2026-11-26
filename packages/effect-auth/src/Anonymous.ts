@@ -23,7 +23,7 @@ import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 export class AnonymousUserStore extends Context.Service<
   AnonymousUserStore,
   {
-    readonly createAnonymousUser: () => Effect.Effect<Types.User, Errors.AuthError>;
+    readonly createAnonymousUser: Effect.Effect<Types.User, Errors.AuthError>;
     readonly deleteUser: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/AnonymousUserStore") {}
@@ -123,7 +123,7 @@ const make = (
       signInAnonymous: Effect.fn("AnonymousService.signInAnonymous")(function* (
         sessionAttributes?: Types.Attributes,
       ) {
-        const user = yield* store.createAnonymousUser();
+        const user = yield* store.createAnonymousUser;
         const { session, token } = yield* sessionManager.createSession(user.id, sessionAttributes);
 
         return { user, session, token };

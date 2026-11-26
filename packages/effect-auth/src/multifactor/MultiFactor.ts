@@ -767,7 +767,7 @@ export const make = (
           } satisfies MultiFactorChallenge;
         }).pipe(
           Effect.withSpan(Obs.spanNames.twoFactorChallenge),
-          Effect.tap(() => Obs.recordMultiFactorChallenge()),
+          Effect.tap(() => Obs.recordMultiFactorChallenge),
         ),
       ),
 

@@ -51,7 +51,7 @@ export const makeRecipientSendGate = (
       return () => Effect.void;
     }
     const { max, windowMs } = limit ?? defaultRecipientSendLimit;
-    const limiter = yield* RateLimit.make();
+    const limiter = yield* RateLimit.make;
     const hash = yield* tokenHasher;
     const config: RateLimit.RateLimitConfig = { maxRequests: max, windowMs };
     return (purpose: string, recipient: string) =>

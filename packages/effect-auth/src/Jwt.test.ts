@@ -39,7 +39,7 @@ const keyPairs: JwtKeyPair[] = [];
 const verifyOnly = (pair: GeneratedJwtKeyPair): JwtKeyPair => ({ ...pair, privateKey: "" });
 
 const jwtKeyStore = {
-  getActive: () => Effect.sync(() => keyPairs[keyPairs.length - 1] ?? null),
+  getActive: Effect.sync(() => keyPairs[keyPairs.length - 1] ?? null),
 
   create: (pair: JwtKeyPair) =>
     Effect.sync(() => {
@@ -47,7 +47,7 @@ const jwtKeyStore = {
       return pair;
     }),
 
-  list: () => Effect.sync(() => [...keyPairs]),
+  list: Effect.sync(() => [...keyPairs]),
 };
 
 const storeContext = Context.merge(Context.make(JwtKeyStore, jwtKeyStore), testCryptoContext());
@@ -341,7 +341,7 @@ describe("JwtService", () => {
         yield* store.create(ed25519);
 
         const service = yield* Jwt.make(baseConfig);
-        return yield* service.getJwks();
+        return yield* service.getJwks;
       }),
     );
 
@@ -712,13 +712,13 @@ describe("RemoteJwksVerifier", () => {
   // Isolated key store so beforeEach on the shared store doesn't interfere.
   const remotePairs: JwtKeyPair[] = [];
   const remoteStore = {
-    getActive: () => Effect.sync(() => remotePairs[remotePairs.length - 1] ?? null),
+    getActive: Effect.sync(() => remotePairs[remotePairs.length - 1] ?? null),
     create: (pair: JwtKeyPair) =>
       Effect.sync(() => {
         remotePairs.push(pair);
         return pair;
       }),
-    list: () => Effect.sync(() => [...remotePairs]),
+    list: Effect.sync(() => [...remotePairs]),
   };
   const remoteContext = Context.merge(Context.make(JwtKeyStore, remoteStore), testCryptoContext());
   const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | TestCryptoServices>) =>
@@ -786,7 +786,7 @@ describe("RemoteJwksVerifier", () => {
     jwks = await runRemote(
       Effect.gen(function* () {
         const service = yield* Jwt.make(baseConfig);
-        return yield* service.getJwks();
+        return yield* service.getJwks;
       }),
     );
   });

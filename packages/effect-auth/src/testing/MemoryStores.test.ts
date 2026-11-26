@@ -203,10 +203,10 @@ describe("memoryStores", () => {
     });
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const empty = yield* store.getActive();
+        const empty = yield* store.getActive;
         yield* store.create(key("old"));
         yield* store.create(key("new"));
-        return { empty, active: yield* store.getActive(), listed: yield* store.list() };
+        return { empty, active: yield* store.getActive, listed: yield* store.list };
       }),
     );
     expect(result.empty).toBeNull();

@@ -110,7 +110,7 @@ export class OidcClientStore extends Context.Service<
     readonly getByClientId: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
     readonly update: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
     readonly delete: (clientId: string) => Effect.Effect<void, AuthError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
+    readonly list: Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
   }
 >()("@effect-auth/OidcClientStore") {}
 
@@ -611,7 +611,7 @@ export class OidcProviderService extends Context.Service<
     readonly getClient: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
 
     /** List registered clients (store-backed only). */
-    readonly listClients: () => Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
+    readonly listClients: Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
 
     /** Update a registered client. Trusted config clients cannot be updated. */
     readonly updateClient: (
@@ -1455,9 +1455,7 @@ export const make = (
 
       getClient: Effect.fn("OidcProviderService.getClient")(getClient),
 
-      listClients: Effect.fn("OidcProviderService.listClients")(function* () {
-        return yield* clientStore.list();
-      }),
+      listClients: clientStore.list.pipe(Effect.withSpan("OidcProviderService.listClients")),
 
       updateClient: Effect.fn("OidcProviderService.updateClient")(function* (
         clientId: string,
