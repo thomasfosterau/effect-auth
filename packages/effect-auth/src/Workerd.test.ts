@@ -541,6 +541,8 @@ const nodeEd25519Signature = (token: string, privateKeyPem: string): string =>
     ),
   );
 
+const encode = (text: string) => Base64Url.encode(new TextEncoder().encode(text));
+
 /** A compact JWS signed in Node with a `KeyObject`. */
 const nodeSigned = (algorithm: JwsAlgorithm) => {
   const { publicKey, privateKey } =
@@ -549,7 +551,6 @@ const nodeSigned = (algorithm: JwsAlgorithm) => {
       : algorithm === "EdDSA"
         ? crypto.generateKeyPairSync("ed25519")
         : crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const encode = (text: string) => Base64Url.encode(new TextEncoder().encode(text));
   const input = `${encode(`{"alg":"${algorithm}"}`)}.${encode(`node.signed-${algorithm}`)}`;
   const data = new TextEncoder().encode(input);
   const signature =
@@ -674,15 +675,16 @@ describe.each(DATE_NAMES)("workerd at its %s compatibility date", (date) => {
     expect(valueOf(run.der)).toEqual({ isEs256Verified: true, isEdDsaVerified: true });
   });
 
+  // One hash and two verifies, about 75 ms each in local workerd: inside
+  // Workers' limits, but a large share of a request's CPU. The bound leaves
+  // room for a slow CI runner; the first call warms the isolate.
+  const timed = async () => {
+    const started = performance.now();
+    const result = await callWorker(PasswordRun, date, "/pbkdf2");
+    return { result, elapsed: performance.now() - started };
+  };
+
   it("hashes with PBKDF2 at its default 600,000 iterations within a Worker's CPU budget", async () => {
-    // One hash and two verifies, about 75 ms each in local workerd: inside
-    // Workers' limits, but a large share of a request's CPU. The bound leaves
-    // room for a slow CI runner; the first call warms the isolate.
-    const timed = async () => {
-      const started = performance.now();
-      const result = await callWorker(PasswordRun, date, "/pbkdf2");
-      return { result, elapsed: performance.now() - started };
-    };
     await timed();
     const { result, elapsed } = await timed();
     expect(result).toMatchObject({ isVerified: true, isWrongRejected: true });

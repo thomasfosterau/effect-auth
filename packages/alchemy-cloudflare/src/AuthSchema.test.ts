@@ -137,6 +137,32 @@ const makeCloudflare = () => {
 };
 const STAGE = "test";
 
+const withRuntime = <A, E>(effect: Effect.Effect<A, E, Stage>): Promise<A> =>
+  Effect.runPromise(
+    assumeProvided(
+      // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
+      // these deploys call `apply` directly and never ask for approval.
+      effect.pipe(
+        Effect.provideService(Stage, STAGE),
+        provideFreshArtifactStore,
+        Effect.provideService(AdoptPolicy, false),
+        Effect.provideService(AuthProviders, {}),
+        // The order of the provides below is load-bearing — each one supplies
+        // requirements of the layers provided before it, mirroring alchemy's
+        // own runtime layering — so they cannot collapse into a single merged
+        // provide.
+        // layerMergeAllWithDependencies: this layering predates the rc.118 move and
+        // is only newly flagged by @effect/language-service 0.87.3; left as is.
+        // @effect-diagnostics-next-line multipleEffectProvide:off layerMergeAllWithDependencies:off
+        Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
+        Effect.provide(Layer.provide(ProfileStoreLive, platform)),
+        Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
+        Effect.provide(platform),
+        Effect.scoped,
+      ),
+    ),
+  );
+
 /**
  * A stack with its own in-memory state, deployable more than once. Pass an
  * existing `store` to drive the same state with a differently-built provider,
@@ -147,32 +173,6 @@ const makeEngine = (cloudflare: ReturnType<typeof makeCloudflare>) => {
   const store: Record<string, never> = {};
   const state = Layer.succeed(State.State, State.InMemoryService(store));
   const providers = cloudflare.providers;
-
-  const withRuntime = <A, E>(effect: Effect.Effect<A, E, Stage>): Promise<A> =>
-    Effect.runPromise(
-      assumeProvided(
-        // SAFETY: `LoggingCli` asks for a `Terminal` only to prompt in `approvePlan`;
-        // these deploys call `apply` directly and never ask for approval.
-        effect.pipe(
-          Effect.provideService(Stage, STAGE),
-          provideFreshArtifactStore,
-          Effect.provideService(AdoptPolicy, false),
-          Effect.provideService(AuthProviders, {}),
-          // The order of the provides below is load-bearing — each one supplies
-          // requirements of the layers provided before it, mirroring alchemy's
-          // own runtime layering — so they cannot collapse into a single merged
-          // provide.
-          // layerMergeAllWithDependencies: this layering predates the rc.118 move and
-          // is only newly flagged by @effect/language-service 0.87.3; left as is.
-          // @effect-diagnostics-next-line multipleEffectProvide:off layerMergeAllWithDependencies:off
-          Effect.provide(Layer.mergeAll(LoggingCli, AlchemyContextLive)),
-          Effect.provide(Layer.provide(ProfileStoreLive, platform)),
-          Effect.provide(Layer.provide(CredentialsStoreLive, platform)),
-          Effect.provide(platform),
-          Effect.scoped,
-        ),
-      ),
-    );
 
   return {
     /** `alchemy deploy` for one program. */

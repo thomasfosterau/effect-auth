@@ -678,6 +678,33 @@ describe("PhoneOtpService", () => {
   });
 });
 
+const recordOf = (phoneNumber: string) => (): RecordState | null => {
+  const record = Option.getOrUndefined(MutableHashMap.get(records, key(phoneNumber, "sign-in")));
+  return record === undefined
+    ? null
+    : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
+};
+
+const runPromise = <A, E>(
+  program: Effect.Effect<
+    A,
+    E,
+    | PhoneOtpStore
+    | PhoneOtpUserStore
+    | IdentifierStore
+    | UserStore
+    | SessionService
+    | Hooks
+    | RateLimitStore
+    | TestCryptoServices
+  >,
+) =>
+  makeTestContext().then((context) =>
+    Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(TestHooks))),
+  );
+
+const failureAnswer = (message: string) => ({ _tag: "Failure", error: "PhoneOtpError", message });
+
 // With sign-up disabled, `send` hides whether the number has an account,
 // so verification must answer a number that holds an outstanding code exactly
 // as it answers one that holds a marker record or nothing at all: through
@@ -706,13 +733,6 @@ describe("PhoneOtpService verification where send hides the account", () => {
     vi.useRealTimers();
   });
 
-  const recordOf = (phoneNumber: string) => (): RecordState | null => {
-    const record = Option.getOrUndefined(MutableHashMap.get(records, key(phoneNumber, "sign-in")));
-    return record === undefined
-      ? null
-      : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
-  };
-
   /** Run `sequence` for `phoneNumber`, requesting a code first when `send` is set. */
   const run = (
     disableSignUp: boolean,
@@ -735,24 +755,6 @@ describe("PhoneOtpService verification where send hides the account", () => {
         record: recordOf(phoneNumber),
       });
     });
-
-  const runPromise = <A, E>(
-    program: Effect.Effect<
-      A,
-      E,
-      | PhoneOtpStore
-      | PhoneOtpUserStore
-      | IdentifierStore
-      | UserStore
-      | SessionService
-      | Hooks
-      | RateLimitStore
-      | TestCryptoServices
-    >,
-  ) =>
-    makeTestContext().then((context) =>
-      Effect.runPromise(program.pipe(Effect.provide(context), Effect.provide(TestHooks))),
-    );
 
   it.each(verifySequences)("answers %s alike for every number", async (sequence) => {
     const { known, unknown, unrequested } = await runPromise(
@@ -795,16 +797,14 @@ describe("PhoneOtpService verification where send hides the account", () => {
         };
       }),
     );
-
-    const answer = (message: string) => ({ _tag: "Failure", error: "PhoneOtpError", message });
     expect(wrong.slice(1).map((step) => step.answer)).toEqual([
       invalid,
       invalid,
-      answer("Too many attempts"),
+      failureAnswer("Too many attempts"),
       invalid,
     ]);
     expect(expired.slice(1).map((step) => step.answer)).toEqual([
-      answer("OTP has expired"),
+      failureAnswer("OTP has expired"),
       invalid,
     ]);
   });
@@ -864,38 +864,37 @@ describe("PhoneOtpService verification where send hides the account", () => {
         : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
     };
 
+    const run = (sequence: (typeof verifySequences)[number]) =>
+      Effect.gen(function* () {
+        const service = yield* PhoneOtp.make({
+          maxAttempts,
+          expiresIn,
+          disableSignUp: true,
+          sendOtp: recordingSend,
+        });
+        return yield* runVerifySequence(sequence, {
+          maxAttempts,
+          expiresIn,
+          send: service.send(phone, "phone-verification"),
+          verify: service.verifyPhoneNumber(created.id, phone, wrongCode),
+          record: recordState,
+        });
+      });
+
     const { wrong, expired } = await runPromise(
       Effect.gen(function* () {
-        const run = (sequence: (typeof verifySequences)[number]) =>
-          Effect.gen(function* () {
-            const service = yield* PhoneOtp.make({
-              maxAttempts,
-              expiresIn,
-              disableSignUp: true,
-              sendOtp: recordingSend,
-            });
-            return yield* runVerifySequence(sequence, {
-              maxAttempts,
-              expiresIn,
-              send: service.send(phone, "phone-verification"),
-              verify: service.verifyPhoneNumber(created.id, phone, wrongCode),
-              record: recordState,
-            });
-          });
         return { wrong: yield* run("wrong codes"), expired: yield* run("expired code") };
       }),
     );
-
-    const answer = (message: string) => ({ _tag: "Failure", error: "PhoneOtpError", message });
     expect(wrong.slice(1).map((step) => step.answer)).toEqual([
-      answer("Invalid or expired OTP"),
-      answer("Invalid or expired OTP"),
-      answer("Too many attempts"),
-      answer("Invalid or expired OTP"),
+      failureAnswer("Invalid or expired OTP"),
+      failureAnswer("Invalid or expired OTP"),
+      failureAnswer("Too many attempts"),
+      failureAnswer("Invalid or expired OTP"),
     ]);
     expect(expired.slice(1).map((step) => step.answer)).toEqual([
-      answer("OTP has expired"),
-      answer("Invalid or expired OTP"),
+      failureAnswer("OTP has expired"),
+      failureAnswer("Invalid or expired OTP"),
     ]);
   });
 });

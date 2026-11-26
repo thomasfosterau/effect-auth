@@ -436,19 +436,19 @@ const allowedActions = async (
 const billingAsAdmin = Entity.entity(billing, { attributes: { role: "admin" } });
 const aliceAsAdmin = Entity.entity(alice, { attributes: { role: "admin" } });
 
+/** An owned row with the given visibility, owned by `owner`. */
+const ownedRow = (
+  id: string,
+  owner: Entity.EntityRef,
+  visibility: OwnedAccess.Visibility,
+  draft = false,
+) =>
+  Entity.entity(Entity.ref("Owned", id), {
+    attributes: { owner: Entity.entityValue(owner), visibility, draft, unapproved: false },
+  });
+
 describe("a system principal is denied under every library policy set with no grant", () => {
   const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
-
-  /** An owned row with the given visibility, owned by `owner`. */
-  const ownedRow = (
-    id: string,
-    owner: Entity.EntityRef,
-    visibility: OwnedAccess.Visibility,
-    draft = false,
-  ) =>
-    Entity.entity(Entity.ref("Owned", id), {
-      attributes: { owner: Entity.entityValue(owner), visibility, draft, unapproved: false },
-    });
 
   it("OwnedAccess.policies: no action on a public, followers, private or draft row", async () => {
     // Every arm's condition holds for the system principal: the row is public,
@@ -576,16 +576,17 @@ describe("a system principal is denied under every library policy set with no gr
       }),
     });
     const value = { id: "a-1", secret: "s3cret" };
-    const as = <A, E>(
-      effect: Effect.Effect<A, E, Authorizer.CurrentPrincipal>,
-      who: Entity.EntityRef,
-    ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
     expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual({ id: "a-1" });
     const refused = await as(Effect.result(Schema.decodeEffect(View)(value)), billing);
     expect(Result.isFailure(refused)).toBe(true);
     expect(await as(Schema.encodeEffect(View)(value), alice)).toEqual(value);
   });
 });
+
+const as = <A, E>(
+  effect: Effect.Effect<A, E, Authorizer.CurrentPrincipal>,
+  who: Entity.EntityRef,
+) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
 
 describe("with an explicit grant, a system principal gets exactly that", () => {
   const owned = OwnedAccess.make({ guards, viewPrivate: Axes.corpusWrite });
@@ -683,33 +684,29 @@ describe("with an explicit grant, a system principal gets exactly that", () => {
       }),
     });
     const value = { id: "a-1", secret: "s3cret" };
-    const as = <A, E>(
-      effect: Effect.Effect<A, E, Authorizer.CurrentPrincipal>,
-      who: Entity.EntityRef,
-    ) => Effect.runPromise(effect.pipe(Authorizer.CurrentPrincipal.provide(who)));
     expect(await as(Schema.encodeEffect(View)(value), billing)).toEqual(value);
     expect(await as(Schema.decodeEffect(View)(value), billing)).toEqual(value);
     expect(await as(Schema.encodeEffect(View)(value), retry)).toEqual({ id: "a-1" });
   });
 });
 
+const field = (policies: ReadonlyArray<Policy.Policy>) =>
+  Schema.Struct({
+    secret: protectedField(Schema.String, {
+      policies,
+      action: "invoice:charge",
+      resource: invoice,
+    }),
+  });
+
+const encodeLogged = (policies: ReadonlyArray<Policy.Policy>, who: Entity.EntityRef) =>
+  captureLogs(
+    Schema.encodeEffect(field(policies))({ secret: "s" }).pipe(
+      Authorizer.CurrentPrincipal.provide(who),
+    ),
+  );
+
 describe("protectedField decisions about a system principal are audited by name", () => {
-  const field = (policies: ReadonlyArray<Policy.Policy>) =>
-    Schema.Struct({
-      secret: protectedField(Schema.String, {
-        policies,
-        action: "invoice:charge",
-        resource: invoice,
-      }),
-    });
-
-  const encodeLogged = (policies: ReadonlyArray<Policy.Policy>, who: Entity.EntityRef) =>
-    captureLogs(
-      Schema.encodeEffect(field(policies))({ secret: "s" }).pipe(
-        Authorizer.CurrentPrincipal.provide(who),
-      ),
-    );
-
   it("an allow is logged at info with the granting policy", async () => {
     const records = await encodeLogged([chargeInvoices], billing);
     const decision = records.find((record) => record.text.includes("authorization.decision"));

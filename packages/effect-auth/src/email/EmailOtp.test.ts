@@ -1155,6 +1155,34 @@ describe("EmailOtpService", () => {
   );
 });
 
+const recordOf = (email: string, purpose: EmailOtpPurpose) => (): RecordState | null => {
+  const record = Option.getOrUndefined(MutableHashMap.get(otpRecords, recordKey(email, purpose)));
+  return record === undefined
+    ? null
+    : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
+};
+
+const runPromise = <A, E>(
+  program: Effect.Effect<
+    A,
+    E,
+    | EmailOtpStore
+    | EmailOtpUserStore
+    | IdentifierStore
+    | UserStore
+    | SessionService
+    | EmailPasswordStore
+    | Hooks
+    | RateLimitStore
+    | TestCryptoServices
+  >,
+) =>
+  makeTestContext().then((context) =>
+    Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
+  );
+
+const failureAnswer = (message: string) => ({ _tag: "Failure", error: "EmailOtpError", message });
+
 // Where `send` hides whether the email has an account, verification must
 // answer an email that holds an outstanding code exactly as it answers one
 // that holds a marker record or nothing at all: through wrong codes, the
@@ -1191,13 +1219,6 @@ describe("EmailOtpService verification where send hides the account", () => {
     vi.useRealTimers();
   });
 
-  const recordOf = (email: string, purpose: EmailOtpPurpose) => (): RecordState | null => {
-    const record = Option.getOrUndefined(MutableHashMap.get(otpRecords, recordKey(email, purpose)));
-    return record === undefined
-      ? null
-      : { attempts: record.attempts, lifetime: record.expiresAt - record.createdAt };
-  };
-
   /** Run `sequence` for `email`, requesting a code first when `send` is set. */
   const run = (
     config: { readonly purpose: EmailOtpPurpose; readonly disableSignUp: boolean },
@@ -1223,25 +1244,6 @@ describe("EmailOtpService verification where send hides the account", () => {
         record: recordOf(email, config.purpose),
       });
     });
-
-  const runPromise = <A, E>(
-    program: Effect.Effect<
-      A,
-      E,
-      | EmailOtpStore
-      | EmailOtpUserStore
-      | IdentifierStore
-      | UserStore
-      | SessionService
-      | EmailPasswordStore
-      | Hooks
-      | RateLimitStore
-      | TestCryptoServices
-    >,
-  ) =>
-    makeTestContext().then((context) =>
-      Effect.runPromise(Effect.provide(program, context).pipe(Effect.provide(TestHooks))),
-    );
 
   it.each(
     hidden.flatMap((config) =>
@@ -1298,16 +1300,14 @@ describe("EmailOtpService verification where send hides the account", () => {
           };
         }),
       );
-
-      const answer = (message: string) => ({ _tag: "Failure", error: "EmailOtpError", message });
       expect(wrong.slice(1).map((step) => step.answer)).toEqual([
         invalid,
         invalid,
-        answer("Too many attempts"),
+        failureAnswer("Too many attempts"),
         invalid,
       ]);
       expect(expired.slice(1).map((step) => step.answer)).toEqual([
-        answer("OTP has expired"),
+        failureAnswer("OTP has expired"),
         invalid,
       ]);
     },

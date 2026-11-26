@@ -4,10 +4,11 @@ import { Digest } from "effect/crypto";
 import { sha256Hex } from "./testing/Sha256.ts";
 import { constantTimeHashEqual, hashToken, timingSafeEqualBytes } from "./TokenHash.ts";
 
+const digest = (token: string) =>
+  Effect.runPromise(hashToken(token).pipe(Effect.provide(Digest.layerWebCrypto)));
+
 describe("hashToken", () => {
   it("is the SHA-256 hex digest of the token's UTF-8 bytes", async () => {
-    const digest = (token: string) =>
-      Effect.runPromise(hashToken(token).pipe(Effect.provide(Digest.layerWebCrypto)));
     expect(await digest("abc")).toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );

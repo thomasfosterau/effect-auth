@@ -102,7 +102,6 @@ export default defineConfig({
       // reported, a new site is a defect, and once a count reaches zero the
       // line is deleted so the rule is back at `error`. Counts are all sites
       // (sources and tests) when the categories were turned on.
-      "unicorn/consistent-function-scoping": "warn", // 148
       "eslint/no-shadow": "warn", // 120
 
       // Assertion helpers are named `expect<What>` (`expectAgreement`,

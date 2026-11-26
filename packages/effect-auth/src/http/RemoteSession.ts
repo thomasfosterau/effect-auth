@@ -106,6 +106,9 @@ const asFetch =
   (request: Request): Promise<Response> =>
     P.isFunction(fetcher) ? fetcher(request) : fetcher.fetch(request);
 
+const asWebRequest = (...[input, init]: Parameters<typeof globalThis.fetch>): Request =>
+  input instanceof Request && init === undefined ? input : new Request(input, init);
+
 /**
  * An `HttpClient` layer backed by an arbitrary fetch-alike instead of
  * `globalThis.fetch`.
@@ -176,8 +179,6 @@ const asFetch =
  */
 export const layerFetcher = (fetcher: FetcherLike): Layer.Layer<HttpClient.HttpClient> => {
   const send = asFetch(fetcher);
-  const asWebRequest = (...[input, init]: Parameters<typeof globalThis.fetch>): Request =>
-    input instanceof Request && init === undefined ? input : new Request(input, init);
   return Layer.provide(
     FetchHttpClient.layer,
     Layer.succeed(FetchHttpClient.Fetch, (input, init) => send(asWebRequest(input, init))),

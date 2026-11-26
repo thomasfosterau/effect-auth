@@ -26,6 +26,12 @@ const SCRYPT_MAX_P_CAP = 16;
 /** Bytes OpenSSL's scrypt allocates for N, r and p; also the `maxmem` passed to Node. */
 const scryptMemory = (N: number, r: number, p: number): number => 128 * r * (N + p + 2);
 
+// Caps on the parameters `verify` accepts from a stored hash (see scryptHasher).
+// Only a usable configured value may raise a cap: a NaN, Infinity or
+// fractional option (which `hash` refuses anyway) must not turn a cap into
+// NaN or Infinity and so disable it.
+const usable = (n: number): number => (Number.isSafeInteger(n) && n > 0 ? n : 0);
+
 /**
  * scrypt Password Hasher implementing the PasswordHasher trait.
  *
@@ -66,11 +72,6 @@ export const scryptHasher = (options?: {
   const PARALLELIZATION = options?.parallelization ?? 1;
   const KEY_LENGTH = 64;
   const SALT_LENGTH = 16;
-  // Caps on the parameters `verify` accepts from a stored hash (see scryptHasher).
-  // Only a usable configured value may raise a cap: a NaN, Infinity or
-  // fractional option (which `hash` refuses anyway) must not turn a cap into
-  // NaN or Infinity and so disable it.
-  const usable = (n: number): number => (Number.isSafeInteger(n) && n > 0 ? n : 0);
   const MAX_N = Math.max(SCRYPT_MAX_N_CAP, usable(COST));
   const MAX_R = Math.max(SCRYPT_MAX_R_CAP, usable(BLOCK_SIZE));
   const MAX_P = Math.max(SCRYPT_MAX_P_CAP, usable(PARALLELIZATION));

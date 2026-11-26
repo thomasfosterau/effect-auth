@@ -71,6 +71,111 @@ const limit = (key: string, resetAt: number, blockedUntil?: number): RateLimitEn
   ...(blockedUntil !== undefined && { blockedUntil }),
 });
 
+/**
+ * One backend shared by two separately built stores, as two processes
+ * would share Redis: a read suspends after it reads, so read-then-remove interleaves.
+ */
+const sharedBackend = () => {
+  const entries = MutableHashMap.empty<string, string>();
+  const store = KeyValueStore.makeStringOnly({
+    get: (key) =>
+      Effect.sync(() => Option.getOrUndefined(MutableHashMap.get(entries, key))).pipe(
+        Effect.tap(() => Effect.yieldNow),
+      ),
+    set: (key, value) => Effect.sync(() => void MutableHashMap.set(entries, key, value)),
+    remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
+    clear: Effect.sync(() => void MutableHashMap.clear(entries)),
+    size: Effect.sync(() => MutableHashMap.size(entries)),
+    keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
+  });
+  let takes = 0;
+  const take = Layer.succeed(KeyValueStoreTake, {
+    take: (key) =>
+      Effect.sync(() => {
+        takes += 1;
+        const value = Option.getOrUndefined(MutableHashMap.get(entries, key));
+        MutableHashMap.remove(entries, key);
+        return value;
+      }),
+  });
+  return {
+    entries,
+    store: Layer.succeed(KeyValueStore.KeyValueStore)(store),
+    take,
+    takes: () => takes,
+  };
+};
+
+const verification = (token: string, userId: string): EmailVerificationRecord => ({
+  token,
+  userId,
+  email: `${userId}@example.com`,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
+});
+
+const reset = (token: string, userId: string): PasswordResetToken => ({
+  token,
+  userId,
+  email: `${userId}@example.com`,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
+});
+
+const runPurge = <A, E>(
+  effect: Effect.Effect<
+    A,
+    E,
+    | MagicLinkStore
+    | EmailOtpStore
+    | OAuthStateStore
+    | RateLimitStore
+    | KeyValueStore.KeyValueStore
+    | KeyValueStoreKeys
+    | TestClock.TestClock
+  >,
+): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provide(
+        Layer.merge(
+          Layer.provideMerge(
+            Layer.mergeAll(MagicLinkStoreKV, EmailOtpStoreKV, OAuthStateStoreKV, RateLimitStoreKV),
+            layerMemoryKeyValueStore,
+          ),
+          TestClock.layer(),
+        ),
+      ),
+    ),
+  );
+
+const magicLink = (token: string, email: string, expiresAt: number): MagicLinkToken => ({
+  token,
+  email,
+  createdAt: 0,
+  expiresAt,
+});
+
+const otp = (
+  email: string,
+  purpose: EmailOtpRecord["purpose"],
+  expiresAt: number,
+): EmailOtpRecord => ({
+  email,
+  otpHash: "hash",
+  purpose,
+  attempts: 0,
+  createdAt: 0,
+  expiresAt,
+});
+
+const link = (token: string, email: string): MagicLinkToken => ({
+  token,
+  email,
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
+});
+
 describe("KeyValueStores", () => {
   it("exports individual layers", () => {
     expect(OAuthStateStoreKV).toBeDefined();
@@ -182,41 +287,6 @@ describe("KeyValueStores", () => {
       codeVerifier: "verifier",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 600_000,
-    };
-
-    /**
-     * One backend shared by two separately built stores, as two processes
-     * would share Redis: a read suspends after it reads, so read-then-remove interleaves.
-     */
-    const sharedBackend = () => {
-      const entries = MutableHashMap.empty<string, string>();
-      const store = KeyValueStore.makeStringOnly({
-        get: (key) =>
-          Effect.sync(() => Option.getOrUndefined(MutableHashMap.get(entries, key))).pipe(
-            Effect.tap(() => Effect.yieldNow),
-          ),
-        set: (key, value) => Effect.sync(() => void MutableHashMap.set(entries, key, value)),
-        remove: (key) => Effect.sync(() => void MutableHashMap.remove(entries, key)),
-        clear: Effect.sync(() => void MutableHashMap.clear(entries)),
-        size: Effect.sync(() => MutableHashMap.size(entries)),
-        keys: Effect.sync(() => Arr.fromIterable(MutableHashMap.keys(entries))),
-      });
-      let takes = 0;
-      const take = Layer.succeed(KeyValueStoreTake, {
-        take: (key) =>
-          Effect.sync(() => {
-            takes += 1;
-            const value = Option.getOrUndefined(MutableHashMap.get(entries, key));
-            MutableHashMap.remove(entries, key);
-            return value;
-          }),
-      });
-      return {
-        entries,
-        store: Layer.succeed(KeyValueStore.KeyValueStore)(store),
-        take,
-        takes: () => takes,
-      };
     };
 
     /** Consume one state from two stores built apart over one backend. */
@@ -454,14 +524,6 @@ describe("KeyValueStores", () => {
   });
 
   describe("EmailVerificationStoreKV", () => {
-    const verification = (token: string, userId: string): EmailVerificationRecord => ({
-      token,
-      userId,
-      email: `${userId}@example.com`,
-      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 86_400_000,
-    });
-
     it("roundtrips create/get/delete", async () => {
       const record = verification("tok-1", "user-1");
       const result = await run(
@@ -499,14 +561,6 @@ describe("KeyValueStores", () => {
   });
 
   describe("PasswordResetStoreKV", () => {
-    const reset = (token: string, userId: string): PasswordResetToken => ({
-      token,
-      userId,
-      email: `${userId}@example.com`,
-      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
-    });
-
     it("roundtrips and deletes by user id", async () => {
       const result = await run(
         Effect.gen(function* () {
@@ -531,13 +585,6 @@ describe("KeyValueStores", () => {
   });
 
   describe("MagicLinkStoreKV", () => {
-    const link = (token: string, email: string): MagicLinkToken => ({
-      token,
-      email,
-      createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-      expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 300_000,
-    });
-
     it("roundtrips and deletes by email", async () => {
       const result = await run(
         Effect.gen(function* () {
@@ -736,55 +783,6 @@ describe("KeyValueStores", () => {
       rateLimits: 0,
       googleOneTapNonces: 0,
     };
-    const runPurge = <A, E>(
-      effect: Effect.Effect<
-        A,
-        E,
-        | MagicLinkStore
-        | EmailOtpStore
-        | OAuthStateStore
-        | RateLimitStore
-        | KeyValueStore.KeyValueStore
-        | KeyValueStoreKeys
-        | TestClock.TestClock
-      >,
-    ): Promise<A> =>
-      Effect.runPromise(
-        effect.pipe(
-          Effect.provide(
-            Layer.merge(
-              Layer.provideMerge(
-                Layer.mergeAll(
-                  MagicLinkStoreKV,
-                  EmailOtpStoreKV,
-                  OAuthStateStoreKV,
-                  RateLimitStoreKV,
-                ),
-                layerMemoryKeyValueStore,
-              ),
-              TestClock.layer(),
-            ),
-          ),
-        ),
-      );
-    const link = (token: string, email: string, expiresAt: number): MagicLinkToken => ({
-      token,
-      email,
-      createdAt: 0,
-      expiresAt,
-    });
-    const otp = (
-      email: string,
-      purpose: EmailOtpRecord["purpose"],
-      expiresAt: number,
-    ): EmailOtpRecord => ({
-      email,
-      otpHash: "hash",
-      purpose,
-      attempts: 0,
-      createdAt: 0,
-      expiresAt,
-    });
 
     it("deletes expired magic links and OTPs and keeps live ones", async () => {
       const result = await runPurge(
@@ -792,9 +790,9 @@ describe("KeyValueStores", () => {
           yield* TestClock.setTime(now);
           const links = yield* MagicLinkStore;
           const otps = yield* EmailOtpStore;
-          yield* links.create(link("old", "a@example.com", now - 1));
-          yield* links.create(link("new", "a@example.com", now + 60_000));
-          yield* links.create(link("gone", "b@example.com", now - 60_000));
+          yield* links.create(magicLink("old", "a@example.com", now - 1));
+          yield* links.create(magicLink("new", "a@example.com", now + 60_000));
+          yield* links.create(magicLink("gone", "b@example.com", now - 60_000));
           yield* otps.upsert(otp("a@example.com", "sign-in", now - 1));
           yield* otps.upsert(otp("a@example.com", "forget-password", now + 60_000));
           yield* otps.upsert(otp("c@example.com", "email-verification", now - 60_000));
@@ -872,7 +870,7 @@ describe("KeyValueStores", () => {
       const result = await runPurge(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          yield* (yield* MagicLinkStore).create(link("edge", "a@example.com", now));
+          yield* (yield* MagicLinkStore).create(magicLink("edge", "a@example.com", now));
           yield* (yield* EmailOtpStore).upsert(otp("a@example.com", "sign-in", now));
           return yield* purgeExpiredKV;
         }),
@@ -1068,8 +1066,8 @@ describe("KeyValueStores", () => {
           yield* TestClock.setTime(now);
           const links = yield* MagicLinkStore;
           const otps = yield* EmailOtpStore;
-          yield* links.create(link("old", "a@example.com", now - 1));
-          yield* links.create(link("new", "a@example.com", now + 60_000));
+          yield* links.create(magicLink("old", "a@example.com", now - 1));
+          yield* links.create(magicLink("new", "a@example.com", now + 60_000));
           yield* otps.upsert(otp("a@example.com", "sign-in", now - 1));
           const purged = yield* purgeExpiredKV;
           return {

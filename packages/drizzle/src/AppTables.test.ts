@@ -211,6 +211,25 @@ authStoresContract("PostgreSQL, application tables", (effect) =>
   ),
 );
 
+const key = (id: string, owner: string): Auth.ApiKey => ({
+  id,
+  start: "ea_",
+  keyHash: hashToken(id),
+  userId: owner,
+  enabled: true,
+  metadata: {},
+  createdAt: 0,
+  updatedAt: 0,
+});
+
+const token = (owner: string) => ({
+  token: hashToken(globalThis.crypto.randomUUID()),
+  userId: owner,
+  email: "ada@example.com",
+  createdAt: 0,
+  expiresAt: 60_000,
+});
+
 describe("an application's own API key and token tables", () => {
   const stores = Layer.mergeAll(
     ApiKeyStore.layer(defineApiKeyTable({ table: appApiKeys, columns: apiKeyMapping })),
@@ -221,23 +240,6 @@ describe("an application's own API key and token tables", () => {
     const userId = globalThis.crypto.randomUUID();
     const other = globalThis.crypto.randomUUID();
     await client.query("INSERT INTO app_users (id) VALUES ($1), ($2)", [userId, other]);
-    const key = (id: string, owner: string): Auth.ApiKey => ({
-      id,
-      start: "ea_",
-      keyHash: hashToken(id),
-      userId: owner,
-      enabled: true,
-      metadata: {},
-      createdAt: 0,
-      updatedAt: 0,
-    });
-    const token = (owner: string) => ({
-      token: hashToken(globalThis.crypto.randomUUID()),
-      userId: owner,
-      email: "ada@example.com",
-      createdAt: 0,
-      expiresAt: 60_000,
-    });
     const verification = token(userId);
     const reset = token(userId);
     const kept = key(globalThis.crypto.randomUUID(), other);

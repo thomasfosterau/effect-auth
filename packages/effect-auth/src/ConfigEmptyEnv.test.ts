@@ -31,10 +31,19 @@ const resolve = <A>(config: Config.Config<A>, env: Record<string, string>) =>
     config.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
   );
 
-describe("empty environment variables", () => {
-  const failureMessage = (exit: Exit.Exit<unknown, unknown>) =>
-    Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "";
+const failureMessage = (exit: Exit.Exit<unknown, unknown>) =>
+  Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "";
 
+const run = <A>(config: Config.Config<A>, provider: ConfigProvider.ConfigProvider) =>
+  Effect.runPromiseExit(config.parse(provider));
+
+const env = (e: Record<string, string>, opts?: { preserveEmptyStrings?: boolean }) =>
+  ConfigProvider.fromEnv({ env: e, ...opts });
+
+const value = (exit: Exit.Exit<Redacted.Redacted | undefined, unknown>) =>
+  Exit.isSuccess(exit) ? (exit.value ? Redacted.value(exit.value) : undefined) : "FAILED";
+
+describe("empty environment variables", () => {
   const jwtEnv = { JWT_ISSUER: "https://issuer.test" };
   const mfEnv = { TWO_FACTOR_ISSUER: "Acme" };
 
@@ -98,12 +107,6 @@ describe("empty environment variables", () => {
 
   describe("optionalSecret probe", () => {
     const N = "TWO_FACTOR_ENCRYPT_SECRET";
-    const run = <A>(config: Config.Config<A>, provider: ConfigProvider.ConfigProvider) =>
-      Effect.runPromiseExit(config.parse(provider));
-    const env = (e: Record<string, string>, opts?: { preserveEmptyStrings?: boolean }) =>
-      ConfigProvider.fromEnv({ env: e, ...opts });
-    const value = (exit: Exit.Exit<Redacted.Redacted | undefined, unknown>) =>
-      Exit.isSuccess(exit) ? (exit.value ? Redacted.value(exit.value) : undefined) : "FAILED";
 
     it.each([
       [{ [`${N}_FILE`]: "/run/secrets/x" }],

@@ -132,12 +132,12 @@ describe("pbkdf2 iterations option", () => {
   );
 });
 
-describe("pbkdf2 stored iteration limit", () => {
-  // A stored hash with the given count. The key is a placeholder: the stub
-  // derives a zero key, so an all-zero stored key verifies at any count that
-  // is allowed to run.
-  const stored = (count: string) => `pbkdf2-sha256$${count}$${SALT}$${KEY}`;
+// A stored hash with the given count. The key is a placeholder: the stub
+// derives a zero key, so an all-zero stored key verifies at any count that
+// is allowed to run.
+const stored = (count: string) => `pbkdf2-sha256$${count}$${SALT}$${KEY}`;
 
+describe("pbkdf2 stored iteration limit", () => {
   it.each([
     ["one past the 5,000,000 cap", "5000001"],
     ["Node's largest count, 2^31 - 1", String(2 ** 31 - 1)],

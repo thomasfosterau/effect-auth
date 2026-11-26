@@ -375,6 +375,43 @@ const ACME = {
   organizationId: "org-1",
 };
 
+/**
+ * The same IdP round trip as above, but with the connection carrying no
+ * organization: any membership that appears came from JIT provisioning.
+ */
+const jitFixture = (
+  overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
+) => {
+  const { organizationId: _connectionOrganization, ...withoutOrganization } = ACME;
+  // An organization-less connection is bound to its own domain, so no claim.
+  const stores = makeStores({ ...overrides, claimAcme: false });
+  const idpRoutes = {
+    "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
+    "https://idp.acme.test/userinfo": {
+      sub: "idp-user-42",
+      email: "worker@acme.test",
+      email_verified: true,
+    },
+  };
+  /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
+  const signIn = async <ROut = never>(extra?: Layer.Layer<ROut>) => {
+    const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
+    await Effect.runPromise(
+      sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(layer)),
+    );
+    return withFetch(idpRoutes, () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const start = yield* sso.signIn({ email: "worker@acme.test" });
+          return yield* sso.handleCallback(start.state, "auth-code");
+        }).pipe(Effect.provide(layer)),
+      ),
+    );
+  };
+  return { ...stores, signIn };
+};
+
 describe("SsoService", () => {
   it("registers a provider and routes sign-in by email domain", async () => {
     const { layer } = makeStores();
@@ -447,43 +484,6 @@ describe("SsoService", () => {
     expect(MutableHashMap.size(users)).toBe(1);
     expect(members.length).toBe(1);
   });
-
-  /**
-   * The same IdP round trip as above, but with the connection carrying no
-   * organization: any membership that appears came from JIT provisioning.
-   */
-  const jitFixture = (
-    overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
-  ) => {
-    const { organizationId: _connectionOrganization, ...withoutOrganization } = ACME;
-    // An organization-less connection is bound to its own domain, so no claim.
-    const stores = makeStores({ ...overrides, claimAcme: false });
-    const idpRoutes = {
-      "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
-      "https://idp.acme.test/userinfo": {
-        sub: "idp-user-42",
-        email: "worker@acme.test",
-        email_verified: true,
-      },
-    };
-    /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
-    const signIn = async <ROut = never>(extra?: Layer.Layer<ROut>) => {
-      const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
-      const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
-      await Effect.runPromise(
-        sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(layer)),
-      );
-      return withFetch(idpRoutes, () =>
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const start = yield* sso.signIn({ email: "worker@acme.test" });
-            return yield* sso.handleCallback(start.state, "auth-code");
-          }).pipe(Effect.provide(layer)),
-        ),
-      );
-    };
-    return { ...stores, signIn };
-  };
 
   it("clears a squatter's password, sessions and credentials when the IdP proves the address", async () => {
     const fx = jitFixture();
@@ -1222,15 +1222,15 @@ describe("SsoService — SAML", () => {
   });
 });
 
-describe("memorySamlReplayStore", () => {
-  const record = (id: string, expiresAt: number): SamlReplayRecord => ({
-    id,
-    kind: "assertion",
-    providerId: "p1",
-    createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
-    expiresAt,
-  });
+const record = (id: string, expiresAt: number): SamlReplayRecord => ({
+  id,
+  kind: "assertion",
+  providerId: "p1",
+  createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
+  expiresAt,
+});
 
+describe("memorySamlReplayStore", () => {
   it("inserts if absent and reports a duplicate as null", async () => {
     const store = memorySamlReplayStore();
     expect(
@@ -2068,27 +2068,27 @@ const failureOf = <A, E>(result: Result.Result<A, E>): E => {
   return result.failure;
 };
 
-describe("SSO signs in only managed users", () => {
-  /** Register `provider` and run one OIDC round trip whose profile is `claims`. */
-  const signInAs = async (
-    stores: ReturnType<typeof makeStores>,
-    claims: Record<string, Schema.Json>,
-    provider: Sso.RegisterProviderInput = ACME,
-  ) => {
-    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(stores.layer)));
-    await Effect.runPromise(
-      sso.registerProvider("admin", provider).pipe(Effect.provide(stores.layer)),
-    );
-    return withFetch(userinfo(claims), () =>
-      Effect.runPromise(
-        Effect.gen(function* () {
-          const start = yield* sso.signIn({ email: "worker@acme.test" });
-          return yield* Effect.result(sso.handleCallback(start.state, "code"));
-        }).pipe(Effect.provide(stores.layer)),
-      ),
-    );
-  };
+/** Register `provider` and run one OIDC round trip whose profile is `claims`. */
+const signInAs = async (
+  stores: ReturnType<typeof makeStores>,
+  claims: Record<string, Schema.Json>,
+  provider: Sso.RegisterProviderInput = ACME,
+) => {
+  const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(stores.layer)));
+  await Effect.runPromise(
+    sso.registerProvider("admin", provider).pipe(Effect.provide(stores.layer)),
+  );
+  return withFetch(userinfo(claims), () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const start = yield* sso.signIn({ email: "worker@acme.test" });
+        return yield* Effect.result(sso.handleCallback(start.state, "code"));
+      }).pipe(Effect.provide(stores.layer)),
+    ),
+  );
+};
 
+describe("SSO signs in only managed users", () => {
   it("refuses an asserted address off the organization's verified domains, touching nothing", async () => {
     const stores = makeStores();
     await seedUser(stores, "victim", "ceo@b.test");

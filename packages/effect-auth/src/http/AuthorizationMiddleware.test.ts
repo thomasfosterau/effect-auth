@@ -463,6 +463,9 @@ describe("makeAuthorizationMiddleware – guard identity", () => {
   });
 });
 
+// Each name is typed as the explicit argument says, not as its literal.
+const widen = <T extends string>(name: T): T => name;
+
 // ---------------------------------------------------------------------------
 // Guard names: a literal, so each guard has its own type
 // ---------------------------------------------------------------------------
@@ -476,8 +479,6 @@ describe("makeAuthorizationMiddleware – guard names", () => {
   });
 
   it("a widened name is a compile error: string, a template pattern and a union each widen the guard's type", () => {
-    // Each name is typed as the explicit argument says, not as its literal.
-    const widen = <T extends string>(name: T): T => name;
     const dynamicName = widen<string>("RequireA");
     const patternName = widen<`${string}Guard`>("RequireAGuard");
     const unionName = widen<"RequireA" | "RequireB">("RequireA");

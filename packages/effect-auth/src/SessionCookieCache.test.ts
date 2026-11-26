@@ -242,10 +242,10 @@ describe("session-binding (sid)", () => {
   });
 });
 
-describe("cache epoch", () => {
-  const withVersion = (version: string): ResolvedSessionCache =>
-    mustResolve({ enabled: true, secret: Redacted.make(SECRET), version });
+const withVersion = (version: string): ResolvedSessionCache =>
+  mustResolve({ enabled: true, secret: Redacted.make(SECRET), version });
 
+describe("cache epoch", () => {
   it("rejects every cookie issued under another epoch", async () => {
     const cookie = await mustEncode(value, withVersion("2026-10"), now, SESSION_ID);
     expect(Option.isNone(await decode(cookie, withVersion("2026-10"), now, SESSION_ID))).toBe(
@@ -291,12 +291,12 @@ describe("server-only attributes", () => {
   });
 });
 
-describe("standing attributes", () => {
-  const holding = (attributes: Types.Attributes): Types.SessionWithUser => ({
-    session: makeSession(),
-    user: makeUser({ attributes }),
-  });
+const holding = (attributes: Types.Attributes): Types.SessionWithUser => ({
+  session: makeSession(),
+  user: makeUser({ attributes }),
+});
 
+describe("standing attributes", () => {
   it.each([{ banned: true }, { banned: false }, { banExpires: 0 }, { scimDeactivated: true }])(
     "never snapshots or serves a user holding %o",
     async (attributes) => {

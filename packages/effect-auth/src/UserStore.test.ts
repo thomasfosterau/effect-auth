@@ -88,6 +88,8 @@ const tableWriter = (id: string) => {
   return { create, inputs };
 };
 
+const create = () => Effect.succeed({ user: makeUser("existing"), created: false });
+
 describe("createUserWithIdentifier", () => {
   it("passes the identifier to create, and claims it in a store that keeps identifiers apart", async () => {
     const records = MutableHashMap.empty<string, Identifier>();
@@ -213,7 +215,6 @@ describe("createUserWithIdentifier", () => {
 
   it("fails with IdentifierTakenError when create reports an existing user that holds no address", async () => {
     const records = MutableHashMap.empty<string, Identifier>();
-    const create = () => Effect.succeed({ user: makeUser("existing"), created: false });
 
     const error = await Effect.runPromise(
       Effect.flip(createUserWithIdentifier(memoryIdentifierStore(records), email, create)),

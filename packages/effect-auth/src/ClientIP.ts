@@ -257,6 +257,8 @@ const strictIPv4Re =
 /** One IPv6 group: one to four hex digits. */
 const hexGroupRe = /^[0-9a-fA-F]{1,4}$/;
 
+const groupsOf = (part: string): ReadonlyArray<string> => (part === "" ? [] : part.split(":"));
+
 /**
  * Whether `s` is one IPv6 address in colon-hex form (no embedded IPv4, zone ID
  * or brackets). Unlike {@link expandIPv6}, this rejects a second `::` and a
@@ -266,7 +268,6 @@ const isStrictIPv6 = (s: string): boolean => {
   if (!/^[0-9a-fA-F:]+$/.test(s)) return false;
   const halves = s.split("::");
   if (halves.length > 2) return false;
-  const groupsOf = (part: string): ReadonlyArray<string> => (part === "" ? [] : part.split(":"));
   const head = groupsOf(halves[0] ?? "");
   const tail = halves.length === 2 ? groupsOf(halves[1] ?? "") : [];
   const groups = [...head, ...tail];

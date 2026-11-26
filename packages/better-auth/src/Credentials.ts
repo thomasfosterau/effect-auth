@@ -48,6 +48,27 @@ export interface RequestInput {
   readonly headers: Headers;
 }
 
+const call = <A>(run: () => Promise<A>, email?: string) =>
+  Effect.tryPromise({ try: run, catch: (error) => fromApiError(error, email) });
+
+const signedIn = (
+  answer: WithHeaders<SignInAnswer | null>,
+): Effect.Effect<CredentialResult, Auth.AuthError> => {
+  const setCookie = answer.headers.getSetCookie();
+  const response: SignInAnswer | null = answer.response;
+  if (response !== null && "twoFactorRedirect" in response) {
+    return Effect.succeed({ status: "second-factor", setCookie });
+  }
+  if (response === null || !P.isObject(response.user)) {
+    return Effect.fail(new Auth.AuthError({ message: "BetterAuth answered no user" }));
+  }
+  return Effect.succeed({
+    status: response.token === null ? "pending-verification" : "signed-in",
+    user: toUser(response.user),
+    setCookie,
+  });
+};
+
 /**
  * BetterAuth's sign-up, sign-in and sign-out as Effects, with `APIError`
  * mapped into the typed error channel (`InvalidCredentialsError`,
@@ -91,27 +112,6 @@ export class BetterAuthCredentials extends Context.Service<
     Layer.effect(
       BetterAuthCredentials,
       Effect.map(Effect.service(BetterAuthInstance), ({ api }) => {
-        const call = <A>(run: () => Promise<A>, email?: string) =>
-          Effect.tryPromise({ try: run, catch: (error) => fromApiError(error, email) });
-
-        const signedIn = (
-          answer: WithHeaders<SignInAnswer | null>,
-        ): Effect.Effect<CredentialResult, Auth.AuthError> => {
-          const setCookie = answer.headers.getSetCookie();
-          const response: SignInAnswer | null = answer.response;
-          if (response !== null && "twoFactorRedirect" in response) {
-            return Effect.succeed({ status: "second-factor", setCookie });
-          }
-          if (response === null || !P.isObject(response.user)) {
-            return Effect.fail(new Auth.AuthError({ message: "BetterAuth answered no user" }));
-          }
-          return Effect.succeed({
-            status: response.token === null ? "pending-verification" : "signed-in",
-            user: toUser(response.user),
-            setCookie,
-          });
-        };
-
         return {
           signUpEmail: ({ headers, email, password, name }) =>
             Effect.flatMap(

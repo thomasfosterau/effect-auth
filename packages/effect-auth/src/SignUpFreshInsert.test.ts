@@ -153,12 +153,13 @@ const makeWorld = (type: IdentifierType, value: string) => {
 
 type World = ReturnType<typeof makeWorld>;
 
+const key = (address: string, purpose: string) => `${address}:${purpose}`;
+
 /** A one-time-code store keyed by the address and purpose, as both OTP flows use. */
 const memoryOtpStore = <R extends { readonly purpose: string; readonly attempts: number }>(
   keyOf: (record: R) => string,
 ) => {
   const records = MutableHashMap.empty<string, R>();
-  const key = (address: string, purpose: string) => `${address}:${purpose}`;
   return {
     upsert: (record: R) =>
       Effect.sync(
@@ -273,6 +274,10 @@ interface Case {
   /** Writes the flow makes after a create, beyond the identifier and session. */
   readonly extraWrites?: (world: World) => ReadonlyArray<unknown>;
 }
+
+// SCIM reads and writes memberships after the create; any other
+// organization call dies.
+const unused = (name: string) => () => Effect.die(`unused: ${name}`);
 
 const cases: ReadonlyArray<Case> = [
   {
@@ -459,9 +464,6 @@ const cases: ReadonlyArray<Case> = [
     type: "email",
     value: EMAIL,
     run: (world) => {
-      // SCIM reads and writes memberships after the create; any other
-      // organization call dies.
-      const unused = (name: string) => () => Effect.die(`unused: ${name}`);
       const orgs: typeof OrganizationStore.Service = {
         getMember: () => Effect.succeedNone,
         getMemberById: () => Effect.succeedNone,

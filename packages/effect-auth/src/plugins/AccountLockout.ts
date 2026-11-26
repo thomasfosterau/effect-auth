@@ -215,23 +215,23 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
         };
   };
 
+  const guarded = <A>(
+    effect: Effect.Effect<A, Errors.AuthError>,
+    fallback: A,
+  ): Effect.Effect<A, Errors.AuthError> =>
+    failOpen
+      ? effect.pipe(
+          Effect.catchTag("AuthError", (error) =>
+            Effect.logWarning("AccountLockout store error (fail-open): sign-in proceeds", {
+              error,
+            }).pipe(Effect.as(fallback)),
+          ),
+        )
+      : effect;
+
   return Hooks.makePlugin(
     Effect.gen(function* () {
       const store = yield* AccountLockoutStore;
-
-      const guarded = <A>(
-        effect: Effect.Effect<A, Errors.AuthError>,
-        fallback: A,
-      ): Effect.Effect<A, Errors.AuthError> =>
-        failOpen
-          ? effect.pipe(
-              Effect.catchTag("AuthError", (error) =>
-                Effect.logWarning("AccountLockout store error (fail-open): sign-in proceeds", {
-                  error,
-                }).pipe(Effect.as(fallback)),
-              ),
-            )
-          : effect;
 
       return {
         beforeAuthenticate: (attempt: Hooks.AuthenticateAttempt) =>

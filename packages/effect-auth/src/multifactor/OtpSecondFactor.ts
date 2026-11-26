@@ -177,6 +177,9 @@ export class OtpSecondFactorService extends Context.Service<
     Layer.effect(OtpSecondFactorService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
+const invalidOtp = () =>
+  Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -205,9 +208,6 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
-
-    const invalidOtp = () =>
-      Effect.fail(new OtpSecondFactorError({ message: "Invalid or expired OTP" }));
 
     const generatePendingToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 

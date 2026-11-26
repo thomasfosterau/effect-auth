@@ -149,6 +149,9 @@ describe("layer", () => {
   });
 });
 
+const hex = (bytes: Uint8Array) =>
+  Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
 /** A `pbkdf2-sha256$iterations$salt$key` hash in core effect-auth's format, via Web Crypto. */
 const legacyPbkdf2Hash = async (password: string, iterations: number): Promise<string> => {
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
@@ -164,8 +167,6 @@ const legacyPbkdf2Hash = async (password: string, iterations: number): Promise<s
     key,
     32 * 8,
   );
-  const hex = (bytes: Uint8Array) =>
-    Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   return `pbkdf2-sha256$${iterations}$${hex(salt)}$${hex(new Uint8Array(bits))}`;
 };
 

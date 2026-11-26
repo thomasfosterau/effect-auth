@@ -838,6 +838,9 @@ export const mcpProviderPreset = (config: OidcProviderConfig): OidcProviderConfi
   },
 });
 
+const invalidMetadata = (description: string) =>
+  new OidcRegistrationError({ error: "invalid_client_metadata", description });
+
 // -----------------------------------------------------------------------------
 // Service implementation
 // -----------------------------------------------------------------------------
@@ -1206,9 +1209,6 @@ export const make = (
       metadata: OidcClientMetadata,
     ): Effect.Effect<NormalizedOidcClientMetadata, OidcRegistrationError> =>
       Effect.gen(function* () {
-        const invalid = (description: string) =>
-          new OidcRegistrationError({ error: "invalid_client_metadata", description });
-
         if (Arr.isReadonlyArrayEmpty(metadata.redirectUris)) {
           return yield* new OidcRegistrationError({
             error: "invalid_redirect_uri",
@@ -1230,7 +1230,7 @@ export const make = (
         // RFC 7591 §2: omitted `token_endpoint_auth_method` means client_secret_basic.
         const authMethod = metadata.tokenEndpointAuthMethod ?? "client_secret_basic";
         if (!isTokenEndpointAuthMethod(authMethod)) {
-          return yield* invalid(`Unsupported token_endpoint_auth_method: ${authMethod}`);
+          return yield* invalidMetadata(`Unsupported token_endpoint_auth_method: ${authMethod}`);
         }
 
         const grantTypes = metadata.grantTypes ?? ["authorization_code"];
@@ -1239,10 +1239,10 @@ export const make = (
           (grant) => !OIDC_DYNAMIC_GRANT_TYPES.some((supported) => supported === grant),
         );
         if (Option.isSome(badGrant)) {
-          return yield* invalid(`Unsupported grant_type: ${badGrant.value}`);
+          return yield* invalidMetadata(`Unsupported grant_type: ${badGrant.value}`);
         }
         if (!grantTypes.includes("authorization_code")) {
-          return yield* invalid("grant_types must include authorization_code");
+          return yield* invalidMetadata("grant_types must include authorization_code");
         }
 
         const responseTypes = metadata.responseTypes ?? ["code"];
@@ -1252,23 +1252,26 @@ export const make = (
             !OIDC_DYNAMIC_RESPONSE_TYPES.some((supported) => supported === responseType),
         );
         if (Option.isSome(badResponseType)) {
-          return yield* invalid(`Unsupported response_type: ${badResponseType.value}`);
+          return yield* invalidMetadata(`Unsupported response_type: ${badResponseType.value}`);
         }
         // RFC 7591 §2: the two lists must agree — authorization_code needs `code`.
         if (!responseTypes.includes("code")) {
-          return yield* invalid("response_types must include code");
+          return yield* invalidMetadata("response_types must include code");
         }
 
         const scope = metadata.scope ?? dcr?.defaultScope ?? allowedScopes.join(" ");
         const scopes = parseScopes(scope);
         const badScope = Arr.findFirst(scopes, (s) => !allowedScopes.includes(s));
-        if (Option.isSome(badScope)) return yield* invalid(`Unsupported scope: ${badScope.value}`);
+        if (Option.isSome(badScope))
+          return yield* invalidMetadata(`Unsupported scope: ${badScope.value}`);
         if (!scopes.includes("openid")) {
-          return yield* invalid("scope must include openid");
+          return yield* invalidMetadata("scope must include openid");
         }
         // A refresh_token grant is only reachable with offline_access.
         if (grantTypes.includes("refresh_token") && !scopes.includes("offline_access")) {
-          return yield* invalid("the refresh_token grant requires the offline_access scope");
+          return yield* invalidMetadata(
+            "the refresh_token grant requires the offline_access scope",
+          );
         }
 
         return {

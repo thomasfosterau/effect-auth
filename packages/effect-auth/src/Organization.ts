@@ -1480,6 +1480,26 @@ const ensureNotOwnRole = (
     : Effect.void;
 
 /**
+ * Whether one granted permission string satisfies a requested one.
+ *
+ * Exact equality first - that is the historical behavior of the static
+ * role map, and the only thing a string without a `:` separator can
+ * support - then `"*"` wildcard matching via `permissionMatches`, so
+ * `"team:*"` covers `"team:create"` exactly as an admin grant does.
+ * Unparseable grants never match anything but themselves.
+ */
+const grantSatisfies = (granted: string, requested: string): boolean => {
+  if (granted === requested) return true;
+  return Result.getOrElse(
+    Result.try(() => permissionMatches(parsePermission(granted), parsePermission(requested))),
+    () => false,
+  );
+};
+
+/** The role new members get when the caller names none. */
+const defaultRoleOf = (organization: Organization): string => organization.defaultRole ?? "member";
+
+/**
  * Create an organization service
  */
 export const make = (
@@ -1531,23 +1551,6 @@ export const make = (
     /** Generate a random identifier for the module's records. */
     const generateId = (): Effect.Effect<string> =>
       crypto.randomBytes(16).pipe(Effect.map(Hex.encode));
-
-    /**
-     * Whether one granted permission string satisfies a requested one.
-     *
-     * Exact equality first - that is the historical behavior of the static
-     * role map, and the only thing a string without a `:` separator can
-     * support - then `"*"` wildcard matching via `permissionMatches`, so
-     * `"team:*"` covers `"team:create"` exactly as an admin grant does.
-     * Unparseable grants never match anything but themselves.
-     */
-    const grantSatisfies = (granted: string, requested: string): boolean => {
-      if (granted === requested) return true;
-      return Result.getOrElse(
-        Result.try(() => permissionMatches(parsePermission(granted), parsePermission(requested))),
-        () => false,
-      );
-    };
 
     /**
      * The permissions a role name resolves to in an organization: the custom
@@ -1863,10 +1866,6 @@ export const make = (
         return members.filter((member) => member.role === creatorRole && isActiveMember(member))
           .length;
       });
-
-    /** The role new members get when the caller names none. */
-    const defaultRoleOf = (organization: Organization): string =>
-      organization.defaultRole ?? "member";
 
     /**
      * Refuse custom-role writes against the protected owner role: owner

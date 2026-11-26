@@ -109,6 +109,15 @@ describe("SessionResolution.detectCredential", () => {
   });
 });
 
+const session = (attributes: Types.Attributes): Types.Session => ({
+  id: "digest",
+  userId: "u",
+  expiresAt: now,
+  createdAt: now,
+  lastActivityAt: now,
+  attributes,
+});
+
 describe("SessionResolution.credentialClassOf", () => {
   it.each([
     ["a session cookie", withSessionCookie, "interactive"],
@@ -119,14 +128,6 @@ describe("SessionResolution.credentialClassOf", () => {
     expect(
       SessionResolution.credentialClassOf(SessionResolution.detectCredential(request(headers))),
     ).toBe(expected);
-  });
-  const session = (attributes: Types.Attributes): Types.Session => ({
-    id: "digest",
-    userId: "u",
-    expiresAt: now,
-    createdAt: now,
-    lastActivityAt: now,
-    attributes,
   });
 
   it("reads a session's class from the session, not from its carrier", () => {

@@ -395,6 +395,9 @@ describe("MySQL / statements", () => {
   });
 });
 
+const columnNames = (table: Tables[keyof Tables]) =>
+  R.values<string, { readonly name: string }>(getTableColumns(table)).map((column) => column.name);
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------
@@ -455,10 +458,6 @@ describe("MySQL / Schema", () => {
   });
 
   it("keeps the same column names as the other dialects", () => {
-    const columnNames = (table: Tables[keyof Tables]) =>
-      R.values<string, { readonly name: string }>(getTableColumns(table)).map(
-        (column) => column.name,
-      );
     expect(columnNames(tables.sessions)).toEqual([
       "id",
       "user_id",
@@ -479,6 +478,15 @@ describe("MySQL / Schema", () => {
   });
 });
 
+const anyMySqlHandle = (db: MySqlAsyncDatabase<MySqlQueryResultHKT, AnyRelations>) =>
+  databaseLayer(db);
+
+// A MySQL row is usable everywhere a PostgreSQL row is, and vice versa —
+// which is exactly why one store implementation covers both.
+const fromMySql = (row: Tables["sessions"]["$inferSelect"]): Pg.SessionRow => row;
+
+const fromPg = (row: Pg.IdentifierRow): Tables["identifiers"]["$inferSelect"] => row;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -487,18 +495,12 @@ describe("MySQL / types", () => {
   it("is a member of the shared Tables union and a valid database handle", () => {
     // Compile-time assertions; the runtime expectations only keep them live.
     const asAnyTables: AnyTables = tables;
-    const anyMySqlHandle = (db: MySqlAsyncDatabase<MySqlQueryResultHKT, AnyRelations>) =>
-      databaseLayer(db);
 
     expect(asAnyTables.sessions).toBe(tables.sessions);
     expect(P.isFunction(anyMySqlHandle)).toBe(true);
   });
 
   it("produces rows interchangeable with the PostgreSQL ones", () => {
-    // A MySQL row is usable everywhere a PostgreSQL row is, and vice versa —
-    // which is exactly why one store implementation covers both.
-    const fromMySql = (row: Tables["sessions"]["$inferSelect"]): Pg.SessionRow => row;
-    const fromPg = (row: Pg.IdentifierRow): Tables["identifiers"]["$inferSelect"] => row;
     const session = {
       id: "s",
       userId: "u",

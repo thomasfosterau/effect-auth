@@ -412,15 +412,15 @@ describe("single-table MySQL / NOT NULL email", () => {
   });
 });
 
-describe("single-table MySQL / mapped emailVerifiedAt", () => {
-  const wireVerifiedRow = (verifiedAt: string | null) => [
-    USER_ID,
-    "ada@example.com",
-    1,
-    "2026-01-01 00:00:00.000",
-    verifiedAt,
-  ];
+const wireVerifiedRow = (verifiedAt: string | null) => [
+  USER_ID,
+  "ada@example.com",
+  1,
+  "2026-01-01 00:00:00.000",
+  verifiedAt,
+];
 
+describe("single-table MySQL / mapped emailVerifiedAt", () => {
   it("writes the verification time to its own column on setVerified, and reads it back", async () => {
     const proxy = makeProxy();
     proxy.respondWith([wireVerifiedRow("2026-01-02 09:30:00.000")]);

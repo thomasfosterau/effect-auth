@@ -354,6 +354,12 @@ const jweKey = (bytes: Uint8Array): Effect.Effect<Jwk.SecretKey<"dir">> =>
 /** A compact JWE has five segments; every earlier stored format has fewer. */
 const isCompactJwe = (stored: string): boolean => stored.split(".").length === 5;
 
+const encryptionFailed = (cause: unknown) =>
+  new JwtError({ message: "Failed to encrypt the private key", cause });
+
+const decryptionFailed = (cause: unknown) =>
+  new JwtError({ message: "Failed to decrypt the private key", cause });
+
 /**
  * Create a JWT service
  */
@@ -395,11 +401,6 @@ export const make = (
     >();
 
     const store = yield* JwtKeyStore;
-
-    const encryptionFailed = (cause: unknown) =>
-      new JwtError({ message: "Failed to encrypt the private key", cause });
-    const decryptionFailed = (cause: unknown) =>
-      new JwtError({ message: "Failed to decrypt the private key", cause });
 
     /** Encrypt a private JWK for storage under its key id. */
     const sealPrivate = (pair: GeneratedJwtKeyPair): Effect.Effect<string, JwtError> =>

@@ -448,6 +448,31 @@ describe("EmailPasswordService.changePassword revokes sessions and trusted devic
   });
 });
 
+/** A plugin that records each new password it sees and refuses `refuse`. */
+const guard = (seen: Array<string>, refuse: string) => {
+  const check = <A extends { readonly userId: string; readonly newPassword: string }>(args: A) =>
+    Effect.sync(() => void seen.push(`${args.userId}:${args.newPassword}`)).pipe(
+      Effect.andThen(
+        args.newPassword === refuse
+          ? Effect.fail(new Errors.PwnedPasswordError({ message: "breached" }))
+          : Effect.succeed(args),
+      ),
+    );
+  return composePlugins([
+    makePlugin({ beforeChangePassword: check, beforeSetPassword: check }),
+  ]).pipe(Layer.provide(Hooks.Default));
+};
+
+const run = async <A, E>(
+  hooks: Layer.Layer<Hooks>,
+  f: (service: typeof EmailPassword.EmailPasswordService.Service) => Effect.Effect<A, E>,
+) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      return yield* f(yield* EmailPassword.make());
+    }).pipe(Effect.provide(await makeTestContext()), Effect.provide(hooks)),
+  );
+
 describe("EmailPasswordService — change and set password hooks and legacy hashes", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);
@@ -458,31 +483,6 @@ describe("EmailPasswordService — change and set password hooks and legacy hash
 
   const credentials = { email: "ada@example.com", password: "old-password-123" };
   const NEW = "new-password-456";
-
-  /** A plugin that records each new password it sees and refuses `refuse`. */
-  const guard = (seen: Array<string>, refuse: string) => {
-    const check = <A extends { readonly userId: string; readonly newPassword: string }>(args: A) =>
-      Effect.sync(() => void seen.push(`${args.userId}:${args.newPassword}`)).pipe(
-        Effect.andThen(
-          args.newPassword === refuse
-            ? Effect.fail(new Errors.PwnedPasswordError({ message: "breached" }))
-            : Effect.succeed(args),
-        ),
-      );
-    return composePlugins([
-      makePlugin({ beforeChangePassword: check, beforeSetPassword: check }),
-    ]).pipe(Layer.provide(Hooks.Default));
-  };
-
-  const run = async <A, E>(
-    hooks: Layer.Layer<Hooks>,
-    f: (service: typeof EmailPassword.EmailPasswordService.Service) => Effect.Effect<A, E>,
-  ) =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        return yield* f(yield* EmailPassword.make());
-      }).pipe(Effect.provide(await makeTestContext()), Effect.provide(hooks)),
-    );
 
   it("changePassword runs beforeChangePassword after the current password verifies", async () => {
     const seen: Array<string> = [];
@@ -1166,6 +1166,22 @@ describe("EmailPasswordService - dangling session protection", () => {
   });
 });
 
+const signUpTwice = (testStore: typeof EmailPasswordStore.Service) =>
+  Effect.gen(function* () {
+    const testContext = yield* Effect.tryPromise({
+      try: () => makeTestContext(testStore),
+      catch: (cause) => new Errors.AuthError({ message: "test setup failed", cause }),
+    }).pipe(Effect.orDie);
+    const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
+      Effect.provide(testContext),
+    );
+    const signUp = (password: string) =>
+      service.signUp({ email: "mint@example.com", password }).pipe(Effect.provide(testContext));
+    const fresh = yield* signUp("strong-password-123");
+    const duplicate = yield* signUp("another-strong-pw");
+    return { fresh, duplicate };
+  }).pipe(Effect.provide(Hooks.Default));
+
 describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
   beforeEach(() => {
     MutableHashMap.clear(users);
@@ -1316,21 +1332,6 @@ describe("EmailPasswordService — anti-enumeration sign-up mode", () => {
           return id;
         }),
     };
-    const signUpTwice = (testStore: typeof EmailPasswordStore.Service) =>
-      Effect.gen(function* () {
-        const testContext = yield* Effect.tryPromise({
-          try: () => makeTestContext(testStore),
-          catch: (cause) => new Errors.AuthError({ message: "test setup failed", cause }),
-        }).pipe(Effect.orDie);
-        const service = yield* EmailPassword.make({ antiEnumeration: true }).pipe(
-          Effect.provide(testContext),
-        );
-        const signUp = (password: string) =>
-          service.signUp({ email: "mint@example.com", password }).pipe(Effect.provide(testContext));
-        const fresh = yield* signUp("strong-password-123");
-        const duplicate = yield* signUp("another-strong-pw");
-        return { fresh, duplicate };
-      }).pipe(Effect.provide(Hooks.Default));
 
     const minting = await Effect.runPromise(signUpTwice(store));
     expect(minting.fresh.user.id).toBe("user-1");

@@ -29,6 +29,17 @@ const keyOf = (secret: string, purpose: Purpose) =>
     RootSecret.use((root) => root.key(purpose)).pipe(Effect.provide(RootSecret.layer(secret))),
   );
 
+const withEnv = (env: Record<string, string>) =>
+  Effect.runPromiseExit(
+    RootSecret.use((root) => root.key("otp-pepper")).pipe(
+      Effect.provide(
+        RootSecret.layerConfig.pipe(
+          Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+        ),
+      ),
+    ),
+  );
+
 describe("RootSecret", () => {
   it("refuses a secret shorter than the minimum", async () => {
     const exit = await Effect.runPromiseExit(
@@ -65,16 +76,6 @@ describe("RootSecret", () => {
   });
 
   it("reads the secret from AUTH_SECRET, which is required", async () => {
-    const withEnv = (env: Record<string, string>) =>
-      Effect.runPromiseExit(
-        RootSecret.use((root) => root.key("otp-pepper")).pipe(
-          Effect.provide(
-            RootSecret.layerConfig.pipe(
-              Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
-            ),
-          ),
-        ),
-      );
     const exit = await withEnv({ AUTH_SECRET: testRootSecret });
     assert(Exit.isSuccess(exit));
     expect(exit.value).toEqual(testKey("otp-pepper"));
@@ -110,12 +111,13 @@ describe("pkceVerifier", () => {
   });
 });
 
-describe("sealerFor", () => {
-  const seal = (purpose: Purpose, plaintext: string, row: string, encryption?: Encryption) =>
-    run(Effect.flatMap(sealerFor(purpose, encryption), (sealer) => sealer.seal(plaintext, row)));
-  const open = (purpose: Purpose, stored: string, row: string, encryption?: Encryption) =>
-    run(Effect.flatMap(sealerFor(purpose, encryption), (sealer) => sealer.open(stored, row)));
+const seal = (purpose: Purpose, plaintext: string, row: string, encryption?: Encryption) =>
+  run(Effect.flatMap(sealerFor(purpose, encryption), (sealer) => sealer.seal(plaintext, row)));
 
+const open = (purpose: Purpose, stored: string, row: string, encryption?: Encryption) =>
+  run(Effect.flatMap(sealerFor(purpose, encryption), (sealer) => sealer.open(stored, row)));
+
+describe("sealerFor", () => {
   it("seals in the current format and opens only for the same purpose and row", async () => {
     const sealed = await seal("totp-secret", "JBSWY3DPEHPK3PXP", "user-1");
     expect(sealed.startsWith(Cipher.SEALED_PREFIX)).toBe(true);

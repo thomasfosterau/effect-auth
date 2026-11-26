@@ -369,6 +369,10 @@ describe("effectivePolicies batching", () => {
   });
 });
 
+// Wide rather than deep: each Has is two nodes (itself and its path).
+const wide = (count: number) =>
+  Condition.or(...Arr.makeBy(count, () => Condition.has("context", "x")));
+
 describe("condition bounds", () => {
   it("measures depth through objects and arrays, and counts nodes", () => {
     expect(Condition.isWithinBounds(nested(Condition.maxDepth))).toBe(true);
@@ -376,9 +380,6 @@ describe("condition bounds", () => {
     // `and` adds two levels: the And object and its conditions array.
     expect(Condition.isWithinBounds(Condition.and(nested(Condition.maxDepth - 2)))).toBe(true);
     expect(Condition.isWithinBounds(Condition.and(nested(Condition.maxDepth - 1)))).toBe(false);
-    // Wide rather than deep: each Has is two nodes (itself and its path).
-    const wide = (count: number) =>
-      Condition.or(...Arr.makeBy(count, () => Condition.has("context", "x")));
     expect(Condition.isWithinBounds(wide((Condition.maxNodes - 2) / 2))).toBe(true);
     expect(Condition.isWithinBounds(wide(Condition.maxNodes / 2))).toBe(false);
   });

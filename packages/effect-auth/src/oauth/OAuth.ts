@@ -1157,6 +1157,10 @@ export const hashedStateStore = (
   consume: (state) => Effect.flatMap(hash(state), store.consume),
 });
 
+/** The row a token is sealed for: the account and which of its tokens. */
+const tokenRow = (account: OAuthAccount, which: "access" | "refresh") =>
+  `${account.provider}\u0000${account.providerId}\u0000${which}`;
+
 /**
  * Create an OAuth service with configured providers
  */
@@ -1211,10 +1215,6 @@ export const make = (
 
     const randomAccountId = (): Effect.Effect<string> =>
       crypto.randomBytes(16).pipe(Effect.map((bytes) => Hex.encode(bytes)));
-
-    /** The row a token is sealed for: the account and which of its tokens. */
-    const tokenRow = (account: OAuthAccount, which: "access" | "refresh") =>
-      `${account.provider}\u0000${account.providerId}\u0000${which}`;
 
     const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> =>
       Effect.gen(function* () {

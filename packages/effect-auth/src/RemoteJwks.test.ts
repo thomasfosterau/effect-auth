@@ -32,6 +32,8 @@ const scriptedFetch = Effect.fn("scriptedFetch")(function* (
 const run = <A, E>(effect: Effect.Effect<A, E>) =>
   Effect.runPromise(effect.pipe(Effect.provide(TestClock.layer())));
 
+const pickA: RemoteJwks.Pick = (keys) => keys.find((k) => k["kid"] === "a");
+
 describe("RemoteJwks", () => {
   it("serves cached keys until they go stale, then refetches", () =>
     run(
@@ -120,7 +122,6 @@ describe("RemoteJwks", () => {
       Effect.gen(function* () {
         const sets = yield* RemoteJwks.makeKeySets();
         const { fetch, calls } = yield* scriptedFetch([[{ kid: "a" }]]);
-        const pickA: RemoteJwks.Pick = (keys) => keys.find((k) => k["kid"] === "a");
         const first = yield* sets.forUrl("https://a.test/jwks", fetch);
         yield* first.key(pickA);
         const again = yield* sets.forUrl("https://a.test/jwks", fetch);

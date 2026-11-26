@@ -62,6 +62,8 @@ import {
 const ORG_A = "org-a";
 const ORG_B = "org-b";
 
+const unused = () => Effect.die("unused");
+
 /**
  * In-memory stand-ins for everything `ScimService` touches.
  *
@@ -181,8 +183,6 @@ const makeStores = (
     revokeOtherSessions: () => Effect.void,
     setSessionAttributes: () => Effect.die("unused"),
   };
-
-  const unused = () => Effect.die("unused");
 
   const orgStore: typeof OrganizationStore.Service = {
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
@@ -380,6 +380,8 @@ const makeStores = (
   };
 };
 
+const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
+
 /** Build the service plus a connection for each of two organizations. */
 const makeFixture = async (
   config: Scim.ScimConfig = {},
@@ -387,7 +389,6 @@ const makeFixture = async (
 ) => {
   const stores = makeStores(storeOptions);
   const service = await Effect.runPromise(Scim.make(config).pipe(Effect.provide(stores.layer)));
-  const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
   const a = await run(service.createConnection(ORG_A));
   const b = await run(service.createConnection(ORG_B));
   return { ...stores, service, run, a, b };

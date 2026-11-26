@@ -360,11 +360,12 @@ describe("AccountLockoutPlugin", () => {
   });
 });
 
+const options = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
+
 describe("memoryAccountLockoutStore", () => {
   it("stays bounded: drops ended locks and idle counters once it grows, and keeps active locks", () => {
     const records = MutableHashMap.empty<string, AccountLockoutRecord>();
     const store = memoryAccountLockoutStore(records);
-    const options = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
     const attemptEach = (prefix: string, count: number, now: number) =>
       Effect.forEach(
         Arr.range(0, count - 1),

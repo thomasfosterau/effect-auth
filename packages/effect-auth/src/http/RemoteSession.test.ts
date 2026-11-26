@@ -450,6 +450,8 @@ describe("RemoteSession cancels every response body it does not read", () => {
   });
 });
 
+const unreachableFetcher = () => Promise.reject(new TypeError("Network connection lost."));
+
 // ---------------------------------------------------------------------------
 // The edge, end to end
 // ---------------------------------------------------------------------------
@@ -494,8 +496,7 @@ describe("RemoteSession.resolveAtEdge", () => {
   });
 
   it("resolveAtEdgeFailOpen degrades an unreachable binding to anonymous", async () => {
-    const fetcher = () => Promise.reject(new TypeError("Network connection lost."));
-    const client = RemoteSession.make({ fetcher });
+    const client = RemoteSession.make({ fetcher: unreachableFetcher });
     let degraded = false;
 
     const result = await Effect.runPromise(

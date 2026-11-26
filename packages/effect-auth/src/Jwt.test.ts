@@ -715,6 +715,14 @@ describe("JwtService — stored private keys", () => {
   });
 });
 
+const b64 = (value: Schema.Json) => Buffer.from(encodeJson(value)).toString("base64url");
+
+const rsaClaims = () => ({
+  iss: baseConfig.issuer,
+  sub: "rsa-user",
+  exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
+});
+
 describe("RemoteJwksVerifier", () => {
   // Isolated key store so beforeEach on the shared store doesn't interfere.
   const remotePairs: JwtKeyPair[] = [];
@@ -734,17 +742,11 @@ describe("RemoteJwksVerifier", () => {
   // A third-party issuer signing with RS256, which JwtService never does.
   const rsa = testJwsKeyPair("RS256");
   const rsaJwks = { keys: [{ ...rsa.publicKeyJwk, kid: "rsa-1", alg: "RS256", use: "sig" }] };
-  const b64 = (value: Schema.Json) => Buffer.from(encodeJson(value)).toString("base64url");
   const rsaSigned = (claims: Schema.JsonObject): string => {
     const input = `${b64({ alg: "RS256", kid: "rsa-1", typ: "at+jwt" })}.${b64(claims)}`;
     const signature = testSignJws("RS256", Buffer.from(input), rsa.privateKeyPem);
     return `${input}.${Buffer.from(signature).toString("base64url")}`;
   };
-  const rsaClaims = () => ({
-    iss: baseConfig.issuer,
-    sub: "rsa-user",
-    exp: Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000) + 300,
-  });
 
   const jwksUrl = "https://issuer.test/.well-known/jwks.json";
   const rsaJwksUrl = "https://issuer.test/rsa/jwks.json";

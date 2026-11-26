@@ -210,6 +210,28 @@ describe("the read-path predicates", () => {
   });
 });
 
+const decideWithAuthorizer = (
+  viewer: AppUser,
+  policies: ReadonlyArray<Policy.DeclarativePolicy>,
+  resource: Entity.Entity,
+) =>
+  Effect.runSync(
+    Effect.gen(function* () {
+      const authorizer = yield* Authorizer.Authorizer;
+      return yield* authorizer.check({ action: "write", resource: resource.ref });
+    }).pipe(
+      Authorizer.CurrentPrincipal.provide(Entity.ref("User", viewer.id)),
+      Effect.provide(Authorizer.Authorizer.layer({ policies })),
+      Effect.provideService(
+        Authorizer.EntityResolver,
+        Authorizer.memoryEntityResolver([
+          Entity.entity(Entity.ref("User", viewer.id), { attributes: { role: viewer.role } }),
+          resource,
+        ]),
+      ),
+    ),
+  );
+
 describe("guards and the policy kernel", () => {
   const viewers = [admin, moderator, contributor, member, user("superadmin"), null];
 
@@ -239,28 +261,6 @@ describe("guards and the policy kernel", () => {
   });
 
   it("an Authorizer handed the kit's own policies decides exactly as the gates do", () => {
-    const decideWithAuthorizer = (
-      viewer: AppUser,
-      policies: ReadonlyArray<Policy.DeclarativePolicy>,
-      resource: Entity.Entity,
-    ) =>
-      Effect.runSync(
-        Effect.gen(function* () {
-          const authorizer = yield* Authorizer.Authorizer;
-          return yield* authorizer.check({ action: "write", resource: resource.ref });
-        }).pipe(
-          Authorizer.CurrentPrincipal.provide(Entity.ref("User", viewer.id)),
-          Effect.provide(Authorizer.Authorizer.layer({ policies })),
-          Effect.provideService(
-            Authorizer.EntityResolver,
-            Authorizer.memoryEntityResolver([
-              Entity.entity(Entity.ref("User", viewer.id), { attributes: { role: viewer.role } }),
-              resource,
-            ]),
-          ),
-        ),
-      );
-
     const doc = Entity.entity(Entity.ref("Owned", "doc-1"), {
       attributes: { owner: Entity.entityValue(Entity.ref("User", member.id)) },
     });
@@ -310,24 +310,24 @@ describe("the capability hooks", () => {
   });
 });
 
-describe("the viewer seam (SessionContext)", () => {
-  const libraryUser = (attributes: Types.User["attributes"]): Types.SessionWithUser => ({
-    session: {
-      id: "s1",
-      userId: "u1",
-      expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-      lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-      attributes: {},
-    },
-    user: {
-      id: "u1",
-      createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-      updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
-      attributes,
-    },
-  });
+const libraryUser = (attributes: Types.User["attributes"]): Types.SessionWithUser => ({
+  session: {
+    id: "s1",
+    userId: "u1",
+    expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    attributes: {},
+  },
+  user: {
+    id: "u1",
+    createdAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    updatedAt: DateTime.toDateUtc(DateTime.makeUnsafe(0)),
+    attributes,
+  },
+});
 
+describe("the viewer seam (SessionContext)", () => {
   class LibraryViewer extends Context.Service<
     LibraryViewer,
     Option.Option<SessionContext.UserWithRole>

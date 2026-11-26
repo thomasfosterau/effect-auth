@@ -233,6 +233,14 @@ export const entityResolver = (config: RbacConfig): typeof EntityResolver.Servic
 export const entityResolverLayer = (config: RbacConfig): Layer.Layer<EntityResolver> =>
   Layer.succeed(EntityResolver)(entityResolver(config));
 
+const resourcesOf = (scoped: ReadonlyArray<PermissionRef>): Array<string> =>
+  Arr.dedupe(
+    Arr.map(
+      Arr.filter(scoped, ({ resource }) => resource !== "*"),
+      ({ resource }) => resource,
+    ),
+  );
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -257,13 +265,6 @@ interface EntityDecls {
 export const model = (config: RbacConfig): AuthorizationModel.Model => {
   const principalType = principalTypeOf(config);
   const grants = Arr.flatMap(entries(config.rolePermissions), ([, permissions]) => permissions);
-  const resourcesOf = (scoped: ReadonlyArray<PermissionRef>): Array<string> =>
-    Arr.dedupe(
-      Arr.map(
-        Arr.filter(scoped, ({ resource }) => resource !== "*"),
-        ({ resource }) => resource,
-      ),
-    );
   const actions = Arr.dedupe(
     Arr.map(
       Arr.filter(grants, ({ action }) => action !== "*"),
