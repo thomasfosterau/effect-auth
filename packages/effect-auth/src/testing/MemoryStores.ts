@@ -12,7 +12,8 @@
  * created through one is read through the others. {@link layer} provides every
  * store at once over fresh state, along with the core's `KeyValueStore`-backed
  * ephemeral stores (`layerKVSingleProcess`) over an in-memory `KeyValueStore` (provided
- * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it),
+ * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it,
+ * and its `KeyValueStoreTake`, so the token stores' `consume` takes records),
  * and `memoryIdentifierStore`.
  *
  * Every operation is synchronous, so the read-then-write steps are atomic
@@ -33,6 +34,7 @@ import { memoryIdentifierStore, IdentifierStore } from "../Identifier.ts";
 import { JwtKeyStore, type JwtKeyPair } from "../Jwt.ts";
 import {
   type KeyValueStoreKeys,
+  type KeyValueStoreTake,
   layerKVSingleProcess,
   layerMemoryKeyValueStore,
 } from "../KeyValueStores.ts";
@@ -720,6 +722,7 @@ export type MemoryStores =
   | Layer.Success<typeof layerKVSingleProcess>
   | KeyValueStore.KeyValueStore
   | KeyValueStoreKeys
+  | KeyValueStoreTake
   | RootSecret;
 
 /**
@@ -729,9 +732,9 @@ export type MemoryStores =
  * state, WebAuthn challenges, rate limits, verification, reset and magic-link
  * tokens, email OTPs, pending multi-factor challenges) run over an in-memory
  * `KeyValueStore`, which the layer also provides with its `KeyValueStoreKeys`
- * listing, so `purgeExpiredKV` runs against it. It also provides the public
- * test {@link RootSecret} (`testRootSecretLayer`). Each build of the layer
- * starts empty.
+ * listing, so `purgeExpiredKV` runs against it, and its `KeyValueStoreTake`.
+ * It also provides the public test {@link RootSecret} (`testRootSecretLayer`).
+ * Each build of the layer starts empty.
  *
  * @example
  * ```ts
