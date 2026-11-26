@@ -446,10 +446,9 @@ describe("PasswordResetService", () => {
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* PasswordReset.make({ sendResetPassword: () => Effect.void });
-          return yield* Effect.all(
-            passwords.map((password) =>
-              Effect.result(service.resetPassword("token-race", password)),
-            ),
+          return yield* Effect.forEach(
+            passwords,
+            (password) => Effect.result(service.resetPassword("token-race", password)),
             { concurrency: "unbounded" },
           );
         }),
