@@ -1,4 +1,5 @@
 import { sha256Hex } from "../testing/Sha256.ts";
+import { testRootSecretLayer } from "../testing/RootSecret.ts";
 import {
   assert,
   describe,
@@ -666,6 +667,7 @@ const makeFixture = (
   // UserStore/Hooks already provided by `baseServices`).
   const featureBase = Layer.mergeAll(
     baseServices,
+    testRootSecretLayer,
     Layer.succeed(AnonymousUserStore)(anonymousUserStore),
     Layer.succeed(DeviceAuthorizationStore)(deviceStore),
     Layer.succeed(PhoneOtpStore)(phoneOtpStore),

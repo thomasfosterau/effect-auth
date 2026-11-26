@@ -78,6 +78,7 @@ import {
   JwtKeyStore,
   JwtService,
   jwkToSpkiDer,
+  RootSecret,
   sha256,
   signJws,
   verifyJws,
@@ -157,7 +158,12 @@ const jwtService = (algorithm) =>
     }).pipe(
       Effect.provide(
         JwtService.layer({ issuer: "https://app.example.com", algorithm }).pipe(
-          Layer.provide(Layer.succeed(JwtKeyStore, memoryJwtKeyStore())),
+          Layer.provide(
+            Layer.merge(
+              Layer.succeed(JwtKeyStore, memoryJwtKeyStore()),
+              Layer.orDie(RootSecret.RootSecret.layer("0123456789abcdef".repeat(4))),
+            ),
+          ),
         ),
       ),
     ),

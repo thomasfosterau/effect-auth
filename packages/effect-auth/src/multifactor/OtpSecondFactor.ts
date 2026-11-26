@@ -17,12 +17,13 @@
  * @module otp-second-factor
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
 import { SecondFactorGate, type SecondFactorChallenge } from "../email/EmailPassword.ts";
 import { Hooks, type HookError } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import * as RootSecret from "../RootSecret.ts";
 import { SessionService } from "../SessionService.ts";
 import { constantTimeHashEqual, tokenHasher } from "../TokenHash.ts";
 import { TrustedDeviceService } from "../TrustedDevice.ts";
@@ -52,10 +53,10 @@ export class OtpSecondFactorError extends Data.TaggedError("OtpSecondFactorError
  * stored; the plaintext is delivered out-of-band to the user.
  */
 export interface OtpSecondFactorRecord {
-  /** Raw challenge token returned to the client; used as the store key. */
+  /** The digest of the challenge token returned to the client; the store key. */
   readonly pendingToken: string;
   readonly userId: string;
-  /** SHA-256 hash of the plaintext OTP (`(yield* hashToken(otp))`). */
+  /** The peppered digest of the plaintext OTP (HMAC-SHA256 under the root secret). */
   readonly otpHash: string;
   readonly attempts: number;
   readonly createdAt: number;
@@ -125,6 +126,24 @@ export interface OtpSecondFactorVerifyResult {
   readonly token: string;
 }
 
+/** `store` keyed by the digest of each pending token, never the raw token. */
+const hashedStore = (
+  store: typeof OtpSecondFactorStore.Service,
+  hash: (token: string) => Effect.Effect<string>,
+): typeof OtpSecondFactorStore.Service => ({
+  create: (record) =>
+    Effect.flatMap(hash(record.pendingToken), (pendingToken) =>
+      store.create({ ...record, pendingToken }),
+    ),
+  get: (token) => Effect.flatMap(hash(token), store.get),
+  update: (record) =>
+    Effect.flatMap(hash(record.pendingToken), (pendingToken) =>
+      store.update({ ...record, pendingToken }),
+    ),
+  incrementAttempts: (token) => Effect.flatMap(hash(token), store.incrementAttempts),
+  delete: (token) => Effect.flatMap(hash(token), store.delete),
+});
+
 /**
  * An email or SMS one-time code as the second factor: issues a challenge after the password step and completes sign-in when the code matches.
  *
@@ -169,15 +188,22 @@ export const make = (
 ): Effect.Effect<
   typeof OtpSecondFactorService.Service,
   never,
-  OtpSecondFactorStore | SessionService | Hooks | SecureRandom.SecureRandom | Digest.Digest
+  | OtpSecondFactorStore
+  | SessionService
+  | Hooks
+  | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Mac.Mac
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const otpLength = config.otpLength ?? 6;
     const expiresIn = config.expiresIn ?? 5 * 60 * 1000;
     const maxAttempts = config.maxAttempts ?? 3;
 
-    const store = yield* OtpSecondFactorStore;
-    const hashToken = yield* tokenHasher;
+    const digestToken = yield* tokenHasher;
+    const store = hashedStore(yield* OtpSecondFactorStore, digestToken);
+    const hashOtp = yield* RootSecret.pepperHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -196,7 +222,7 @@ export const make = (
         const record: OtpSecondFactorRecord = {
           pendingToken,
           userId: user.id,
-          otpHash: yield* hashToken(otp),
+          otpHash: yield* hashOtp(otp),
           attempts: 0,
           createdAt: now,
           expiresAt: now + expiresIn,
@@ -255,7 +281,7 @@ export const make = (
           return yield* new OtpSecondFactorError({ message: "Too many attempts" });
         }
 
-        if (!constantTimeHashEqual(record.otpHash, yield* hashToken(otp))) {
+        if (!constantTimeHashEqual(record.otpHash, yield* hashOtp(otp))) {
           if (attempts >= maxAttempts) {
             yield* store.delete(pendingToken);
             return yield* new OtpSecondFactorError({ message: "Too many attempts" });

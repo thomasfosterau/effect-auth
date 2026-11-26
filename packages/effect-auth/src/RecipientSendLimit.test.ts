@@ -35,7 +35,7 @@ import * as MagicLink from "./MagicLink.ts";
 import * as Password from "./password/Password.ts";
 import * as PasswordReset from "./password/PasswordReset.ts";
 import * as PhoneOtp from "./PhoneOtp.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { defaultRecipientSendLimit, isRecipientSendCapped } from "./RecipientSendLimit.ts";
 import { inlineDeliveryScheduler } from "./testing/Delivery.ts";
@@ -105,7 +105,7 @@ const makeWorld = () => {
     ).pipe(Layer.provide(KeyValueStore.layerMemory)),
     Hooks.Default,
     inlineDeliveryScheduler,
-    PlatformCrypto.layer,
+    testCryptoLayer,
     TestClock.layer(),
   );
   return { rateLimits, sent, layer };

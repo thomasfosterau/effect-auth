@@ -15,7 +15,7 @@
  */
 import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import {
   claimIdentifier,
@@ -32,8 +32,8 @@ import {
   UserStore,
 } from "./UserStore.ts";
 import * as OtpCode from "./OtpCode.ts";
-import { tokenHasher } from "./TokenHash.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as RootSecret from "./RootSecret.ts";
 import type { RateLimitStore } from "./RateLimit.ts";
 import { makeRecipientSendGate } from "./RecipientSendLimit.ts";
 import type * as Types from "./Types.ts";
@@ -51,7 +51,7 @@ export class PhoneOtpError extends Data.TaggedError("PhoneOtpError")<{
 /** The purposes a phone OTP can be issued for. */
 export type PhoneOtpPurpose = "sign-in" | "phone-verification";
 
-/** Stored phone OTP record. Only the SHA-256 hash of the code is persisted. */
+/** Stored phone OTP record. Only the peppered hash of the code (HMAC-SHA256 under the root secret) is persisted. */
 export interface PhoneOtpRecord {
   readonly phoneNumber: string;
   readonly otpHash: string;
@@ -242,7 +242,7 @@ export class PhoneOtpService extends Context.Service<
   {
     /**
      * Generate an OTP for the given phone number + purpose (replacing any
-     * outstanding one) and send it. Only a SHA-256 hash of the code is stored.
+     * outstanding one) and send it. Only a peppered hash of the code is stored.
      * Anti-enumeration: for `sign-in` with sign-up disabled and no user, this
      * succeeds without sending. It stores an undelivered marker record in
      * place of the code: the record holds the hash of a random 32-byte secret
@@ -344,6 +344,8 @@ export const make = (
   | RateLimitStore
   | SecureRandom.SecureRandom
   | Digest.Digest
+  | Mac.Mac
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const codes = OtpCode.resolveCodeConfig(config);
@@ -356,7 +358,7 @@ export const make = (
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
-    const hashCode = yield* tokenHasher;
+    const hashCode = yield* RootSecret.pepperHasher;
     const detached = yield* makeDetachedSend;
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 

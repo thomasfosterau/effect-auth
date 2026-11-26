@@ -1,4 +1,5 @@
 import { sha256Hex } from "../testing/Sha256.ts";
+import { testRootSecretLayer } from "../testing/RootSecret.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, DateTime, Effect, Layer, MutableHashMap, MutableHashSet } from "effect";
 import * as Arr from "effect/Array";
@@ -385,6 +386,7 @@ const makeFixture = (admin?: AdminConfig) => {
 
   const stage1 = Layer.mergeAll(
     storesLayer,
+    testRootSecretLayer,
     sessionServiceLayer,
     userServiceLayer,
     rateLimiterLayer,

@@ -41,13 +41,14 @@ import {
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { Aead, Digest, SecureRandom } from "effect/crypto";
+import { Aead, Digest, Kdf, SecureRandom } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
+import * as RootSecret from "./RootSecret.ts";
 import * as Types from "./Types.ts";
 import * as Obs from "./Observability.ts";
 
@@ -124,17 +125,12 @@ export interface JwtConfig {
    */
   readonly clockSkewLeeway?: number;
   /**
-   * Opt-in encryption-at-rest for the PKCS#8 PEM private key stored in
-   * {@link JwtKeyStore}. The store sees only ciphertext; plaintext is only
-   * ever held in memory during signing.
-   *
-   * Pass `{ secret }` to use the built-in AES-256-GCM cipher (key derived
-   * from the secret via SHA-256; each stored key gets a unique random IV and
-   * a GCM auth-tag for integrity). Pass `{ cipher }` to supply a custom
-   * {@link TokenCipher} (envelope encryption, HSM-backed keys, etc.).
-   *
-   * Strongly recommended in production. When this option is set, encryption
-   * is always applied — there is no opt-out per key.
+   * How the PKCS#8 PEM private key in {@link JwtKeyStore} is encrypted at
+   * rest; it always is, bound to its key id. By default the key is derived
+   * from the {@link RootSecret.RootSecret}. Pass `{ secret }` to derive it from
+   * an override secret instead (keys encrypted under it before still open),
+   * or `{ cipher }` for a custom {@link TokenCipher} (envelope encryption,
+   * HSM-backed keys, etc.). A key stored as plaintext before still reads.
    */
   readonly encryptPrivateKey?:
     | { readonly secret: Redacted.Redacted }
@@ -441,7 +437,12 @@ export const make = (
 ): Effect.Effect<
   typeof JwtService.Service,
   never,
-  JwtKeyStore | SecureRandom.SecureRandom | Aead.Aead | Digest.Digest
+  | JwtKeyStore
+  | SecureRandom.SecureRandom
+  | Aead.Aead
+  | Digest.Digest
+  | Kdf.Kdf
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const expiresIn = config.expiresIn ?? 15 * 60 * 1000; // 15 minutes default
@@ -449,13 +450,7 @@ export const make = (
     const getSubject = config.getSubject ?? ((user: Types.User) => user.id);
     const leewayMs = config.clockSkewLeeway ?? 0;
 
-    const cipher: TokenCipher | null = config.encryptPrivateKey
-      ? "cipher" in config.encryptPrivateKey
-        ? config.encryptPrivateKey.cipher
-        : yield* Effect.orDie(
-            Cipher.aes256GcmCipher(Redacted.value(config.encryptPrivateKey.secret)),
-          )
-      : null;
+    const sealer = yield* RootSecret.sealerFor("jwt-private-key", config.encryptPrivateKey);
 
     const store = yield* JwtKeyStore;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -468,8 +463,7 @@ export const make = (
 
     /**
      * Fetch the active signing key, lazily generating and persisting one when
-     * the store is empty. Private key PEM is decrypted (when a cipher is
-     * configured) before returning, so callers always receive plaintext.
+     * the store is empty. Private key PEM is decrypted before returning, so callers always receive plaintext.
      * Concurrent first-call fibers are serialized through a Deferred so only
      * one key is generated regardless of concurrency.
      */
@@ -477,8 +471,7 @@ export const make = (
       function* (): Effect.fn.Return<JwtKeyPair, JwtError | Errors.AuthError> {
         const active = yield* store.getActive();
         if (active) {
-          if (cipher === null) return active;
-          return { ...active, privateKeyPem: yield* cipher.decrypt(active.privateKeyPem) };
+          return { ...active, privateKeyPem: yield* sealer.open(active.privateKeyPem, active.id) };
         }
 
         const deferred = yield* Deferred.make<JwtKeyPair, JwtError | Errors.AuthError>();
@@ -497,10 +490,7 @@ export const make = (
         // Leader: generate and persist the key
         const pair = yield* Effect.gen(function* () {
           const kp = yield* generateKeyPair(algorithm, crypto);
-          const toStore =
-            cipher !== null
-              ? { ...kp, privateKeyPem: yield* cipher.encrypt(kp.privateKeyPem) }
-              : kp;
+          const toStore = { ...kp, privateKeyPem: yield* sealer.seal(kp.privateKeyPem, kp.id) };
           yield* store.create(toStore);
           return kp;
         }).pipe(

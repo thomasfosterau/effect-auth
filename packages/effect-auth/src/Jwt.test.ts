@@ -1,4 +1,5 @@
 import { assert, describe, it, expect, beforeEach, beforeAll, afterAll } from "vite-plus/test";
+import { testCryptoContext, type TestCryptoServices } from "./testing/TestCrypto.ts";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 import { Clock, Context, DateTime, Effect, Redacted, Result } from "effect";
@@ -35,10 +36,7 @@ const jwtKeyStore = {
   list: () => Effect.sync(() => [...keyPairs]),
 };
 
-const storeContext = Context.merge(
-  Context.make(JwtKeyStore, jwtKeyStore),
-  PlatformCrypto.context(),
-);
+const storeContext = Context.merge(Context.make(JwtKeyStore, jwtKeyStore), testCryptoContext());
 
 const user: User = {
   id: "user-1",
@@ -54,7 +52,7 @@ const baseConfig: JwtConfig = {
   audience: "https://api.example.com",
 };
 
-const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | PlatformCrypto.Services>) =>
+const run = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | TestCryptoServices>) =>
   Effect.runPromise(Effect.provide(program, storeContext));
 
 describe("JwtService", () => {
@@ -524,11 +522,8 @@ describe("RemoteJwksVerifier", () => {
       }),
     list: () => Effect.sync(() => [...remotePairs]),
   };
-  const remoteContext = Context.merge(
-    Context.make(JwtKeyStore, remoteStore),
-    PlatformCrypto.context(),
-  );
-  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | PlatformCrypto.Services>) =>
+  const remoteContext = Context.merge(Context.make(JwtKeyStore, remoteStore), testCryptoContext());
+  const runRemote = <A, E>(program: Effect.Effect<A, E, JwtKeyStore | TestCryptoServices>) =>
     Effect.runPromise(Effect.provide(program, remoteContext));
 
   let server: Server;

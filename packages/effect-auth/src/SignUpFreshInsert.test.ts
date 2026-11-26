@@ -32,7 +32,7 @@ import {
   makeIdentifier,
   memoryIdentifierStore,
 } from "./Identifier.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { type CreateUserResult, UserStore } from "./UserStore.ts";
 import * as MagicLink from "./MagicLink.ts";
@@ -126,7 +126,7 @@ const makeWorld = (type: IdentifierType, value: string) => {
     Layer.succeed(EmailPasswordStore)(memoryEmailPasswordStore()),
     Layer.succeed(RateLimitStore)(memoryRateLimitStore()),
     Hooks.Default,
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   return {

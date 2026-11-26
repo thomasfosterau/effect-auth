@@ -9,7 +9,7 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
@@ -286,7 +286,7 @@ const makeStores = (
       ),
     ),
     Hooks.Default,
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   /** Register an organization row, with whatever JIT settings a test needs. */
@@ -1215,7 +1215,7 @@ const makeHttpFixture = () => {
     Layer.succeed(OrganizationStore)(orgStore as never),
     Layer.succeed(SamlVerifier)(stubSamlVerifier(samlRequests)),
     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   const ssoServiceLayer = SsoService.layer().pipe(Layer.provide(ssoDeps));

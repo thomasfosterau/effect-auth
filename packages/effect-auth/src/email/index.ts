@@ -11,7 +11,6 @@ export {
   type EmailOtpAuthResult,
   type EmailOtpCheckResult,
   EmailOtpService,
-  hashOtp,
   generateOtp,
 } from "./EmailOtp.ts";
 export {

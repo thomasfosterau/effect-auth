@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { SessionService } from "./SessionService.ts";
@@ -187,7 +187,7 @@ describe("OidcProviderService", () => {
       get: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
+      Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -197,7 +197,7 @@ describe("OidcProviderService", () => {
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     return { stores, layer };
   };
@@ -604,7 +604,7 @@ describe("OidcProviderService dynamic client registration", () => {
       get: () => Effect.succeed(null),
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-      Layer.provide(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore)),
+      Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
     );
     const layer = Layer.mergeAll(
       Layer.succeed(OidcClientStore)(stores.clientStore),
@@ -614,7 +614,7 @@ describe("OidcProviderService dynamic client registration", () => {
       Layer.succeed(UserStore)(userStore),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       jwtServiceLayer,
-      PlatformCrypto.layer,
+      testCryptoLayer,
     );
     const config = {
       ...baseConfig,
@@ -1076,7 +1076,7 @@ const makeHttpFixture = (
 
   const jwtKeyStoreLayer = Layer.succeed(JwtKeyStore)(oidc.jwtKeyStore);
   const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
-    Layer.provide(jwtKeyStoreLayer),
+    Layer.provide(Layer.merge(jwtKeyStoreLayer, testCryptoLayer)),
   );
 
   // `OidcProviderService` resolves the OIDC stores, the core `UserStore`, and
@@ -1362,7 +1362,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(clientSecret).toBeTruthy();
 
     // 2. Authorize with the user's session cookie (+ PKCE + nonce).
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1626,7 +1626,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorizeOnce = async () => {
       const res = await fx.handler(
         get(
@@ -1769,7 +1769,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1858,7 +1858,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1928,7 +1928,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -1992,7 +1992,7 @@ describe("HTTP OIDC provider endpoints", () => {
     );
     const { client, clientSecret } = await registeredClient(registered);
 
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",
@@ -2169,7 +2169,7 @@ describe("HTTP dynamic client registration (RFC 7591 / 7592)", () => {
     expect(client.client_id_issued_at).toBeGreaterThan(0);
 
     // 2. Authorization code with PKCE S256 — no client secret anywhere.
-    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(PlatformCrypto.layer)));
+    const pkce = await Effect.runPromise(generatePKCE().pipe(Effect.provide(testCryptoLayer)));
     const authorize = await fx.handler(
       get(
         "/oauth2/authorize",

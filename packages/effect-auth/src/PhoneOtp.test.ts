@@ -1,4 +1,3 @@
-import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { memoryRateLimitStore } from "./testing/MemoryStores.ts";
@@ -7,7 +6,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { SecureRandom } from "effect/crypto";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoContext, type TestCryptoServices, testPepper } from "./testing/TestCrypto.ts";
 import {
   getPhoneNumber,
   type PhoneOtpRecord,
@@ -191,7 +190,7 @@ const makeTestContext = async (
       makeSessionService(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        PlatformCrypto.context(),
+        testCryptoContext(),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -209,7 +208,7 @@ const makeTestContext = async (
           Context.make(PhoneOtpStore, phoneOtpStore),
           Context.make(PhoneOtpUserStore, phoneOtpUserStore),
         ),
-        PlatformCrypto.context(),
+        testCryptoContext(),
       ),
     ),
     RateLimitStore,
@@ -251,7 +250,7 @@ describe("PhoneOtpService", () => {
     const otp = recorded(sentOtps).otp;
     expect(otp).toMatch(/^\d{6}$/);
     const record = Option.getOrUndefined(MutableHashMap.get(records, "+15551230000:sign-in"));
-    expect(record?.otpHash).toBe(sha256Hex(otp));
+    expect(record?.otpHash).toBe(testPepper(otp));
     expect(record?.attempts).toBe(0);
   });
 
@@ -362,7 +361,7 @@ describe("PhoneOtpService", () => {
     const testContext = await makeTestContext();
     MutableHashMap.set(records, "+15551234444:sign-in", {
       phoneNumber: "+15551234444",
-      otpHash: sha256Hex("123456"),
+      otpHash: testPepper("123456"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 10_000,
@@ -505,7 +504,7 @@ describe("PhoneOtpService", () => {
     // Seed a record whose createdAt is older than the 60 s cooldown.
     MutableHashMap.set(records, "+15559990002:sign-in", {
       phoneNumber: "+15559990002",
-      otpHash: sha256Hex("000000"),
+      otpHash: testPepper("000000"),
       purpose: "sign-in",
       attempts: 0,
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 70_000,
@@ -528,7 +527,7 @@ describe("PhoneOtpService", () => {
     // The new record has a fresh hash, not the seeded one.
     expect(
       Option.getOrUndefined(MutableHashMap.get(records, "+15559990002:sign-in"))?.otpHash,
-    ).toBe(sha256Hex(recorded(sentOtps).otp));
+    ).toBe(testPepper(recorded(sentOtps).otp));
   });
 
   it("applies a 60 s cooldown by default, and none with resendCooldown: 0", async () => {
@@ -634,7 +633,7 @@ describe("PhoneOtpService", () => {
     // The stub draws only the all-zero code, as the account holder's shows.
     expect(sentOtps).toEqual([{ phoneNumber: "+15559990020", otp: guess, purpose: "sign-in" }]);
     expect(marker).toBeDefined();
-    expect(marker?.otpHash).not.toBe(sha256Hex(guess));
+    expect(marker?.otpHash).not.toBe(testPepper(guess));
     expect(error).toMatchObject({ _tag: "PhoneOtpError", message: "Invalid or expired OTP" });
     expect(MutableHashMap.size(users)).toBe(1);
     expect(createdWith).toEqual([]);
@@ -710,7 +709,7 @@ describe("PhoneOtpService verification where send hides the account", () => {
       | SessionService
       | Hooks
       | RateLimitStore
-      | PlatformCrypto.Services
+      | TestCryptoServices
     >,
   ) =>
     makeTestContext().then((context) =>
@@ -875,7 +874,7 @@ const runInContext = <A, E>(
     | UserStore
     | SessionService
     | RateLimitStore
-    | PlatformCrypto.Services
+    | TestCryptoServices
     | Hooks
   >,
 ) =>

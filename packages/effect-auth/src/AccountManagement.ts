@@ -15,7 +15,8 @@
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
-import { SecureRandom } from "effect/crypto";
+import { type Digest, SecureRandom } from "effect/crypto";
+import { tokenHasher } from "./TokenHash.ts";
 import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -45,6 +46,7 @@ export type AccountTokenPurpose = "change-email" | "delete-account";
  * for `change-email` tokens.
  */
 export interface AccountToken {
+  /** The token's SHA-256 digest, the store key; the raw token is only emailed. */
   readonly token: string;
   readonly userId: string;
   readonly purpose: AccountTokenPurpose;
@@ -207,6 +209,18 @@ export class AccountManagementService extends Context.Service<
     Layer.effect(AccountManagementService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
+/** `store` keyed by the digest of each token, never the emailed token itself. */
+const hashedAccountTokens = (
+  store: typeof AccountManagementStore.Service,
+  hash: (token: string) => Effect.Effect<string>,
+): typeof AccountManagementStore.Service => ({
+  create: (record) =>
+    Effect.flatMap(hash(record.token), (token) => store.create({ ...record, token })),
+  get: (token) => Effect.flatMap(hash(token), store.get),
+  delete: (token) => Effect.flatMap(hash(token), store.delete),
+  deleteByUserId: store.deleteByUserId,
+});
+
 const make = (
   config: AccountManagementConfig,
 ): Effect.Effect<
@@ -217,6 +231,7 @@ const make = (
   | IdentifierStore
   | SessionService
   | SecureRandom.SecureRandom
+  | Digest.Digest
 > =>
   Effect.gen(function* () {
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
@@ -225,7 +240,7 @@ const make = (
 
     const users = yield* UserServiceStore;
     const identifiers = yield* IdentifierStore;
-    const store = yield* AccountManagementStore;
+    const store = hashedAccountTokens(yield* AccountManagementStore, yield* tokenHasher);
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
     const purgeServices = {

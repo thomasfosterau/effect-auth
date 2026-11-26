@@ -575,8 +575,9 @@ const providers = {
 
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
 // OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
-// unproven sign-up's password) and SessionService; a storage adapter
-// such as @thomasfosterau/effect-auth/sql provides the stores.
+// unproven sign-up's password), SessionService and RootSecret (which seals the
+// provider tokens and derives the PKCE verifier); a storage adapter such as
+// @thomasfosterau/effect-auth/sql provides the stores.
 const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
@@ -1043,7 +1044,11 @@ JWTs already issued (`Jwt`) cannot be revoked and expire on their own. Short-liv
 
 ## Configuration
 
-Encryption at rest of JWT private keys, OAuth tokens and TOTP secrets is opt-in: leave `JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` or `TWO_FACTOR_ENCRYPT_SECRET` **unset** to keep it off. A variable that is set but empty (for example `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`) fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError` naming the variable, because Effect rc.118 reads an empty value as absent and would otherwise silently store the data unencrypted. A value that is only whitespace (for example `"   "` or a lone newline) counts as empty and fails the same way; a secret with surrounding spaces but other content is accepted unchanged. The check reads the active `ConfigProvider`, so it also applies to map providers. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) is not detected and reads as unset.
+Every deployment sets one root secret: `AUTH_SECRET`, at least 32 bytes (`openssl rand -hex 32`), read by `RootSecret.layerConfig` (or given to `RootSecret.layer(secret)`), which fails at startup with `RootSecretError` when it is missing or short. Each keyed primitive gets its own key from it through HKDF-SHA256 with a purpose string, so no two share a key: the pepper for email, phone and second-factor OTPs and backup codes (stored as HMAC-SHA256, so a database read alone cannot brute-force a six-digit code), the PKCE `code_verifier` (derived from the OAuth `state`, never stored), and the encryption keys for TOTP secrets, OAuth provider tokens and JWT private keys. Those three are always sealed at rest with AES-256-GCM, bound to the purpose and the row they are stored in, so a ciphertext copied to another row does not open. `MultiFactorService`, `OtpSecondFactorService`, `EmailOtpService`, `PhoneOtpService`, `OAuthService`, `SsoService` and `JwtService` require `RootSecret`; `Testing.memoryStores` provides a fixed test secret. Raw change-email, account-deletion and pending second-factor tokens, and the OAuth `state`, are stored as SHA-256 digests, as the other bearer tokens are.
+
+`JWT_ENCRYPT_PRIVATE_KEY_SECRET`, `OAUTH_ENCRYPT_TOKENS_SECRET` and `TWO_FACTOR_ENCRYPT_SECRET` (or `encryptPrivateKey` / `encryptTokens` / `encryptSecret: { secret }`) override the root secret's key for one purpose; the key is derived from the override the same way. A variable that is set but empty (for example `JWT_ENCRYPT_PRIVATE_KEY_SECRET=""`) fails `jwtServiceConfig` / `oauthServiceOptionsConfig` / `multiFactorConfig` at startup with a `ConfigError` naming the variable, because Effect rc.118 reads an empty value as absent and would otherwise silently fall back to the root secret's key. A value that is only whitespace (for example `"   "` or a lone newline) counts as empty and fails the same way; a secret with surrounding spaces but other content is accepted unchanged. The check reads the active `ConfigProvider`, so it also applies to map providers. Known limitation: an empty secret set together with a sibling variable sharing its prefix (for example `TWO_FACTOR_ENCRYPT_SECRET=""` plus `TWO_FACTOR_ENCRYPT_SECRET_FILE=...`) is not detected and reads as unset.
+
+Upgrading from a release without the root secret: rows stay readable while they are rewritten. A stored value without the current format's `v2.` prefix is opened with the override secret's earlier cipher when one is set, and is otherwise read as the plaintext an unencrypted deployment wrote; the next write seals it. Backup codes stored under their bare SHA-256 digest still redeem. Email, phone and second-factor OTPs that are live at the upgrade stop verifying (they are minutes old; the user requests a new one), and so do OAuth states, pending second-factor challenges and change-email and account-deletion links issued before it.
 
 ## API
 

@@ -56,10 +56,17 @@ const TAG_LENGTH = 16;
  */
 const sealWith =
   (aead: typeof Aead.Aead.Service, random: typeof SecureRandom.SecureRandom.Service) =>
-  (key: Aead.Key, plaintext: string): Effect.Effect<string, CryptoError.CryptoError> =>
+  (
+    key: Aead.Key,
+    plaintext: string,
+    aad?: Uint8Array,
+  ): Effect.Effect<string, CryptoError.CryptoError> =>
     Effect.gen(function* () {
       const nonce = yield* random.randomBytes(NONCE_LENGTH);
-      const sealed = yield* aead.encrypt(key, encoder.encode(plaintext), { nonce });
+      const sealed = yield* aead.encrypt(key, encoder.encode(plaintext), {
+        nonce,
+        ...(aad !== undefined && { aad }),
+      });
       const body = sealed.subarray(0, sealed.length - TAG_LENGTH);
       const tag = sealed.subarray(sealed.length - TAG_LENGTH);
       const out = new Uint8Array(NONCE_LENGTH + sealed.length);
@@ -75,7 +82,7 @@ const sealWith =
  */
 const openWith =
   (aead: typeof Aead.Aead.Service) =>
-  (key: Aead.Key, sealed: string): Effect.Effect<string | undefined> =>
+  (key: Aead.Key, sealed: string, aad?: Uint8Array): Effect.Effect<string | undefined> =>
     Effect.gen(function* () {
       const bytes = Result.getOrUndefined(Base64Url.decode(sealed));
       if (bytes === undefined || bytes.length < NONCE_LENGTH + TAG_LENGTH + 1) return undefined;
@@ -85,7 +92,9 @@ const openWith =
       const joined = new Uint8Array(body.length + TAG_LENGTH);
       joined.set(body, 0);
       joined.set(tag, body.length);
-      const opened = yield* Effect.option(aead.decrypt(key, joined, { nonce }));
+      const opened = yield* Effect.option(
+        aead.decrypt(key, joined, { nonce, ...(aad !== undefined && { aad }) }),
+      );
       if (Option.isNone(opened)) return undefined;
       return Result.getOrUndefined(Result.try(() => decoder.decode(opened.value)));
     });
@@ -152,6 +161,83 @@ export const aes256GcmCipher = (
         ),
     };
   });
+
+// ---------------------------------------------------------------------------
+// Secrets sealed at rest
+// ---------------------------------------------------------------------------
+
+/**
+ * Seals one purpose's secrets at rest (TOTP secrets, provider tokens, JWT
+ * private keys), each bound to the row it is stored in: a ciphertext moved to
+ * another row or purpose does not open.
+ */
+export interface SecretSealer {
+  /** Seal `plaintext` for the row named `row`. */
+  readonly seal: (plaintext: string, row: string) => Effect.Effect<string, AuthError>;
+  /**
+   * Open what `seal` wrote for `row`. A value in an earlier format still
+   * opens: a legacy ciphertext under the override secret, else plaintext.
+   */
+  readonly open: (stored: string, row: string) => Effect.Effect<string, AuthError>;
+}
+
+/** The prefix of a value {@link secretSealer} sealed. */
+export const SEALED_PREFIX = "v2.";
+
+/**
+ * The default {@link SecretSealer}: AES-256-GCM under `key` (a 32-byte key
+ * derived for `purpose`), with `purpose` and the row as associated data,
+ * written as `v2.` + `base64url(iv ‖ tag ‖ ciphertext)`. A stored value
+ * without the prefix predates it: `legacy` (the {@link aes256GcmCipher} of an
+ * override secret) opens it when it can, and otherwise it is read as the
+ * plaintext an unencrypted deployment wrote.
+ */
+export const secretSealer = <RK = never, RL = never>(options: {
+  readonly key: Effect.Effect<Uint8Array, never, RK>;
+  readonly purpose: string;
+  readonly legacy?: Effect.Effect<TokenCipher, AuthError, RL> | undefined;
+}): Effect.Effect<SecretSealer, never, Aead.Aead | SecureRandom.SecureRandom | RK | RL> =>
+  Effect.gen(function* () {
+    const context = yield* Effect.context<RK | RL>();
+    const key = yield* Effect.cached(
+      Effect.flatMap(options.key, aesKey).pipe(Effect.provideContext(context)),
+    );
+    const legacyCipher =
+      options.legacy === undefined
+        ? undefined
+        : yield* Effect.cached(Effect.provideContext(options.legacy, context));
+    const seal = sealWith(yield* Aead.Aead, yield* SecureRandom.SecureRandom);
+    const open = openWith(yield* Aead.Aead);
+    const aad = (row: string) => encoder.encode(`effect-auth/${options.purpose}\u0000${row}`);
+    return {
+      seal: (plaintext, row) =>
+        Effect.flatMap(key, (k) => seal(k, plaintext, aad(row))).pipe(
+          Effect.map((sealed) => SEALED_PREFIX + sealed),
+          Effect.mapError(
+            (cause) => new AuthError({ message: `Encryption failed: ${cause.message}`, cause }),
+          ),
+        ),
+      open: (stored, row) => {
+        if (stored.startsWith(SEALED_PREFIX)) {
+          return Effect.filterOrFail(
+            Effect.flatMap(key, (k) => open(k, stored.slice(SEALED_PREFIX.length), aad(row))),
+            P.isNotUndefined,
+            () => new AuthError({ message: "Decryption failed" }),
+          );
+        }
+        if (legacyCipher === undefined) return Effect.succeed(stored);
+        return Effect.flatMap(legacyCipher, (cipher) => cipher.decrypt(stored)).pipe(
+          Effect.orElseSucceed(() => stored),
+        );
+      },
+    };
+  });
+
+/** A {@link SecretSealer} over a custom {@link TokenCipher}, which keeps its own format. */
+export const cipherSealer = (cipher: TokenCipher): SecretSealer => ({
+  seal: (plaintext) => cipher.encrypt(plaintext),
+  open: (stored) => cipher.decrypt(stored),
+});
 
 // ---------------------------------------------------------------------------
 // Digest
