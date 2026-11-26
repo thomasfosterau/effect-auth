@@ -1617,25 +1617,24 @@ export const deviceAuthorizationsGroup = Group.make(
  * formats are fixed by those specifications, so they are not JSON:API.
  */
 export const authGroup = HttpApiGroup.make("auth").add(
-  // Device authorization grant (RFC 8628). 404 when unconfigured.
+  // Device authorization grant (RFC 8628). 404 when unconfigured. Requests
+  // are form-encoded (or JSON); every refusal, a request that does not
+  // decode included, is an RFC 6749 §5.2 error object with status 400: `invalid_request`, `invalid_client`,
+  // `invalid_scope`, `unsupported_grant_type`, `invalid_grant`, and the
+  // poll's `authorization_pending`, `slow_down`, `access_denied` and
+  // `expired_token`.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
-    payload: S.DeviceCodePayload,
+    payload: [S.DeviceCodePayload, S.DeviceCodePayload.pipe(HttpApiSchema.asFormUrlEncoded())],
     success: S.DeviceCodeView,
-    // An unknown client or scope: `invalid_client` / `invalid_scope`.
-    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
-  }),
-  // Poll: RFC error codes (authorization_pending/slow_down/...) -> 400.
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
+  // A successful poll answers a token response whose `access_token` is the
+  // session token, used as a bearer; no cookie is set.
   HttpApiEndpoint.post("deviceToken", "/device/token", {
-    payload: S.DeviceTokenPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
+    payload: [S.DeviceTokenPayload, S.DeviceTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
+    success: S.DeviceTokenView,
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
   // --- Enterprise SSO callbacks (relying party). 404 when the module is
   // --- absent. The IdP sends the browser back here, so they keep their
   // --- binding's wire format.

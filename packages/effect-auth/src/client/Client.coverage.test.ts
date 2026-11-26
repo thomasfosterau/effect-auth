@@ -226,27 +226,38 @@ describe("device authorization", () => {
     const device = browser();
     const phone = browser();
 
-    const code = await device.device.code({ clientId: FIXTURE_DEVICE_CLIENT.id, scopes: ["read"] });
-    expect(code.verificationUri).toBe("https://client.test/device");
+    const code = await device.device.code({ client_id: FIXTURE_DEVICE_CLIENT.id, scope: "read" });
+    expect(code.verification_uri).toBe("https://client.test/device");
+    expect(code.verification_uri_complete).toBe(
+      `https://client.test/device?user_code=${encodeURIComponent(code.user_code)}`,
+    );
+    const poll = {
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: code.device_code,
+      client_id: FIXTURE_DEVICE_CLIENT.id,
+    };
 
     // Polling before the user decides answers 400 authorization_pending.
-    const pending = await device.device.token({ deviceCode: code.deviceCode }).catch((e) => e);
+    const pending = await device.device.token(poll).catch((e) => e);
     assert.instanceOf(pending, AuthClientError);
     expect(pending.status).toBe(400);
+    expect(pending.message).toBe("authorization_pending");
 
     await phone.signUp({ email: "device@client.test", password: PW });
     // The verification page shows the client and scopes before the user decides.
-    expect(await phone.device.lookup({ userCode: code.userCode })).toMatchObject({
+    expect(await phone.device.lookup({ userCode: code.user_code })).toMatchObject({
       clientId: "fixture-device",
       clientName: "Fixture device",
       scopes: ["read"],
       status: "pending",
     });
-    expect((await phone.device.approve({ userCode: code.userCode })).status).toBe("approved");
+    expect((await phone.device.approve({ userCode: code.user_code })).status).toBe("approved");
 
-    const authorized = await device.device.token({ deviceCode: code.deviceCode });
-    expect(authorized.user.email).toBe("device@client.test");
-    expect(await device.getSession()).not.toBeNull();
+    // The token response carries the session token; no cookie is set.
+    const authorized = await device.device.token(poll);
+    expect(authorized).toMatchObject({ token_type: "Bearer", scope: "read" });
+    expect(authorized.expires_in).toBeGreaterThan(0);
+    expect(await device.getSession()).toBeNull();
   });
 });
 

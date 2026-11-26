@@ -124,19 +124,23 @@ await client.identifiers.delete(handles[0].id);
 
 SAML's two endpoints are deliberately absent: the assertion consumer service (`POST /sso/saml/acs/:providerId`) is a form POST the IdP makes through the browser, and SP metadata (`GET /sso/saml/metadata/:providerId`) is an XML document an IdP admin imports by URL. Neither is a call JavaScript makes.
 
-**Device authorization (RFC 8628)**: `device.code()` and `device.token()` on the input-constrained device (RFC 8628's own wire format), with a `clientId` the server registered (`DeviceAuthorizationConfig.clients`); `device.lookup()`, then `device.approve()` / `device.deny()`, on the verification page the signed-in user opens (`POST /device-authorizations/lookups` and `/decisions`, the user code in the body, a session for each). `lookup` answers the client's name and the scopes it asks for, so the page shows the user what they are approving:
+**Device authorization (RFC 8628)**: `device.code()` and `device.token()` on the input-constrained device (RFC 8628's own wire format, snake_case members), with a `client_id` the server registered (`DeviceAuthorizationConfig.clients`). The token response's `access_token` is a session token to send as `Authorization: Bearer`; no cookie is set, and a refusal rejects with the RFC error code (`authorization_pending`, `slow_down`, …) as the `AuthClientError`'s message. Then `device.lookup()`, then `device.approve()` / `device.deny()`, on the verification page the signed-in user opens (`POST /device-authorizations/lookups` and `/decisions`, the user code in the body, a session for each). `lookup` answers the client's name and the scopes it asks for, so the page shows the user what they are approving:
 
 ```ts
-const { deviceCode, userCode, verificationUri, interval } = await client.device.code({
-  clientId: "my-cli",
-  scopes: ["read"],
+const { device_code, user_code, verification_uri, interval } = await client.device.code({
+  client_id: "my-cli",
+  scope: "read",
 });
-// …show userCode + verificationUri, then poll:
-const session = await client.device.token({ deviceCode }); // 400 until decided
+// …show user_code + verification_uri (or a QR code of verification_uri_complete), then poll:
+const { access_token } = await client.device.token({
+  grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+  device_code,
+  client_id: "my-cli",
+}); // 400 authorization_pending until decided
 
 // On the verification page, signed in:
-const { clientName, scopes } = await client.device.lookup({ userCode });
-await client.device.approve({ userCode });
+const { clientName, scopes } = await client.device.lookup({ userCode: user_code });
+await client.device.approve({ userCode: user_code });
 ```
 
 **Account management** — `changeEmail.{request,confirm}`, `deleteUser.{request,confirm}`. Requests are session-authenticated and always answer `{ status: true }` (anti-enumeration); the confirm endpoints take the token from the email.

@@ -103,7 +103,12 @@ export class DeviceAuthorizationStore extends Context.Service<
 
 /** RFC 8628 polling errors, mapped to the standard OAuth `error` codes. */
 export class DevicePollError extends Data.TaggedError("DevicePollError")<{
-  readonly error: "authorization_pending" | "slow_down" | "expired_token" | "access_denied";
+  readonly error:
+    | "authorization_pending"
+    | "slow_down"
+    | "expired_token"
+    | "access_denied"
+    | "invalid_grant";
   readonly message: string;
 }> {}
 
@@ -182,6 +187,11 @@ export interface DeviceBeginResult {
   readonly deviceCode: string;
   readonly userCode: string;
   readonly verificationUri: string;
+  /**
+   * `verificationUri` with the user code as its `user_code` query parameter
+   * (RFC 8628 §3.3.1), for a QR code or a link the user need not type into.
+   */
+  readonly verificationUriComplete: string;
   readonly expiresIn: number;
   readonly interval: number;
 }
@@ -264,10 +274,13 @@ export class DeviceAuthorizationService extends Context.Service<
     /**
      * Poll for completion. Returns a session once approved; otherwise fails with
      * the RFC 8628 error (`authorization_pending`, `slow_down`, `expired_token`,
-     * `access_denied`).
+     * `access_denied`). With `clientId` (RFC 8628 §3.4's `client_id`), a device
+     * code issued to another client fails with `invalid_grant` and changes
+     * nothing.
      */
     readonly poll: (
       deviceCode: string,
+      clientId?: string,
     ) => Effect.Effect<
       DevicePollResult,
       | DevicePollError
@@ -341,6 +354,10 @@ const formatUserCode = (raw: string): string => {
 /** Normalize a user code for lookup (uppercase, strip non-alphanumerics). */
 export const normalizeUserCode = (code: string): string =>
   code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** `verificationUri` with `user_code` added to its query (RFC 8628 §3.3.1). */
+const completeVerificationUri = (verificationUri: string, userCode: string): string =>
+  `${verificationUri}${verificationUri.includes("?") ? "&" : "?"}user_code=${encodeURIComponent(userCode)}`;
 
 const invalidCode = () => new DeviceCodeError({ message: "Invalid or expired code" });
 
@@ -440,15 +457,29 @@ const make = (
           deviceCode: rawDeviceCode,
           userCode,
           verificationUri: config.verificationUri,
+          verificationUriComplete: completeVerificationUri(config.verificationUri, userCode),
           expiresIn: Math.floor(expiresIn / 1000),
           interval,
         };
       }),
 
-      poll: Effect.fn("DeviceAuthorizationService.poll")(function* (deviceCode: string) {
+      poll: Effect.fn("DeviceAuthorizationService.poll")(function* (
+        deviceCode: string,
+        clientId?: string,
+      ) {
         const digest = yield* hashToken(deviceCode);
         const read = yield* store.getByDeviceCode(digest);
         const now = yield* Clock.currentTimeMillis;
+
+        // RFC 8628 §3.4 / RFC 6749 §5.2: a code issued to another client is
+        // `invalid_grant`. Checked before anything is written, so another
+        // client's polls neither slow nor spend the request.
+        if (read !== null && clientId !== undefined && read.clientId !== clientId) {
+          return yield* new DevicePollError({
+            error: "invalid_grant",
+            message: "The device code was issued to another client",
+          });
+        }
 
         if (read === null || now > read.expiresAt || Option.isNone(findClient(read.clientId))) {
           if (read !== null) yield* store.delete(read.deviceCode);

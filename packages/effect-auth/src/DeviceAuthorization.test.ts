@@ -110,6 +110,9 @@ describe("DeviceAuthorizationService", () => {
     expect(result.deviceCode).toBeTruthy();
     expect(result.userCode).toMatch(/^[A-Z0-9]+-[A-Z0-9]+$/);
     expect(result.verificationUri).toBe("https://example.com/device");
+    expect(result.verificationUriComplete).toBe(
+      `https://example.com/device?user_code=${encodeURIComponent(result.userCode)}`,
+    );
     expect(result.interval).toBe(5);
     // The store is keyed by hash; the returned deviceCode is the raw value.
     const record = Option.getOrUndefined(MutableHashMap.get(records, sha256Hex(result.deviceCode)));
@@ -119,6 +122,19 @@ describe("DeviceAuthorizationService", () => {
   it("returns authorization_pending before approval", async () => {
     const begun = await run((svc) => svc.begin({ clientId: "cli" }));
     const pending = await run((svc) => Effect.flip(svc.poll(begun.deviceCode)));
+    assert.instanceOf(pending, DevicePollError);
+    expect(pending.error).toBe("authorization_pending");
+  });
+
+  it("refuses another client's poll with invalid_grant and leaves the request as it was", async () => {
+    const begun = await run((svc) => svc.begin({ clientId: "cli" }));
+    const before = Option.getOrUndefined(MutableHashMap.get(records, sha256Hex(begun.deviceCode)));
+    const refused = await run((svc) => Effect.flip(svc.poll(begun.deviceCode, "other")));
+    assert.instanceOf(refused, DevicePollError);
+    expect(refused.error).toBe("invalid_grant");
+    // Nothing was written: the owning client's next poll is not slowed.
+    expect(MutableHashMap.get(records, sha256Hex(begun.deviceCode))).toEqual(Option.some(before));
+    const pending = await run((svc) => Effect.flip(svc.poll(begun.deviceCode, "cli")));
     assert.instanceOf(pending, DevicePollError);
     expect(pending.error).toBe("authorization_pending");
   });

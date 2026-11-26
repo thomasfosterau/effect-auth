@@ -4102,6 +4102,22 @@ export const groupLayers = (
     Layer.provideMerge(JsonApiMiddleware.layer),
   );
 
+/** RFC 8628 §3.4's `grant_type`. */
+const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+
+/** An RFC 6749 §5.2 error response, status 400. */
+const oauthError = (error: string, description?: string): Effect.Effect<never, S.OAuthError> =>
+  Effect.fail(
+    new S.OAuthError({
+      error,
+      ...(description !== undefined && { error_description: description }),
+    }),
+  );
+
+/** RFC 6749 §3.3's space-delimited `scope`, as a list. */
+const scopeList = (scope: string | undefined): ReadonlyArray<string> =>
+  scope === undefined ? [] : Arr.filter(Str.split(scope, " "), Str.isNonEmpty);
+
 /** Layer implementing the `auth` group handlers. */
 export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
   const cfg = resolveCookieConfig(config, multiSession);
@@ -4114,18 +4130,29 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // RFC 8628 §3.2: the answer carries the device code, the secret
           // the device polls with.
           yield* noStore;
-          return yield* device.service
+          if (payload.client_id === undefined || payload.client_id === "") {
+            return yield* oauthError("invalid_request", "client_id is required");
+          }
+          const scopes = scopeList(payload.scope);
+          const begun = yield* device.service
             .begin({
-              clientId: payload.clientId,
-              ...(payload.scopes !== undefined && { scopes: payload.scopes }),
+              clientId: payload.client_id,
+              ...(Arr.isReadonlyArrayNonEmpty(scopes) && { scopes }),
             })
             .pipe(
               Effect.catchTags({
-                // RFC 8628 §3.2: `invalid_client` / `invalid_scope` as the message.
-                DeviceClientError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
+                DeviceClientError: (e) => oauthError(e.error, e.message),
                 AuthError: (e) => internalServerError(e),
               }),
             );
+          return {
+            device_code: begun.deviceCode,
+            user_code: begun.userCode,
+            verification_uri: begun.verificationUri,
+            verification_uri_complete: begun.verificationUriComplete,
+            expires_in: begun.expiresIn,
+            interval: begun.interval,
+          };
         }),
       )
       .handle("deviceToken", ({ payload }) =>
@@ -4133,46 +4160,43 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const device = yield* resolveDevice;
           // A token response (RFC 8628 §3.5, RFC 6749 §5.1): never cached.
           yield* noStore;
-          const result = yield* device.service.poll(payload.deviceCode).pipe(
+          if (payload.grant_type !== DEVICE_CODE_GRANT_TYPE) {
+            return yield* payload.grant_type === undefined
+              ? oauthError("invalid_request", "grant_type is required")
+              : oauthError(
+                  "unsupported_grant_type",
+                  `grant_type must be ${DEVICE_CODE_GRANT_TYPE}`,
+                );
+          }
+          if (payload.device_code === undefined || payload.device_code === "") {
+            return yield* oauthError("invalid_request", "device_code is required");
+          }
+          if (payload.client_id === undefined || payload.client_id === "") {
+            return yield* oauthError("invalid_request", "client_id is required");
+          }
+          const result = yield* device.service.poll(payload.device_code, payload.client_id).pipe(
             Effect.catchTags({
-              // RFC 8628 poll errors -> 400 with the error code as message.
-              DevicePollError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
+              DevicePollError: (e) => oauthError(e.error, e.message),
               SessionNotFoundError: (e) => internalServerError(e),
               SessionExpiredError: (e) => internalServerError(e),
               UserNotFoundError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
+              // A session hook refused the grant: the device stops polling.
+              // A rate limit asks it to poll more slowly instead.
+              RateLimitError: (e) => oauthError("slow_down", e.message),
+              AccountLockedError: (e) => oauthError("access_denied", e.message),
+              UserBannedError: (e) => oauthError("access_denied", e.message),
+              CaptchaError: (e) => oauthError("access_denied", e.message),
+              PwnedPasswordError: (e) => oauthError("access_denied", e.message),
             }),
           );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
+          const now = yield* Clock.currentTimeMillis;
+          return {
+            access_token: result.token,
+            token_type: "Bearer" as const,
+            expires_in: Math.max(0, Math.floor((result.session.expiresAt.getTime() - now) / 1000)),
+            scope: Arr.join(result.grant.scopes, " "),
           };
-          return yield* withSessionCookie(body, result, cfg, "device");
         }),
       )
       .handle("ssoCallback", ({ payload }) =>
@@ -4478,7 +4502,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
   ).pipe(
-    // `/oauth2/token` answers a request it cannot decode as RFC 6749 §5.2 does.
+    // The token endpoints and `/device/code` answer a request they cannot
+    // decode as RFC 6749 §5.2 does.
     Layer.provide(S.OAuthTokenSchemaErrors.layer),
   );
 };

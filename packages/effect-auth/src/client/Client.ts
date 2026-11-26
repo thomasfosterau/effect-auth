@@ -415,7 +415,9 @@ const errorMessage = (body: unknown): string | undefined => {
       ? first.detail
       : undefined;
   }
-  return "message" in body && typeof body.message === "string" ? body.message : undefined;
+  if ("message" in body && typeof body.message === "string") return body.message;
+  // An OAuth error object (RFC 6749 §5.2), as the RFC tier answers.
+  return "error" in body && typeof body.error === "string" ? body.error : undefined;
 };
 
 /** The auth client: typed methods over the contract, plus session-change notification. */
@@ -539,15 +541,22 @@ export interface AuthClient {
 
   /**
    * Device authorization grant (RFC 8628). `code`/`token` are called by the
-   * input-constrained device with its registered `clientId`;
-   * `lookup`/`approve`/`deny` by the signed-in user on the verification page,
+   * input-constrained device with its registered `client_id`, in RFC 8628's
+   * wire format; a refusal rejects with the RFC error code (`invalid_client`,
+   * `authorization_pending`, `slow_down`, ...) as the `AuthClientError`'s
+   * message. `lookup`/`approve`/`deny` are called by the signed-in user on the verification page,
    * which shows the client and scopes `lookup` answers before the user
    * decides. 404 when unconfigured.
    */
   readonly device: {
     readonly code: (payload: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
-    /** Poll for the session. 400 while the user has not decided yet. */
-    readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.AuthSuccess>;
+    /**
+     * Poll for the token response, whose `access_token` is a session token to
+     * send as `Authorization: Bearer`. 400 `authorization_pending` while the
+     * user has not decided yet. Sets no cookie, so it notifies no session
+     * observer.
+     */
+    readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.DeviceTokenView>;
     /** The pending request a user code names: the client and the scopes it asks for. */
     readonly lookup: (payload: Http.DeviceUserCodePayload) => Promise<Http.DeviceAuthorizationView>;
     readonly approve: (
@@ -1240,8 +1249,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
     device: {
       code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload),
-      token: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/device/token", payload)),
+      token: (payload) => request<Http.DeviceTokenView>("POST", "/device/token", payload),
       lookup: ({ userCode }) => lookupDevice(userCode),
       approve: ({ userCode }) => decideDevice(userCode, "approved"),
       deny: ({ userCode }) => decideDevice(userCode, "denied"),

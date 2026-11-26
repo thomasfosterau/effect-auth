@@ -2463,129 +2463,199 @@ describe("multi-factor", () => {
   });
 });
 
+const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+/** RFC 8628 §3.1 / §3.4 requests are form-encoded. */
+const formRequest = (path: string, params: Record<string, string>) =>
+  new Request(`http://test${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
+  });
+const OAuthErrorBody = Schema.Struct({ error: Schema.String });
+const CodeBody = Schema.Struct({ device_code: Schema.String, user_code: Schema.String });
+const TokenBody = Schema.Struct({
+  access_token: Schema.String,
+  token_type: Schema.String,
+  expires_in: Schema.Finite,
+  scope: Schema.String,
+});
+const begin = async (handler: Handler, params: Record<string, string> = { client_id: "cli" }) =>
+  jsonBody(await handler(formRequest("/device/code", params)), CodeBody);
+const poll = (handler: Handler, deviceCode: string, clientId = "cli") =>
+  handler(
+    formRequest("/device/token", {
+      grant_type: DEVICE_GRANT,
+      device_code: deviceCode,
+      client_id: clientId,
+    }),
+  );
+const oauthError = async (res: Response) => {
+  expect(res.status).toBe(400);
+  return (await jsonBody(res, OAuthErrorBody)).error;
+};
+
 describe("HTTP device authorization (RFC 8628)", () => {
   it("runs the full device flow: code -> approve -> token", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
 
-    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
+    const codeRes = await handler(formRequest("/device/code", { client_id: "cli" }));
     expect(codeRes.status).toBe(200);
-    const code = await jsonBody(
-      codeRes,
-      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
-    );
+    const code = await jsonBody(codeRes, CodeBody);
 
     // Polling before approval yields authorization_pending (400).
-    const pending = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
-    expect(pending.status).toBe(400);
-    expect((await jsonBody(pending, MessageBody)).message).toBe("authorization_pending");
+    expect(await oauthError(await poll(handler, code.device_code))).toBe("authorization_pending");
 
     // Approve from an authenticated verification page.
     const sid = await signUp(handler, "device-user@example.com");
-    const approve = await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
+    const approve = await handler(deviceDecisionRequest(code.user_code, "approved", asCookie(sid)));
     expect(approve.status).toBe(200);
 
-    // Now the device gets a session.
-    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    // Now the device gets a token response, and no cookie.
+    const token = await poll(handler, code.device_code);
     expect(token.status).toBe(200);
-    expect(token.headers.get("set-cookie")).toContain("conduit_session=");
+    expect(token.headers.get("set-cookie")).toBeNull();
+    const body = await jsonBody(token, TokenBody);
+    expect(body.token_type).toBe("Bearer");
+    expect(body.expires_in).toBeGreaterThan(0);
+    // The access token is a session token, presented as a bearer.
+    const current = await handler(
+      getRequest(CURRENT_SESSION, { authorization: `Bearer ${body.access_token}` }),
+    );
+    expect(current.status).toBe(200);
   });
 
-  it("keeps its own JSON wire format, never a JSON:API document", async () => {
+  it("accepts JSON requests too", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const codeRes = await handler(jsonRequest("/device/code", { client_id: "cli" }));
+    expect(codeRes.status).toBe(200);
+    const code = await jsonBody(codeRes, CodeBody);
+    const pending = await handler(
+      jsonRequest("/device/token", {
+        grant_type: DEVICE_GRANT,
+        device_code: code.device_code,
+        client_id: "cli",
+      }),
+    );
+    expect(await oauthError(pending)).toBe("authorization_pending");
+  });
+
+  it("speaks RFC 8628's wire format, never a JSON:API document", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
 
-    // The device posts plain `application/json` and gets plain JSON back.
-    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
+    const codeRes = await handler(formRequest("/device/code", { client_id: "cli" }));
     const code = await expectSpecJson(codeRes, "application/json", [
-      "deviceCode",
-      "userCode",
-      "verificationUri",
-      "expiresIn",
+      "device_code",
+      "user_code",
+      "verification_uri",
+      "verification_uri_complete",
+      "expires_in",
       "interval",
     ]);
-    const deviceCode = Schema.decodeUnknownSync(Schema.String)(code["deviceCode"]);
-    const userCode = Schema.decodeUnknownSync(Schema.String)(code["userCode"]);
+    const deviceCode = Schema.decodeUnknownSync(Schema.String)(code["device_code"]);
+    const userCode = Schema.decodeUnknownSync(Schema.String)(code["user_code"]);
+    const verificationUri = Schema.decodeUnknownSync(Schema.String)(code["verification_uri"]);
+    expect(code["verification_uri_complete"]).toBe(
+      `${verificationUri}?user_code=${encodeURIComponent(userCode)}`,
+    );
 
-    // The poll's refusal is the grant's error code, not a JSON:API error document.
-    const pending = await handler(jsonRequest("/device/token", { deviceCode }));
+    // The poll's refusal is an RFC 6749 §5.2 error object.
+    const pending = await poll(handler, deviceCode);
     expect(pending.status).toBe(400);
-    const refusal = await expectSpecJson(pending, "application/json", ["message"]);
-    expect(refusal["message"]).toBe("authorization_pending");
+    const refusal = await expectSpecJson(pending, "application/json", ["error"]);
+    expect(refusal["error"]).toBe("authorization_pending");
 
     const sid = await signUp(handler, "device-wire@example.com");
     expect((await handler(deviceDecisionRequest(userCode, "approved", asCookie(sid)))).status).toBe(
       200,
     );
-    const token = await handler(jsonRequest("/device/token", { deviceCode }));
+    const token = await poll(handler, deviceCode);
     expect(token.status).toBe(200);
-    await expectSpecJson(token, "application/json", ["user", "needsEmailVerification"]);
+    await expectSpecJson(token, "application/json", [
+      "access_token",
+      "token_type",
+      "expires_in",
+      "scope",
+    ]);
+  });
+
+  it("refuses a malformed poll with the RFC's error codes", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const code = await begin(handler);
+    const token = (params: Record<string, string>) =>
+      handler(formRequest("/device/token", params)).then(oauthError);
+
+    expect(await token({ device_code: code.device_code, client_id: "cli" })).toBe(
+      "invalid_request",
+    );
+    expect(
+      await token({
+        grant_type: "authorization_code",
+        device_code: code.device_code,
+        client_id: "cli",
+      }),
+    ).toBe("unsupported_grant_type");
+    expect(await token({ grant_type: DEVICE_GRANT, client_id: "cli" })).toBe("invalid_request");
+    expect(await token({ grant_type: DEVICE_GRANT, device_code: code.device_code })).toBe(
+      "invalid_request",
+    );
+    // A code issued to another client is not this client's grant.
+    expect(await oauthError(await poll(handler, code.device_code, "other"))).toBe("invalid_grant");
+    // A body that does not decode is invalid_request too, not a schema error.
+    const nonString = await handler(
+      jsonRequest("/device/token", { grant_type: DEVICE_GRANT, device_code: 1, client_id: "cli" }),
+    );
+    expect(await oauthError(nonString)).toBe("invalid_request");
+    // An unknown code has expired, as far as the device can tell.
+    expect(await oauthError(await poll(handler, "not-a-code"))).toBe("expired_token");
   });
 
   it("requires authentication to approve a code", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
-    const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
-    const res = await handler(deviceDecisionRequest(code.userCode, "approved"));
+    const code = await begin(handler);
+    const res = await handler(deviceDecisionRequest(code.user_code, "approved"));
     expect(res.status).toBe(401);
   });
 
   it("requires a session to deny or look up a code", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
-    const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
-    expect((await handler(deviceDecisionRequest(code.userCode, "denied"))).status).toBe(401);
-    expect((await handler(deviceLookupRequest(code.userCode))).status).toBe(401);
+    const code = await begin(handler);
+    expect((await handler(deviceDecisionRequest(code.user_code, "denied"))).status).toBe(401);
+    expect((await handler(deviceLookupRequest(code.user_code))).status).toBe(401);
   });
 
   it("denies a code as the signed-in user, and the device's poll learns it", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
-    const code = await jsonBody(
-      codeRes,
-      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
-    );
+    const code = await begin(handler);
     const sid = await signUp(handler, "device-deny@example.com");
-    const denied = await handler(deviceDecisionRequest(code.userCode, "denied", asCookie(sid)));
+    const denied = await handler(deviceDecisionRequest(code.user_code, "denied", asCookie(sid)));
     expect(denied.status).toBe(200);
     // A decided code cannot be decided again, nor turned into an approval.
     expect(
-      (await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)))).status,
+      (await handler(deviceDecisionRequest(code.user_code, "approved", asCookie(sid)))).status,
     ).toBe(400);
     // An unknown code is refused.
     expect(
       (await handler(deviceDecisionRequest("ZZZZ-ZZZZ", "denied", asCookie(sid)))).status,
     ).toBe(400);
-    const poll = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
-    expect(poll.status).toBe(400);
-    expect((await jsonBody(poll, MessageBody)).message).toBe("access_denied");
+    expect(await oauthError(await poll(handler, code.device_code))).toBe("access_denied");
     // The code travels in the body: the old command routes are gone.
-    expect((await handler(jsonRequest("/device/deny", { userCode: code.userCode }))).status).toBe(
+    expect((await handler(jsonRequest("/device/deny", { userCode: code.user_code }))).status).toBe(
       404,
     );
   });
 
-  it("refuses an unregistered client or scope", async () => {
+  it("refuses an unregistered client or scope, and a request without a client", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const unknown = await handler(jsonRequest("/device/code", { clientId: "intruder" }));
-    expect(unknown.status).toBe(400);
-    expect((await jsonBody(unknown, MessageBody)).message).toBe("invalid_client");
-    const scope = await handler(
-      jsonRequest("/device/code", { clientId: "cli", scopes: ["admin"] }),
-    );
-    expect(scope.status).toBe(400);
-    expect((await jsonBody(scope, MessageBody)).message).toBe("invalid_scope");
-    // A request without a client is malformed.
-    expect((await handler(jsonRequest("/device/code", {}))).status).toBe(400);
+    const code = (params: Record<string, string>) =>
+      handler(formRequest("/device/code", params)).then(oauthError);
+    expect(await code({ client_id: "intruder" })).toBe("invalid_client");
+    expect(await code({ client_id: "cli", scope: "read admin" })).toBe("invalid_scope");
+    expect(await code({})).toBe("invalid_request");
   });
 
   it("shows the client and scopes before approval, and records them on the session", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(
-      jsonRequest("/device/code", { clientId: "cli", scopes: ["read"] }),
-    );
-    const code = await jsonBody(
-      codeRes,
-      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
-    );
+    const code = await begin(handler, { client_id: "cli", scope: "read" });
     const sid = await signUp(handler, "device-consent@example.com");
     const Shown = Schema.Struct({
       data: Schema.Struct({
@@ -2599,7 +2669,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
         }),
       }),
     });
-    const lookup = await handler(deviceLookupRequest(code.userCode, asCookie(sid)));
+    const lookup = await handler(deviceLookupRequest(code.user_code, asCookie(sid)));
     expect(lookup.status).toBe(200);
     const shown = await jsonBody(lookup, Shown);
     expect(shown.data.attributes).toEqual({
@@ -2609,15 +2679,16 @@ describe("HTTP device authorization (RFC 8628)", () => {
       status: "pending",
     });
     // The resource is named by the device code's digest, never the code.
-    expect(shown.data.id).not.toBe(code.deviceCode);
+    expect(shown.data.id).not.toBe(code.device_code);
 
-    const approve = await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
+    const approve = await handler(deviceDecisionRequest(code.user_code, "approved", asCookie(sid)));
     expect((await jsonBody(approve, Shown)).data.attributes.status).toBe("approved");
 
-    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
-    expect(token.status).toBe(200);
-    const deviceSid = sessionIdFromSetCookie(token.headers.get("set-cookie"));
-    const current = await handler(getRequest("/sessions/current", asCookie(deviceSid)));
+    const token = await jsonBody(await poll(handler, code.device_code), TokenBody);
+    expect(token.scope).toBe("read");
+    const current = await handler(
+      getRequest("/sessions/current", { authorization: `Bearer ${token.access_token}` }),
+    );
     const session = await jsonBody(
       current,
       Schema.Struct({
@@ -2634,7 +2705,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
 
   it("returns 404 when device authorization is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
-    const res = await handler(jsonRequest("/device/code", { clientId: "cli" }));
+    const res = await handler(formRequest("/device/code", { client_id: "cli" }));
     expect(res.status).toBe(404);
   });
 });
@@ -3323,24 +3394,29 @@ describe("every response carrying Set-Cookie is no-store", () => {
     expect(cacheControl(res)).toBe("no-store");
   });
 
-  it("a device token response, already no-store, keeps one directive", async () => {
+  it("a device token response is no-store, a malformed poll included", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const issued = await handler(jsonRequest("/device/code", { clientId: "cli" }));
+    const issued = await handler(jsonRequest("/device/code", { client_id: "cli" }));
     // The device code is the secret the device polls with.
     expect(cacheControl(issued)).toBe("no-store");
     const code = await jsonBody(
       issued,
-      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
+      Schema.Struct({ device_code: Schema.String, user_code: Schema.String }),
     );
-    // A malformed poll's 400 never reaches the handler, and is no-store too.
+    // A malformed poll's 400 is no-store too.
     const malformed = await handler(jsonRequest("/device/token", {}));
     expect(malformed.status).toBe(400);
     expect(cacheControl(malformed)).toBe("no-store");
     const sid = await signUp(handler, "ns@test.com");
-    await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
-    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    await handler(deviceDecisionRequest(code.user_code, "approved", asCookie(sid)));
+    const token = await handler(
+      jsonRequest("/device/token", {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: code.device_code,
+        client_id: "cli",
+      }),
+    );
     expect(token.status).toBe(200);
-    expect(token.headers.get("set-cookie")).toContain("conduit_session=");
     expect(cacheControl(token)).toBe("no-store");
   });
 
