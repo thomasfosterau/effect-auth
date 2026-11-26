@@ -252,12 +252,21 @@ describe("the JSON:API resources", () => {
     ).toStrictEqual(carried(invitationKeys));
   });
 
-  it("organization-domains carry exactly OrganizationDomain, its organization and attester as relationships", () => {
+  it("organization-domains carry exactly OrganizationDomain, its organization and attester as relationships, to the operator", () => {
     expect(
-      storeFacingKeys(Resources.OrganizationDomain, {
+      storeFacingKeys(Resources.OperatorOrganizationDomain, {
         foreignKeys: { organization: "organizationId", attester: "attestedBy" },
       }),
     ).toStrictEqual(sorted(R.keys(domainKeys)));
+  });
+
+  it("organization-domains carry everything but the attester, to a tenant", () => {
+    expect(R.keys(Resources.OrganizationDomain.relationships)).toEqual(["organization"]);
+    expect(
+      storeFacingKeys(Resources.OrganizationDomain, {
+        foreignKeys: { organization: "organizationId" },
+      }),
+    ).toStrictEqual(sorted(R.keys(domainKeys).filter((key) => key !== "attestedBy")));
   });
 
   it("organization-roles carry exactly OrgRole, its organization as a relationship", () => {

@@ -354,6 +354,14 @@ export class OrganizationDomainStore extends Context.Service<
     readonly listByOrganization: (
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, Errors.AuthError>;
+    /**
+     * Every claim on a normalized domain, across every organization and in
+     * any state, oldest first. Only the operator's lookup
+     * ({@link OrganizationService.listDomainClaims}) reads it; index `domain`.
+     */
+    readonly listByDomain: (
+      domain: string,
+    ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, Errors.AuthError>;
     readonly update: (
       domain: OrganizationDomain,
     ) => Effect.Effect<OrganizationDomain, Errors.AuthError>;
@@ -385,6 +393,15 @@ export const memoryOrganizationDomainStore = (
       Arr.sort(
         Arr.fromIterable(MutableHashMap.values(records)).filter(
           (record) => record.organizationId === organizationId,
+        ),
+        Order.mapInput(Order.Number, (record: OrganizationDomain) => record.createdAt),
+      ),
+    ),
+  listByDomain: (domain) =>
+    Effect.sync(() =>
+      Arr.sort(
+        Arr.fromIterable(MutableHashMap.values(records)).filter(
+          (record) => record.domain === domain,
         ),
         Order.mapInput(Order.Number, (record: OrganizationDomain) => record.createdAt),
       ),
@@ -1177,6 +1194,23 @@ export class OrganizationService extends Context.Service<
       organizationId: string,
       domain: string,
     ) => Effect.Effect<OrganizationDomain, OrganizationError | Errors.AuthError>;
+
+    /**
+     * The application operator's lookup of every claim on `domain`, across
+     * every organization and in any state, oldest first: what a dispute
+     * needs to find the claim to {@link releaseDomain}. Like
+     * {@link attestDomain}, a server-side call with no actor and no
+     * organization permission, also reached through the platform-admin
+     * endpoint `GET /admin/organization-domains?filter[domain]=`; never expose
+     * it on a route an organization member can reach, since it reveals
+     * other tenants' claims.
+     *
+     * Refused for an invalid domain, or when no
+     * {@link OrganizationDomainStore} is configured.
+     */
+    readonly listDomainClaims: (
+      domain: string,
+    ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, OrganizationError | Errors.AuthError>;
 
     /**
      * Just-in-time membership for an SSO sign-in: if `email`'s domain is a
@@ -2595,6 +2629,13 @@ export const make = (
         }
         yield* domainStore.delete(claim.id);
         return claim;
+      }),
+
+      listDomainClaims: Effect.fn("OrganizationService.listDomainClaims")(function* (
+        input: string,
+      ) {
+        const domainStore = yield* requireDomainStore();
+        return yield* domainStore.listByDomain(yield* validDomain(input));
       }),
 
       provisionJitMembership: Effect.fn("OrganizationService.provisionJitMembership")(function* (
