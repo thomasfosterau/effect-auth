@@ -29,7 +29,9 @@
  * - `TableNames` / `defaultTableNames` / `Tables` and the row types — what the
  *   three dialects agree on.
  * - `defineSchema` / `fromTables` / `AuthSchema` and the `*ColumnNames` types —
- *   how to point the stores at tables this package did not define.
+ *   how to point the stores at tables this package did not define;
+ *   `defineApiKeyTable`, `defineTokenTable` and `defineRateLimitTable` do the
+ *   same for `ApiKeyStore`, `TokenStore` and `RateLimitStore`.
  * - `ladderCheck` — a role column's `CHECK`, derived from the app's `Ladder`.
  * - `ownedListFilter` / `isFollowerLayer` / `isMemberLayer` — `Auth.OwnedAccess`'s
  *   read scope rendered as a `WHERE`, and its follower and member seams over an
@@ -84,6 +86,21 @@
  */
 
 export {
+  type ApiKeyColumnNames,
+  type ApiKeyColumns,
+  type ApiKeySchema,
+  type ApiKeyTableInput,
+  defineApiKeyTable,
+  defineRateLimitTable,
+  defineTokenTable,
+  type RateLimitColumnNames,
+  type RateLimitColumns,
+  type RateLimitSchema,
+  type RateLimitTableInput,
+  type TokenColumnNames,
+  type TokenColumns,
+  type TokenSchema,
+  type TokenTableInput,
   type AuthSchema,
   type AuthSchemaSpec,
   type ColumnKey,
