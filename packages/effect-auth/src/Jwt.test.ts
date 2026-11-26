@@ -1100,9 +1100,7 @@ describe("RemoteJwksVerifier", () => {
 
   it("RemoteJwksVerifier.layer refuses a JWKS URL that is not HTTPS", async () => {
     const exit = await Effect.runPromiseExit(
-      Effect.gen(function* () {
-        return yield* Jwt.RemoteJwksVerifier;
-      }).pipe(
+      Effect.service(Jwt.RemoteJwksVerifier).pipe(
         Effect.provide(
           Jwt.RemoteJwksVerifier.layer({
             jwksUri: "http://issuer.test/.well-known/jwks.json",

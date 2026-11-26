@@ -1534,20 +1534,18 @@ const storeContract = (engine: StoreEngine): void => {
       };
 
       await run(
-        Effect.gen(function* () {
-          yield* Effect.forEach(
-            R.toEntries(timestampColumns),
-            ([table, columns]) =>
-              engine.columnTypes(table).pipe(
-                Effect.map((typeByCol) => {
-                  Arr.forEach(columns, (col) => {
-                    expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
-                  });
-                }),
-              ),
-            { concurrency: 1, discard: true },
-          );
-        }),
+        Effect.forEach(
+          R.toEntries(timestampColumns),
+          ([table, columns]) =>
+            engine.columnTypes(table).pipe(
+              Effect.map((typeByCol) => {
+                Arr.forEach(columns, (col) => {
+                  expect(typeByCol[col], `${table}.${col}`).toBe("BIGINT");
+                });
+              }),
+            ),
+          { concurrency: 1, discard: true },
+        ),
       );
     });
 
