@@ -98,7 +98,7 @@
     "access": "public"
   },
   "scripts": {
-    "docs": "docgen"
+    "docs": "PATH=\"$(cd ../../scripts/bin && pwd):$PATH\" docgen"
   },
   "dependencies": {
     "@thomasfosterau/effect-connect": "catalog:"

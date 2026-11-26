@@ -31,17 +31,10 @@
     "effect": "catalog:",
     "fallow": "catalog:",
     "semver": "catalog:",
-    "tsx": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
-  },
-  "devEngines": {
-    "runtime": {
-      "name": "node",
-      "version": "lts"
-    }
   },
   "packageManager": "pnpm@12.21.0"
 }
