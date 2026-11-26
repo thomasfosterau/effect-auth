@@ -429,20 +429,22 @@ const decodeBase64urlIgnorePadding = (encoded: string): Uint8Array => {
     if (index < 0) throw new CodecError({ message: "Invalid character" });
     return index;
   });
-  // Each character contributes 6 bits; every complete 8 bits is one byte.
-  const bits = Arr.map(sextets, (sextet) => sextet.toString(2).padStart(6, "0")).join("");
-  const octets = Arr.chunksOf(bits.split(""), 8);
-  const remainder = bits.length % 8;
-  // Any remaining bits must be zero padding.
-  if (remainder > 0 && bits.slice(bits.length - remainder).includes("1")) {
-    throw new CodecError({ message: "Invalid padding bits" });
-  }
-  return Uint8Array.from(
-    Arr.map(
-      Arr.filter(octets, (octet) => octet.length === 8),
-      (octet) => parseInt(octet.join(""), 2),
-    ),
-  );
+  // Each 4 characters are 24 bits, 3 bytes: arithmetic on one number per
+  // group, so the work stays linear with no per-bit strings (and no
+  // `Arr.chunksOf`, which is quadratic).
+  const groupCount = Math.ceil(sextets.length / 4);
+  const groups =
+    groupCount > 0 ? Arr.makeBy(groupCount, (i) => sextets.slice(i * 4, i * 4 + 4)) : [];
+  const octets = Arr.flatMap(groups, (group) => {
+    const value = Arr.reduce(group, 0, (acc, sextet) => acc * 64 + sextet);
+    const byteCount = Math.floor((group.length * 6) / 8);
+    const spareBits = group.length * 6 - byteCount * 8;
+    // Any remaining bits must be zero padding.
+    if (value % 2 ** spareBits !== 0) throw new CodecError({ message: "Invalid padding bits" });
+    const whole = value / 2 ** spareBits;
+    return Arr.makeBy(byteCount, (i) => Math.floor(whole / 256 ** (byteCount - 1 - i)) % 256);
+  });
+  return Uint8Array.from(octets);
 };
 
 /** `JSON.parse`, as a schema: any JSON value. */

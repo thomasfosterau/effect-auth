@@ -37,6 +37,7 @@ export const ErrorCode = {
   // Account access
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
   USER_BANNED: "USER_BANNED",
+  REAUTHENTICATION_REQUIRED: "REAUTHENTICATION_REQUIRED",
 
   // Permissions / scopes
   NOT_AUTHENTICATED: "NOT_AUTHENTICATED",
@@ -216,6 +217,21 @@ export class PasswordPolicyError extends Data.TaggedError("PasswordPolicyError")
 }> {}
 
 /**
+ * A sensitive change (starting an email change) needs fresh proof that the
+ * caller is the account holder: the current password, or for an account
+ * without one, a recent sign-in.
+ */
+export class ReauthenticationRequiredError extends Data.TaggedError(
+  "ReauthenticationRequiredError",
+)<{
+  readonly message: string;
+}> {
+  get code(): typeof ErrorCode.REAUTHENTICATION_REQUIRED {
+    return ErrorCode.REAUTHENTICATION_REQUIRED;
+  }
+}
+
+/**
  * Attempting to set a password for a user that already has one. Callers should
  * use `changePassword` instead.
  */
@@ -297,8 +313,8 @@ export class AccountLockedError extends Data.TaggedError("AccountLockedError")<{
 }
 
 /**
- * User account has been permanently banned by an administrator.
- * Raised by the `BannedUserPlugin`.
+ * The user is banned or SCIM-deactivated. `SessionService` raises it when it
+ * would create or answer a session for such a user.
  */
 export class UserBannedError extends Data.TaggedError("UserBannedError")<{
   readonly message: string;
@@ -584,10 +600,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  *   `false`) has no `trustedProxy`, when the `Hooks` in
  *   `services` include `IPRateLimitPlugin` with no `trustedProxy`, and
  *   when the `services` include an `OidcProviderService` with dynamic client
- *   registration enabled and there is no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for a `trustedProxy`: with
- *   no proxy no request has an address, so every limited request would be
- *   refused with `429`, and the handler refuses to start instead.
+ *   registration enabled and there is no `trustedProxy`. With no proxy no
+ *   request has an address, so every limited request would be refused with
+ *   `429`, and the handler refuses to start instead.
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.
@@ -616,7 +631,7 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
  * run. The limits are `Http.make`'s `ipRateLimit` (on unless it is
  * `false`), the dynamic client
  * registration limit (`POST /register`) and the device user-code limit on
- * approve/deny, which counts as configured whenever a
+ * lookups and decisions, which counts as configured whenever a
  * `DeviceAuthorizationService` is in `services` unless it was built with
  * `allowMissingRateLimiter: true`.
  *
@@ -626,6 +641,10 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
  * checked: the handler's build fails with this error instead, and every request
  * rejects with it. `Http.makeAsync` rejects with it at startup, so the app fails
  * to start, however `services` is composed.
+ *
+ * It is also the error for an `ipv6PrefixLength` that is not an integer from 1
+ * to 128: `Http.make` throws it for `ipRateLimit.ipv6PrefixLength`, and the
+ * `IPRateLimitPlugin` layer build dies with it.
  */
 export class RateLimiterConfigError extends Data.TaggedError("RateLimiterConfigError")<{
   readonly message: string;

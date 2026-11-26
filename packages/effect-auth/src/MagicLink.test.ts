@@ -1,6 +1,7 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { EmailPasswordStore, exemptFromSecondFactor } from "./email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import {
   memoryApiKeyStore,
   memoryEmailPasswordStore,
@@ -443,8 +444,8 @@ describe("MagicLinkService", () => {
     expect(createdWith).toEqual([
       { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
     ]);
-    expect(result.session.userId).toBe(result.user.id);
-    expect(result.session.attributes).toEqual({ device: "test" });
+    expect(result.session?.userId).toBe(result.user.id);
+    expect(result.session?.attributes).toEqual({ device: "test" });
     expect(MutableHashMap.size(sessions)).toBe(1);
     // One-time use: token consumed.
     expect(MutableHashMap.size(magicLinkTokens)).toBe(0);
@@ -475,10 +476,72 @@ describe("MagicLinkService", () => {
 
     expect(result.user.id).toBe("user-known");
     expect(MutableHashMap.size(users)).toBe(1);
-    expect(result.session.userId).toBe("user-known");
+    expect(result.session?.userId).toBe("user-known");
     // The verified link proves ownership: the previously unverified email
     // identifier is promoted to verified.
     expect(findEmailIdentifier("known@example.com")?.verified).toBe(true);
+  });
+
+  it("answers a second-factor challenge, and no session, for a user the gate requires one of", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-enrolled",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-enrolled", "enrolled@example.com", true);
+    const challenged: Array<string> = [];
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("enrolled@example.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }),
+        testContext,
+      ).pipe(Effect.provide(Layer.merge(TestHooks, enrolledGate(challenged)))),
+    );
+
+    expect(result.secondFactor).toEqual(testChallenge);
+    expect(result.session).toBeUndefined();
+    expect(result.token).toBeUndefined();
+    expect(challenged).toEqual(["user-enrolled"]);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+    // The link is spent either way.
+    expect(MutableHashMap.size(magicLinkTokens)).toBe(0);
+  });
+
+  it("issues a session past the gate when the magic link is exempt from it", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-enrolled",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-enrolled", "enrolled@example.com", true);
+    const challenged: Array<string> = [];
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
+          yield* service.send("enrolled@example.com");
+          return yield* service.verify(recorded(sentLinks).token);
+        }),
+        testContext,
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(TestHooks, enrolledGate(challenged), exemptFromSecondFactor("magic-link")),
+        ),
+      ),
+    );
+
+    expect(result.secondFactor).toBeUndefined();
+    expect(result.session?.userId).toBe("user-enrolled");
+    expect(challenged).toEqual([]);
   });
 
   it("never signs a look-alike address into the account a loose store matches it to", async () => {
@@ -495,9 +558,10 @@ describe("MagicLinkService", () => {
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MagicLink.make({ sendMagicLink: recordingSend });
-          // The attacker holds `exämple.com`; a case- and accent-insensitive
-          // store answers its lookups with Bob's record.
-          yield* service.send("bob@exämple.com");
+          // The attacker holds `böb@example.com` (a local part keeps its accents);
+          // a case- and accent-insensitive store answers its lookups with Bob's
+          // record.
+          yield* service.send("böb@example.com");
           return yield* service.verify(recorded(sentLinks).token);
         }).pipe(
           Effect.provideService(IdentifierStore, looseCollationIdentifierStore(identifierRecords)),
@@ -506,10 +570,10 @@ describe("MagicLinkService", () => {
       ).pipe(Effect.provide(TestHooks)),
     );
 
-    expect(sentLinks.map((sent) => sent.email)).toEqual(["bob@exämple.com"]);
+    expect(sentLinks.map((sent) => sent.email)).toEqual(["böb@example.com"]);
     // The link signs in a new account for the look-alike, never Bob's.
     expect(result.user.id).not.toBe("user-bob");
-    expect(findEmailIdentifier("bob@exämple.com")?.userId).toBe(result.user.id);
+    expect(findEmailIdentifier("böb@example.com")?.userId).toBe(result.user.id);
     expect(findEmailIdentifier("bob@example.com")?.userId).toBe("user-bob");
   });
 

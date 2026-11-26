@@ -12,13 +12,12 @@
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
-import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
 import {
   answeredByStandIn,
   EmailPasswordService,
   EmailPasswordStore,
-  SecondFactorGate,
+  secondFactorChallenge,
   type AuthResult,
 } from "./email/EmailPassword.ts";
 import {
@@ -311,9 +310,8 @@ const make = (
         }
 
         // Same second-factor seam as email/password sign-in.
-        const gate = yield* Effect.serviceOption(SecondFactorGate);
-        if (Option.isSome(gate) && (yield* gate.value.required(user))) {
-          const secondFactor = yield* gate.value.begin(user);
+        const secondFactor = yield* secondFactorChallenge(user, "username");
+        if (secondFactor !== undefined) {
           return yield* hooks.afterSignIn({
             user,
             secondFactor,

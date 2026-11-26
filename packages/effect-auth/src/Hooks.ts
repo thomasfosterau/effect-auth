@@ -26,7 +26,7 @@
  * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
  *
  * const layer = composePlugins([
- *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: lowercases email
+ *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: normalises email
  *   AuditPlugin, // afterSignIn/afterSignUp/afterSignOut: logs
  * ]).pipe(Layer.provide(Hooks.Default))
  *
@@ -95,6 +95,26 @@ export interface CreateSessionArgs {
 /** Named arguments for the `beforeResetPassword` hook. */
 export interface ResetPasswordArgs {
   readonly token: string;
+  readonly newPassword: string;
+}
+
+/**
+ * Named arguments for the `beforeChangePassword` hook, fired once the current
+ * password has checked out. A transform may rewrite `newPassword`; failing
+ * refuses the change.
+ */
+export interface ChangePasswordArgs {
+  readonly userId: string;
+  readonly newPassword: string;
+}
+
+/**
+ * Named arguments for the `beforeSetPassword` hook, fired when an account
+ * without a password sets one. A transform may rewrite `newPassword`; failing
+ * refuses it.
+ */
+export interface SetPasswordArgs {
+  readonly userId: string;
   readonly newPassword: string;
 }
 
@@ -243,10 +263,19 @@ export const authenticationSubject = (attempt: AuthenticateAttempt): string | un
 };
 
 /**
+ * What a `beforeSendCode` send delivers: a one-time code or a magic link
+ * (a {@link PossessionMethod}), or a password-reset link.
+ *
+ * @since 0.9.0
+ */
+export type SendCodeMethod = PossessionMethod | "password-reset";
+
+/**
  * Named arguments for the `beforeSendCode` hook: one request to send a
- * one-time code or a magic link, fired by `EmailOtpService.send`,
- * `PhoneOtpService.send` and `MagicLinkService.send` before the address is
- * looked up and before anything is stored or sent. A plugin refuses the send
+ * one-time code, a magic link or a password-reset link, fired by
+ * `EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send` and
+ * `PasswordResetService.requestPasswordReset` before the address is looked up
+ * and before anything is stored or sent. A plugin refuses the send
  * by failing (`CaptchaPlugin` with `CaptchaError`); the flows read nothing
  * back from it.
  *
@@ -254,8 +283,11 @@ export const authenticationSubject = (attempt: AuthenticateAttempt): string | un
  * account, so the hook runs before the flow looks the address up.
  */
 export interface SendCodeAttempt {
-  readonly method: PossessionMethod;
-  /** The code's purpose (`"sign-in"`, `"forget-password"`, ...); a magic link's is `"sign-in"`. */
+  readonly method: SendCodeMethod;
+  /**
+   * The code's purpose (`"sign-in"`, `"forget-password"`, ...); a magic
+   * link's is `"sign-in"`, a password reset's `"password-reset"`.
+   */
   readonly purpose: string;
   /** Where the code goes, normalized: an email address or an E.164 phone number. */
   readonly address: string;
@@ -263,7 +295,10 @@ export interface SendCodeAttempt {
   readonly captchaToken?: string | undefined;
 }
 
-/** Options the send flows (`EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send`) take. */
+/**
+ * Options the send flows (`EmailOtpService.send`, `PhoneOtpService.send`,
+ * `MagicLinkService.send`, `PasswordResetService.requestPasswordReset`) take.
+ */
 export interface SendCodeOptions {
   /** A captcha token, handed to the `beforeSendCode` hook (`CaptchaPlugin` verifies it). */
   readonly captchaToken?: string | undefined;
@@ -347,6 +382,8 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
   afterRequestPasswordReset: identity,
   beforeResetPassword: identity,
   afterResetPassword: identity,
+  beforeChangePassword: identity,
+  beforeSetPassword: identity,
   beforeCreateVerification: identity,
   afterCreateVerification: identity,
   beforeVerifyEmail: identity,
@@ -415,8 +452,8 @@ export class Hooks extends Context.Service<
      */
     readonly beforeAuthenticate: Transform<AuthenticateAttempt>;
     /**
-     * Fired by every one-time-code and magic-link send before it looks the
-     * address up; see {@link SendCodeAttempt}. Failing refuses the send.
+     * Fired by every one-time-code, magic-link and password-reset send
+     * before it looks the address up; see {@link SendCodeAttempt}. Failing refuses the send.
      * `CaptchaPlugin` guards it.
      */
     readonly beforeSendCode: Transform<SendCodeAttempt>;
@@ -436,6 +473,18 @@ export class Hooks extends Context.Service<
     readonly afterRequestPasswordReset: Tap<EmailRef>;
     readonly beforeResetPassword: Transform<ResetPasswordArgs>;
     readonly afterResetPassword: Tap<PasswordResetResult>;
+    /**
+     * Fired by `EmailPasswordService.changePassword` after the current
+     * password verifies and before the new one is checked and hashed; see
+     * {@link ChangePasswordArgs}. `HaveIBeenPwnedPlugin` guards it.
+     */
+    readonly beforeChangePassword: Transform<ChangePasswordArgs>;
+    /**
+     * Fired by `EmailPasswordService.setPassword` before the new password is
+     * checked and hashed; see {@link SetPasswordArgs}. `HaveIBeenPwnedPlugin`
+     * guards it.
+     */
+    readonly beforeSetPassword: Transform<SetPasswordArgs>;
     readonly beforeCreateVerification: Transform<CreateVerificationArgs>;
     readonly afterCreateVerification: Tap<CreateVerificationArgs>;
     readonly beforeVerifyEmail: Transform<VerifyEmailArgs>;
@@ -604,6 +653,18 @@ const wrapHooks = (
       inner.afterResetPassword,
       impls.afterResetPassword,
       isolateTaps,
+    ),
+    beforeChangePassword: wrapHook(
+      "beforeChangePassword",
+      inner.beforeChangePassword,
+      impls.beforeChangePassword,
+      false,
+    ),
+    beforeSetPassword: wrapHook(
+      "beforeSetPassword",
+      inner.beforeSetPassword,
+      impls.beforeSetPassword,
+      false,
     ),
     beforeCreateVerification: wrapHook(
       "beforeCreateVerification",

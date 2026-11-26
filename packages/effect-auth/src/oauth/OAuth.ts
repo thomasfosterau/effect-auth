@@ -42,7 +42,11 @@ import {
 import { type HookError } from "../Hooks.ts";
 import { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
 export { type OAuthAccount, OAuthAccountStore } from "./OAuthAccount.ts";
-import { EmailPasswordStore } from "../email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "../email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
 import type * as Types from "../Types.ts";
@@ -183,15 +187,12 @@ export interface OAuthCreateUserInput {
  * Result of a complete OAuth sign-in (callback handled, user resolved or
  * created, account linked, session issued).
  */
-export interface OAuthSignInResult {
+export type OAuthSignInResult = {
   readonly user: Types.User;
   readonly account: OAuthAccount;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
   readonly isNewUser: boolean;
   readonly returnTo?: string;
-}
+} & SessionOrChallenge;
 
 /**
  * OAuth provider interface
@@ -971,7 +972,11 @@ export class OAuthService extends Context.Service<
       options?: { linkToUserId?: string },
     ) => Effect.Effect<
       OAuthCallbackResult,
-      AuthError | OAuthProviderError | OAuthStateNotFoundError | OAuthStateExpiredError
+      | AuthError
+      | OAuthProviderError
+      | OAuthStateNotFoundError
+      | OAuthStateExpiredError
+      | OAuthAccountConflictError
     >;
 
     /**
@@ -987,7 +992,9 @@ export class OAuthService extends Context.Service<
      * and its sessions revoked, the address is marked verified, and then the
      * identity is linked and the prover's session minted. Any other match (an
      * unverified provider email, auto-linking off for the provider, a dangling
-     * identifier) fails with `EmailInUseError` and changes nothing.
+     * identifier) fails with `EmailInUseError` and changes nothing. A
+     * provider account another callback linked meanwhile fails with
+     * `OAuthAccountConflictError`.
      *
      * This is the recommended high-level entrypoint; use {@link handleCallback}
      * only when managing users yourself.
@@ -1002,6 +1009,7 @@ export class OAuthService extends Context.Service<
       | OAuthStateNotFoundError
       | OAuthStateExpiredError
       | OAuthAccountNotLinkedError
+      | OAuthAccountConflictError
       | OAuthMissingEmailError
       | EmailInUseError
       | UserNotFoundError
@@ -1312,6 +1320,27 @@ export const make = (
         return { stateEntry, tokens, userInfo };
       });
 
+    /**
+     * Insert a new link. The store's `create` is a plain insert, so a provider
+     * account linked concurrently is refused; re-read it, as `claimIdentifier`
+     * does, so the caller sees a conflict rather than a store failure.
+     */
+    const createAccount = (
+      account: OAuthAccount,
+    ): Effect.Effect<OAuthAccount, AuthError | OAuthAccountConflictError> =>
+      accountStore.create(account).pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.gen(function* () {
+            const raced = yield* accountStore.get(account.provider, account.providerId);
+            if (raced === null) return yield* error;
+            return yield* new OAuthAccountConflictError({
+              message: `This ${account.provider} account is already linked`,
+              provider: account.provider,
+            });
+          }),
+        ),
+      );
+
     /** Store fresh tokens on an account a callback found already linked. */
     const refreshCallbackAccount = (existingAccount: OAuthAccount, tokens: OAuthTokenResponse) =>
       Effect.gen(function* () {
@@ -1361,7 +1390,7 @@ export const make = (
           yield* Clock.currentTimeMillis,
         );
 
-        yield* accountStore.create(yield* encryptAccount(newAccount));
+        yield* createAccount(yield* encryptAccount(newAccount));
 
         return {
           account: newAccount,
@@ -1513,13 +1542,12 @@ export const make = (
               yield* accountStore.update(yield* encryptAccount(updatedAccount));
 
               const user = yield* userStore.getUser(updatedAccount.userId);
-              const { session, token } = yield* sessionManager.createSession(user.id);
+              const issued = yield* sessionOrChallenge(sessionManager, user, "oauth");
 
               return {
                 user,
                 account: updatedAccount,
-                session,
-                token,
+                ...issued,
                 isNewUser: false,
                 ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
               } satisfies OAuthSignInResult;
@@ -1553,15 +1581,14 @@ export const make = (
               createdAt: now,
               updatedAt: now,
             };
-            yield* accountStore.create(yield* encryptAccount(account));
+            yield* createAccount(yield* encryptAccount(account));
 
-            const { session, token } = yield* sessionManager.createSession(user.id);
+            const issued = yield* sessionOrChallenge(sessionManager, user, "oauth");
 
             return {
               user,
               account,
-              session,
-              token,
+              ...issued,
               isNewUser,
               ...(stateEntry.returnTo !== undefined && { returnTo: stateEntry.returnTo }),
             } satisfies OAuthSignInResult;
@@ -1651,7 +1678,7 @@ export const make = (
         if (existingAccount) {
           yield* accountStore.update(yield* encryptAccount(account));
         } else {
-          yield* accountStore.create(yield* encryptAccount(account));
+          yield* createAccount(yield* encryptAccount(account));
         }
 
         // Refresh the user's profile fields from the provider when requested.

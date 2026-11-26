@@ -18,9 +18,13 @@ import * as Arr from "effect/Array";
 import { type Digest, SecureRandom } from "effect/crypto";
 import { tokenHasher } from "./TokenHash.ts";
 import { AccountDeletion } from "./AccountDeletion.ts";
+import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import { PasswordHasher } from "./password/Password.ts";
+import { storedPasswordVerifier } from "./password/DecoyVerify.ts";
 import * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
+import { isImpersonationSession } from "./Types.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
@@ -99,6 +103,26 @@ export interface AccountManagementConfig {
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
+   * Tell the account's current address that an email change was requested,
+   * naming the new address, so the holder hears of it while it can still be
+   * stopped (the confirmation link goes only to the new address). Sent, and
+   * awaited, on every request that passes re-authentication, before the new
+   * address is checked, whether or not it is free; a failed send fails the
+   * request. Not sent for an account with no email. `emailCallbacks` derives
+   * it from an `EmailSender` (purpose `"email-change-requested"`).
+   */
+  readonly sendEmailChangeNotice: (params: {
+    readonly user: Types.User;
+    readonly oldEmail: string;
+    readonly newEmail: string;
+  }) => Effect.Effect<void, Errors.AuthError>;
+  /**
+   * How recent a sign-in must be, in ms, to start an email change on an
+   * account that has no password (see
+   * {@link AccountManagementService.requestEmailChange}). Default 5 minutes.
+   */
+  readonly reauthenticationMaxAge?: number;
+  /**
    * Optional notice to the OLD address once an email change is confirmed. A
    * confirmation submitted twice concurrently may send this notice twice.
    */
@@ -120,6 +144,21 @@ export interface AccountManagementConfig {
   readonly revokeSessionsOnEmailChange?: boolean;
 }
 
+/**
+ * The proof that the caller of
+ * {@link AccountManagementService.requestEmailChange} is the account holder.
+ */
+export interface EmailChangeReauthentication {
+  /** The account's current password. Required when the account has one. */
+  readonly currentPassword?: string | undefined;
+  /**
+   * The session the request arrives on. For an account without a password it
+   * must be the user's own, created within `reauthenticationMaxAge`, and not
+   * an impersonation.
+   */
+  readonly session?: Types.Session | undefined;
+}
+
 /** Result of confirming an email change. */
 export interface EmailChangeResult {
   readonly user: Types.User;
@@ -128,22 +167,41 @@ export interface EmailChangeResult {
 /**
  * Self-service account changes: a verification-gated email change and account deletion, each confirmed by a single-use token.
  *
- * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`; account deletion also clears the user-keyed credential stores present where the layer is built.
+ * Requires `AccountManagementStore`, `UserServiceStore`, `IdentifierStore` and `SessionService`; account deletion also clears the user-keyed credential stores present where the layer is built. Re-authenticating an email change reads the password through `EmailPasswordStore` and `PasswordHasher` (and `MultiAlgorithmVerifier`) when they are present where the layer is built; without `EmailPasswordStore`, every account re-authenticates by a recent sign-in.
  */
 export class AccountManagementService extends Context.Service<
   AccountManagementService,
   {
     /**
-     * Begin an email change: validate the new address is free, then issue a
-     * token delivered to the new address. Returns the token (for the caller to
-     * decide delivery/anti-enumeration; the HTTP layer answers `{ status: true }`).
+     * Begin an email change. The caller re-authenticates first:
+     *
+     * - an account with a password gives its current password
+     *   (`InvalidCredentialsError` when it is wrong,
+     *   `ReauthenticationRequiredError` when it is missing);
+     * - an account without one (passwordless: magic link, one-time codes,
+     *   passkeys, OAuth) gives the session it is signed in on, which must have
+     *   been created within `reauthenticationMaxAge` (default 5 minutes) and
+     *   not by impersonation, else `ReauthenticationRequiredError`: the user
+     *   signs in again, through whatever method they have, and retries. When
+     *   the account is enrolled in a second factor, that sign-in passed it.
+     *
+     * Then it notifies the current address (`sendEmailChangeNotice`), checks
+     * the new address is free, and issues a token delivered to the new
+     * address. Returns the token (for the caller to decide delivery and
+     * anti-enumeration; the HTTP layer answers `202` either way).
      */
     readonly requestEmailChange: (
       userId: string,
       newEmail: string,
+      reauthentication: EmailChangeReauthentication,
     ) => Effect.Effect<
       { readonly token: string; readonly expiresAt: number },
-      Errors.AuthError | Errors.UserNotFoundError | Errors.EmailInUseError
+      | Errors.AuthError
+      | Errors.UserNotFoundError
+      | Errors.EmailInUseError
+      | Errors.InvalidCredentialsError
+      | Errors.ReauthenticationRequiredError
+      | Errors.HashingError
     >;
 
     /**
@@ -237,12 +295,20 @@ const make = (
     const changeEmailExpiresIn = config.changeEmailExpiresIn ?? 60 * 60 * 1000;
     const deleteAccountExpiresIn = config.deleteAccountExpiresIn ?? 60 * 60 * 1000;
     const revokeSessionsOnEmailChange = config.revokeSessionsOnEmailChange ?? true;
+    const reauthenticationMaxAge = config.reauthenticationMaxAge ?? 5 * 60 * 1000;
 
     const users = yield* UserServiceStore;
     const identifiers = yield* IdentifierStore;
     const store = hashedAccountTokens(yield* AccountManagementStore, yield* tokenHasher);
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
+    // Optional: an app without passwords re-authenticates every account by
+    // a recent sign-in.
+    const passwords = Option.getOrUndefined(yield* Effect.serviceOption(EmailPasswordStore));
+    const hasher = yield* Effect.serviceOption(PasswordHasher);
+    const verifyPassword = Option.isSome(hasher)
+      ? yield* storedPasswordVerifier(hasher.value)
+      : undefined;
     const purgeServices = {
       ...(yield* userPurgeStores),
       accountTokens: store,
@@ -253,16 +319,62 @@ const make = (
 
     const generateToken = (): Effect.Effect<string> => randomBase64UrlToken(crypto);
 
+    const reauthenticate = Effect.fn("AccountManagementService.reauthenticate")(function* (
+      userId: string,
+      proof: EmailChangeReauthentication,
+    ) {
+      const passwordHash =
+        passwords === undefined ? null : yield* passwords.getPasswordHash(userId);
+      if (passwordHash !== null) {
+        if (proof.currentPassword === undefined) {
+          return yield* new Errors.ReauthenticationRequiredError({
+            message: "Enter your current password to change your email address",
+          });
+        }
+        if (verifyPassword === undefined) {
+          return yield* new Errors.AuthError({
+            message: "A PasswordHasher is required to verify the current password",
+          });
+        }
+        if (!(yield* verifyPassword(proof.currentPassword, passwordHash))) {
+          return yield* new Errors.InvalidCredentialsError({ message: "Invalid password" });
+        }
+        return yield* Effect.void;
+      }
+      const session = proof.session;
+      const now = yield* Clock.currentTimeMillis;
+      if (
+        session === undefined ||
+        session.userId !== userId ||
+        isImpersonationSession(session) ||
+        now - session.createdAt.getTime() > reauthenticationMaxAge
+      ) {
+        return yield* new Errors.ReauthenticationRequiredError({
+          message: "Sign in again to change your email address",
+        });
+      }
+      return yield* Effect.void;
+    });
+
     return {
       requestEmailChange: Effect.fn("AccountManagementService.requestEmailChange")(function* (
         userId: string,
         rawNewEmail: string,
+        proof: EmailChangeReauthentication,
       ) {
         const user = yield* users.get(userId);
         if (user === null) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        yield* reauthenticate(userId, proof);
         const newEmail = normalizeEmail(rawNewEmail);
+
+        // Tell the current address before anything else, so an attempt is
+        // reported whether or not the new address turns out to be free.
+        const oldEmail = anyEmailValue(yield* identifiers.listByUser(userId));
+        if (oldEmail !== null && oldEmail !== newEmail) {
+          yield* config.sendEmailChangeNotice({ user, oldEmail, newEmail });
+        }
 
         // Uniqueness: reject if another account already owns the address.
         const existing = yield* lookupIdentifier(identifiers, "email", newEmail);

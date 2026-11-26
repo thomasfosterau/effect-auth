@@ -15,8 +15,9 @@
  *   absent means permanent). A `banExpires` in the past means the ban has
  *   lapsed - see {@link isBanned}.
  *
- * Wire {@link BannedUserPlugin} into your hooks stack to block banned users
- * from validating sessions.
+ * `SessionService` refuses a banned user a new session and refuses their
+ * existing ones, with no plugin needed; a ban also revokes the user's
+ * sessions, API keys and OIDC grants.
  *
  * @module admin
  */
@@ -35,6 +36,7 @@ import { AccountManagementStore } from "./AccountManagement.ts";
 import { SessionService } from "./SessionService.ts";
 import type * as Types from "./Types.ts";
 import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
+import { revokeStandingAccess } from "./UserCredentials.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { isBanned } from "./UserStanding.ts";
 import { normalizeEmail, normalizeUsername } from "./utils.ts";
@@ -56,7 +58,11 @@ export class AdminError extends Data.TaggedError("AdminError")<{
  * Query for listing users
  */
 export interface ListUsersQuery {
-  /** Maximum number of users to return */
+  /**
+   * Maximum number of users to return. `AdminService.listUsers` caps it at
+   * {@link AdminConfig.maxListLimit} and passes it always; a store called
+   * directly without one returns every match.
+   */
   readonly limit?: number;
   /** Number of users to skip (for pagination) */
   readonly offset?: number;
@@ -85,7 +91,7 @@ export interface ListUsersResult {
  * Input for admin-initiated user creation.
  */
 export interface AdminCreateUserInput {
-  /** Primary email address — normalised (trimmed, lower-cased) and recorded as an email `Identifier`. */
+  /** Primary email address — normalised (`normalizeEmail`) and recorded as an email `Identifier`. */
   readonly email: string;
   /** Whether the primary email identifier is created verified. Default false. */
   readonly emailVerified?: boolean;
@@ -100,7 +106,7 @@ export interface AdminCreateUserInput {
    * Additional identifier records created via `IdentifierStore` (email,
    * username, or phone), beyond the primary email. Each value is normalised
    * for its type before it is stored, as the flows that look it up expect:
-   * an email or username trimmed and lower-cased, a phone number through
+   * an email through `normalizeEmail`, a username trimmed and lower-cased, a phone number through
    * {@link AdminConfig.normalizePhoneNumber}.
    */
   readonly identifiers?: ReadonlyArray<{
@@ -164,6 +170,11 @@ export interface AdminConfig {
   readonly adminUserIds?: ReadonlyArray<string>;
   /** Ban reason used when none is provided (default: "No reason") */
   readonly defaultBanReason?: string;
+  /**
+   * The most users one `listUsers` call returns (default: 100). A larger
+   * `limit` is lowered to it, and a call without one gets it.
+   */
+  readonly maxListLimit?: number;
   /** Default ban duration in milliseconds; undefined = permanent */
   readonly defaultBanExpiresIn?: number;
   /**
@@ -182,6 +193,8 @@ export interface AdminConfig {
     | ((raw: string) => Effect.Effect<string, Errors.AuthError>)
     | undefined;
 }
+
+const DEFAULT_MAX_LIST_LIMIT = 100;
 
 /** A copy of `attributes` without the ban keys (`banned`, `banReason`, `banExpires`). */
 const withoutBanAttributes = (attributes: Types.Attributes): Types.Attributes =>
@@ -428,7 +441,11 @@ export const make = (
         query: ListUsersQuery = {},
       ) {
         yield* requireAdmin(actor);
-        return yield* adminStore.listUsers(query);
+        const maxListLimit = config.maxListLimit ?? DEFAULT_MAX_LIST_LIMIT;
+        return yield* adminStore.listUsers({
+          ...query,
+          limit: Math.max(0, Math.min(query.limit ?? maxListLimit, maxListLimit)),
+        });
       }),
 
       setRole: Effect.fn("AdminService.setRole")(function* (
@@ -491,6 +508,7 @@ export const make = (
         });
 
         yield* sessionManager.invalidateUserSessions(userId);
+        yield* revokeStandingAccess(purgeServices, userId);
 
         return banned;
       }),
@@ -674,22 +692,9 @@ export const make = (
   });
 
 /**
- * Hooks plugin that blocks banned users at session validation.
+ * A no-op, kept so existing hook stacks still compose: `SessionService`
+ * refuses a banned user's sessions itself.
  *
- * Fails `afterValidateSession` with `AuthError("User is banned")` when the
- * validated user {@link isBanned | is currently banned}, short-circuiting
- * `SessionService.validateSession`. Lapsed bans (`banExpires` in the past)
- * pass through.
- *
- * Zero-dependency: compose it with the rest of your stack, e.g.
- * `composePlugins([BannedUserPlugin]).pipe(Layer.provide(Hooks.Default))` or
- * `BannedUserPlugin.pipe(Layer.provide(Hooks.Default))`.
+ * @deprecated Drop it from your hook stack; the ban is enforced without it.
  */
-export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
-  afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    Effect.flatMap(isBanned(sessionWithUser.user), (banned) =>
-      banned
-        ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been suspended" }))
-        : Effect.succeed(sessionWithUser),
-    ),
-});
+export const BannedUserPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});

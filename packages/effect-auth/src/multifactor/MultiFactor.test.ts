@@ -27,9 +27,11 @@ import {
 import { generateHotp, generateTotp } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as Password from "../password/Password.ts";
+import { scryptHasher } from "../password/Scrypt.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
+import { TrustedDeviceStore } from "../TrustedDevice.ts";
 
 const users = MutableHashMap.empty<string, User>();
 const identifiers = MutableHashMap.empty<string, Identifier>();
@@ -388,7 +390,15 @@ describe("MultiFactorService", () => {
   });
 
   it("should fail to disable with a wrong password and remove the record on success", async () => {
-    const testContext = await makeTestContext();
+    // Trusted devices are revoked by the successful disable only.
+    const revokedDevices: string[] = [];
+    const devices: typeof TrustedDeviceStore.Service = {
+      upsert: (record) => Effect.succeed(record),
+      getByTokenHash: () => Effect.succeed(null),
+      delete: () => Effect.void,
+      deleteByUserId: (userId) => Effect.sync(() => void revokedDevices.push(userId)),
+    };
+    const testContext = Context.add(await makeTestContext(), TrustedDeviceStore, devices);
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
     const { wrongPassword, stillEnabled, enabledAfterDisable } = await Effect.runPromise(
@@ -421,6 +431,35 @@ describe("MultiFactorService", () => {
     expect(stillEnabled).toBe(true);
     expect(enabledAfterDisable).toBe(false);
     expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
+    expect(revokedDevices).toEqual(["user-2fa-4"]);
+  });
+
+  it("verifies a password hashed by a previous hasher through MultiAlgorithmVerifier", async () => {
+    // Seeded with PBKDF2; the configured hasher is now scrypt.
+    await seedUser("user-2fa-legacy", "legacy@example.com", "correct-password");
+    const current = scryptHasher({ cost: 16384 });
+    const testContext = Context.add(
+      Context.add(await makeTestContext(), PasswordHasher, current),
+      Password.MultiAlgorithmVerifier,
+      Password.multiAlgorithmVerifier([Password.pbkdf2Hasher({ iterations: 1000 }), current]),
+    );
+
+    const enabledAfterDisable = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+          });
+          yield* service.enable("user-2fa-legacy", "correct-password");
+          yield* service.regenerateBackupCodes("user-2fa-legacy", "correct-password");
+          yield* service.disable("user-2fa-legacy", "correct-password");
+          return yield* service.isEnabled("user-2fa-legacy");
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
+    expect(enabledAfterDisable).toBe(false);
   });
 
   it("should create a session on the challenge + verifyTotp happy path", async () => {

@@ -4,15 +4,19 @@
  * Rejects passwords that appear in the Pwned Passwords dataset using the
  * k-anonymity range API: the password is SHA-1 hashed, only the first 5 hex
  * characters are sent, and the returned suffix list is checked locally (the
- * full password/hash never leaves the process). Covers `beforeSignUp` and
- * `beforeResetPassword` (both carry the plaintext new password).
+ * full password/hash never leaves the process). Covers every hook that
+ * carries a new plaintext password: `beforeSignUp`, `beforeResetPassword`,
+ * `beforeChangePassword` and `beforeSetPassword`. Requests ask for padding
+ * (`Add-Padding: true`), so the response size says nothing about the bucket.
  *
- * Availability over strictness: on an API/network failure the password is
- * allowed by default (`failClosed: false`).
+ * Availability over strictness: when the API cannot answer (a network error,
+ * any non-2xx status such as a 429 or 503, or no answer within `timeout`),
+ * the password is allowed by default (`failClosed: false`) and refused with
+ * `failClosed: true`.
  *
  * @module plugins/hibp
  */
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest } from "effect/crypto";
@@ -20,15 +24,25 @@ import { Hex } from "effect/encoding";
 import { HttpClientRequest } from "effect/http";
 import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
-import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
+import {
+  type ChangePasswordArgs,
+  makePlugin,
+  type ResetPasswordArgs,
+  type SetPasswordArgs,
+} from "../Hooks.ts";
 import { AuthError, PwnedPasswordError } from "../Errors.ts";
 
 /** Configuration for {@link HaveIBeenPwnedPlugin}. */
 export interface HibpConfig {
   /** Reject when the breach count is at least this. Default 1. */
   readonly threshold?: number;
-  /** Reject (rather than allow) when the API is unavailable. Default false. */
+  /**
+   * Reject (rather than allow) when the API cannot answer: a network error, a
+   * non-2xx status, or no answer within `timeout`. Default false.
+   */
   readonly failClosed?: boolean;
+  /** How long to wait for the API before treating it as unavailable. Default 5 seconds. */
+  readonly timeout?: Duration.Input;
 }
 
 const RANGE_URL = "https://api.pwnedpasswords.com/range";
@@ -42,6 +56,7 @@ const RANGE_URL = "https://api.pwnedpasswords.com/range";
 export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
   const threshold = config.threshold ?? 1;
   const failClosed = config.failClosed ?? false;
+  const timeout = config.timeout ?? Duration.seconds(5);
 
   return makePlugin(
     Effect.gen(function* () {
@@ -58,13 +73,15 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
           const hash = yield* sha1Upper(password);
           const prefix = hash.slice(0, 5);
           const suffix = hash.slice(5);
-          return yield* OutboundHttp.send(
-            outbound.client,
-            HttpClientRequest.get(`${RANGE_URL}/${prefix}`),
-            outbound.limits,
-          ).pipe(
+          const request = HttpClientRequest.get(`${RANGE_URL}/${prefix}`).pipe(
+            HttpClientRequest.setHeader("Add-Padding", "true"),
+          );
+          return yield* OutboundHttp.send(outbound.client, request, outbound.limits).pipe(
+            // A 429, a 5xx or a challenge page has no suffix lines: read as
+            // a count of 0 it would allow every password.
             Effect.filterOrFail(OutboundHttp.isOk),
             Effect.map((response) => response.body),
+            Effect.timeout(timeout),
             Effect.map((body) =>
               Arr.findFirst(body.split("\n"), (line) => {
                 const [suf, count] = line.trim().split(":");
@@ -94,6 +111,9 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
         beforeSignUp: (input: SignUpInput) => check(input.password).pipe(Effect.as(input)),
         beforeResetPassword: (args: ResetPasswordArgs) =>
           check(args.newPassword).pipe(Effect.as(args)),
+        beforeChangePassword: (args: ChangePasswordArgs) =>
+          check(args.newPassword).pipe(Effect.as(args)),
+        beforeSetPassword: (args: SetPasswordArgs) => check(args.newPassword).pipe(Effect.as(args)),
       };
     }),
   );

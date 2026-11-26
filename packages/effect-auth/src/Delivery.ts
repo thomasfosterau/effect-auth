@@ -93,6 +93,7 @@ export type DeliveryPurpose =
   | `email-otp:${EmailOtpPurpose}`
   | "password-reset"
   | "change-email"
+  | "email-change-requested"
   | "delete-account"
   | `phone-otp:${PhoneOtpPurpose}`
   | "second-factor-otp"
@@ -140,6 +141,7 @@ const emailSubject = (purpose: DeliveryPurpose): string =>
     Match.when("magic-link", () => "Your sign-in link"),
     Match.when("password-reset", () => "Reset your password"),
     Match.when("change-email", () => "Confirm your new email address"),
+    Match.when("email-change-requested", () => "Your email address is being changed"),
     Match.when("delete-account", () => "Confirm account deletion"),
     Match.when("second-factor-otp", () => "Your verification code"),
     Match.when("existing-account", () => "Someone tried to sign up with your email address"),
@@ -154,17 +156,28 @@ const EXISTING_ACCOUNT_TEXT = [
   "If it wasn't you, you can ignore this email.",
 ].join("\n\n");
 
+const emailChangeRequestedText = (newEmail: string | undefined): string =>
+  [
+    `Someone signed in to your account asked to change its email address${newEmail === undefined ? "" : ` to ${newEmail}`}. The change happens only once the new address is confirmed.`,
+    "If this was you, there is nothing to do.",
+    "If it wasn't you, sign in and change your password now, and sign out your other sessions.",
+  ].join("\n\n");
+
 /**
  * The built-in email renderer: a purpose-keyed subject and a plain-text body
  * carrying `params.otp`, then `params.url` (or, failing that,
  * `params.token`). The `"existing-account"` notice gets a fixed body pointing
- * at sign-in or password reset. A functional fallback for tests and first
+ * at sign-in or password reset, and the `"email-change-requested"` notice one
+ * naming `params.newEmail`. A functional fallback for tests and first
  * runs, not a template system: applications pass their own `render`.
  */
 export const defaultEmailRender = (message: EmailMessage): RenderedEmail => {
   const subject = emailSubject(message.purpose);
   if (message.purpose === "existing-account") {
     return { subject, text: EXISTING_ACCOUNT_TEXT };
+  }
+  if (message.purpose === "email-change-requested") {
+    return { subject, text: emailChangeRequestedText(message.params.newEmail) };
   }
   const { otp, token, url } = message.params;
   const lines: Array<string> = [];
@@ -416,6 +429,21 @@ export const emailCallbacks = (
       to: params.newEmail,
       purpose: "change-email",
       params: { token: params.token },
+    }),
+
+  /**
+   * `AccountManagementConfig.sendEmailChangeNotice` (sent to the OLD address),
+   * with `params.newEmail`.
+   */
+  sendEmailChangeNotice: (params: {
+    readonly user: Types.User;
+    readonly oldEmail: string;
+    readonly newEmail: string;
+  }) =>
+    sender.send({
+      to: params.oldEmail,
+      purpose: "email-change-requested",
+      params: { newEmail: params.newEmail },
     }),
 
   /** `AccountManagementConfig.sendDeleteAccountVerification` */

@@ -37,8 +37,13 @@ import type { HttpClient } from "effect/http";
 import { idpUrlPolicy } from "./IdpUrlPolicy.ts";
 import * as OutboundHttp from "./OutboundHttp.ts";
 import { AuthError } from "./Errors.ts";
+import { constantTimeHashEqual } from "./TokenHash.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
@@ -62,6 +67,7 @@ import {
 } from "./oauth/OAuth.ts";
 import * as OAuth from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
+import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
 export class SsoError extends Data.TaggedError("SsoError")<{
@@ -81,7 +87,7 @@ export interface OidcSsoProvider {
   readonly id: string;
   /** OIDC issuer identifier (`iss`). */
   readonly issuer: string;
-  /** Email domain that routes to this provider (normalized, lowercase). */
+  /** Email domain that routes to this provider (lower-cased, punycoded under UTS 46). */
   readonly domain: string;
   readonly protocol: "oidc";
   readonly clientId: string;
@@ -113,7 +119,7 @@ export interface OidcSsoProvider {
  */
 export interface SamlSsoProvider {
   readonly id: string;
-  /** Email domain that routes to this provider (normalized, lowercase). */
+  /** Email domain that routes to this provider (lower-cased, punycoded under UTS 46). */
   readonly domain: string;
   readonly protocol: "saml";
   /** The IdP's entity id — the `Issuer` every assertion must carry. */
@@ -211,14 +217,11 @@ export interface RegisterSamlProviderInput {
 }
 
 /** Result of a completed SSO sign-in. */
-export interface SsoSignInResult {
+export type SsoSignInResult = {
   readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
   readonly isNewUser: boolean;
   readonly provider: SsoProvider;
-}
+} & SessionOrChallenge;
 
 /** Where to start an SSO sign-in from. */
 export interface SsoSignInSelector {
@@ -327,11 +330,21 @@ export class SsoService extends Context.Service<
      * lives only on that `AuthnRequest` record, which {@link SamlReplayStore}'s
      * atomic `consume` spends, so a replayed response fails with
      * {@link SsoError}.
+     *
+     * `options.browserState` binds the response to the browser that started
+     * the sign-in. When `options` is given, a response that answers a request
+     * is accepted only if `browserState` equals that request's `RelayState`,
+     * which the HTTP tier keeps in a pre-login cookie it sets when the
+     * sign-in starts. An attacker who completes the IdP leg as themselves then
+     * cannot have a victim's browser finish it (login CSRF). An IdP-initiated
+     * response answers no request and is not checked; see
+     * {@link SsoConfig.allowIdpInitiated}.
      */
     readonly handleSamlCallback: (
       providerId: string,
       samlResponse: string,
       relayState?: string,
+      options?: SamlCallbackOptions,
     ) => Effect.Effect<
       SsoSignInResult,
       SsoError | AuthError | HookError,
@@ -382,8 +395,14 @@ export interface SsoConfig {
   readonly samlAssertionReplayTtl?: number;
   /**
    * Accept assertions with no `InResponseTo` (IdP-initiated sign-on). Off by
-   * default: an unsolicited response cannot be tied to a request this SP made,
-   * which forfeits the login-CSRF protection `InResponseTo` provides.
+   * default. An unsolicited response answers no request this SP made, so the
+   * browser that posts it never started a sign-in here and carries no
+   * pre-login cookie to check: nothing ties the assertion to that browser,
+   * and an attacker can sign a victim in as the attacker (login CSRF).
+   * `InResponseTo` alone does not prevent that either; the protection for an
+   * SP-initiated flow is the browser binding (`handleSamlCallback`'s
+   * `browserState`, the pre-login cookie over HTTP). Turn this on only for an
+   * IdP whose users start from its portal and accept that risk.
    */
   readonly allowIdpInitiated?: boolean;
   /**
@@ -398,7 +417,27 @@ export interface SsoConfig {
   readonly allowPrivateIdpUrls?: boolean;
 }
 
-const normalizeDomain = (value: string): string => value.trim().toLowerCase();
+/** Options for {@link SsoService}'s `handleSamlCallback`. */
+export interface SamlCallbackOptions {
+  /**
+   * The `RelayState` the browser posting the response holds from the start of
+   * its sign-in (the HTTP tier's pre-login cookie), or `undefined` when it
+   * holds none. A response that answers a request is refused unless this
+   * equals that request's `RelayState`.
+   */
+  readonly browserState: string | undefined;
+}
+
+/** Whether the browser's state names exactly the request's, compared in constant time. */
+const browserHolds = (
+  digest: (token: string) => Effect.Effect<string>,
+  browserState: string | undefined,
+  requestState: string | undefined,
+): Effect.Effect<boolean> =>
+  browserState === undefined || requestState === undefined
+    ? Effect.succeed(false)
+    : Effect.zipWith(digest(browserState), digest(requestState), constantTimeHashEqual);
+
 const domainOf = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");
 
 /** The `sso:`-prefixed provider name stored in OAuth state, encoding the id. */
@@ -488,6 +527,44 @@ export const make = (
       return { verifier: verifier.value, replay: replay.value };
     });
 
+    /**
+     * Spend the `AuthnRequest` a verified response answers, and check that it
+     * was this connection's, that the posted `RelayState` is its own and, when
+     * `options` is given, that the posting browser holds that `RelayState`.
+     */
+    const spendAuthnRequest = (
+      replay: typeof SamlReplayStore.Service,
+      providerId: string,
+      inResponseTo: string,
+      relayState: string | undefined,
+      options: SamlCallbackOptions | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const pending = yield* replay.consume(inResponseTo);
+        if (pending === null || pending.kind !== "authn-request") {
+          return yield* new SsoError({
+            message: "SAML response answers an unknown, expired, or already-used request",
+          });
+        }
+        if (pending.providerId !== providerId) {
+          return yield* new SsoError({
+            message: "SAML response answers a request issued for a different connection",
+          });
+        }
+        if (pending.relayState !== undefined && pending.relayState !== relayState) {
+          return yield* new SsoError({ message: "SAML RelayState does not match the request" });
+        }
+        if (
+          options !== undefined &&
+          !(yield* browserHolds(digestToken, options.browserState, pending.relayState))
+        ) {
+          return yield* new SsoError({
+            message: "SAML response answers a sign-in this browser did not start",
+          });
+        }
+        return pending;
+      });
+
     /** Resolve a connection by id, insisting it speaks SAML. */
     const requireSamlProvider = (providerId: string) =>
       Effect.gen(function* () {
@@ -562,7 +639,7 @@ export const make = (
         sessions: sessionManager,
       });
 
-      const email = profile.email.trim().toLowerCase();
+      const email = normalizeEmail(profile.email);
 
       const { identifier, user: owner } = yield* findIdentifierOwner(
         identifiers,
@@ -629,8 +706,8 @@ export const make = (
         ),
       );
 
-      const { session, token } = yield* sessionManager.createSession(user.id);
-      return { user, session, token, isNewUser, provider } satisfies SsoSignInResult;
+      const issued = yield* sessionOrChallenge(sessionManager, user, "sso");
+      return { user, ...issued, isNewUser, provider } satisfies SsoSignInResult;
     });
 
     /**
@@ -926,6 +1003,7 @@ export const make = (
         providerId: string,
         samlResponse: string,
         relayState?: string,
+        options?: SamlCallbackOptions,
       ) {
         const provider = yield* requireSamlProvider(providerId);
         const { verifier, replay } = yield* requireSaml();
@@ -973,20 +1051,13 @@ export const make = (
             });
           }
         } else {
-          const pending = yield* replay.consume(assertion.inResponseTo);
-          if (pending === null || pending.kind !== "authn-request") {
-            return yield* new SsoError({
-              message: "SAML response answers an unknown, expired, or already-used request",
-            });
-          }
-          if (pending.providerId !== provider.id) {
-            return yield* new SsoError({
-              message: "SAML response answers a request issued for a different connection",
-            });
-          }
-          if (pending.relayState !== undefined && pending.relayState !== relayState) {
-            return yield* new SsoError({ message: "SAML RelayState does not match the request" });
-          }
+          yield* spendAuthnRequest(
+            replay,
+            provider.id,
+            assertion.inResponseTo,
+            relayState,
+            options,
+          );
         }
 
         // Spend the assertion id itself, so a captured response cannot be

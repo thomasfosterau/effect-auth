@@ -246,4 +246,61 @@ describe("IPRateLimitPlugin", () => {
         Effect.provide(makeHooksLayer({ signIn: { maxRequests: 2, windowMs: 60 * 60 * 1000 } })),
       ),
     ));
+
+  it("keys IPv6 clients on their /64 by default, so one block shares one budget", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        // 14 addresses in 2001:db8:1:1::/64: only the first 5 pass.
+        const results = yield* Effect.forEach(
+          Arr.makeBy(14, (i) => `2001:db8:1:1::${i.toString(16)}`),
+          callSignIn,
+          { concurrency: 1 },
+        );
+        expect(results.filter((r) => r === "ok")).toHaveLength(5);
+        // Another /64 has its own budget.
+        expect(yield* callSignIn("2001:db8:1:2::1")).toBe("ok");
+      }).pipe(Effect.provide(makeHooksLayer())),
+    ));
+
+  it("groups IPv6 clients by a configured prefix length", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          Arr.makeBy(5, (i) => `2001:db8:1:${(i + 1).toString(16)}::1`),
+          callSignIn,
+          { concurrency: 1, discard: true },
+        );
+        // A different /64 in the same /56 is limited too.
+        expect(yield* callSignIn("2001:db8:1:ff::1")).toBe("limited");
+        expect(yield* callSignIn("2001:db8:1:100::1")).toBe("ok");
+      }).pipe(Effect.provide(makeHooksLayer({ ipv6PrefixLength: 56 }))),
+    ));
+
+  it("keys each IPv6 address on its own with a prefix length of 128", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          Arr.makeBy(5, () => "2001:db8::1"),
+          callSignIn,
+          {
+            concurrency: 1,
+            discard: true,
+          },
+        );
+        expect(yield* callSignIn("2001:db8::1")).toBe("limited");
+        expect(yield* callSignIn("2001:db8::2")).toBe("ok");
+      }).pipe(Effect.provide(makeHooksLayer({ ipv6PrefixLength: 128 }))),
+    ));
+
+  it.each([0, 129, 64.5, Number.NaN])("refuses an ipv6PrefixLength of %s at layer build", (n) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(
+          Effect.scoped(Layer.build(makeHooksLayer({ ipv6PrefixLength: n }))),
+        );
+        expect(exit._tag).toBe("Failure");
+        expect(String(exit)).toContain("RateLimiterConfigError");
+      }),
+    ),
+  );
 });

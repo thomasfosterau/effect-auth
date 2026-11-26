@@ -1,4 +1,7 @@
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SchemaParser from "effect/SchemaParser";
+import * as Struct from "effect/Struct";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/http-api";
 import {
   Document,
@@ -41,6 +44,33 @@ export const SessionDocument = Document.DataDocument(R.Session, {
 const writeDocument = <const T extends string, A extends Schema.Top>(type: T, attributes: A) =>
   Schema.Struct({ data: Schema.Struct({ type: Schema.Literal(type), attributes }) });
 
+/**
+ * A resource's create or update payload with the named attributes checked
+ * against their request bounds (`HttpApiSchema`'s `*Input` schemas). The
+ * resource itself stays unbounded, so a stored value of any size is still
+ * answered; only a write is refused.
+ */
+const boundedPayload = <Payload extends Schema.Top>(
+  payload: Payload,
+  bounds: Readonly<Record<string, Schema.Codec<unknown, unknown>>>,
+): Payload["Rebuild"] => {
+  const checkBounds = SchemaParser.decodeUnknownResult(
+    Schema.Struct({
+      data: Schema.Struct({
+        attributes: Schema.optional(Schema.Struct(bounds).mapFields(Struct.map(Schema.optional))),
+      }),
+    }),
+  );
+  return payload.check(
+    Schema.makeFilter((document: Payload["Type"]) =>
+      Result.match(checkBounds(document), {
+        onSuccess: () => undefined,
+        onFailure: (issue) => issue,
+      }),
+    ),
+  );
+};
+
 /** A JSON:API body accepted as `application/vnd.api+json`. */
 const jsonApiPayload = <S extends Schema.Top>(schema: S) =>
   MediaType.asMediaType(schema, "application/vnd.api+json");
@@ -67,28 +97,32 @@ const SignInMeta = Schema.Struct({
 export const SignInCredential = Schema.Union([
   Schema.Struct({
     method: Schema.Literal("password"),
-    email: Schema.String,
+    email: S.IdentifierInput,
     password: Schema.String,
-    captchaToken: Schema.optional(Schema.String),
+    captchaToken: Schema.optional(S.TokenInput),
   }),
   Schema.Struct({
     method: Schema.Literal("username"),
-    username: Schema.String,
+    username: S.IdentifierInput,
     password: Schema.String,
-    captchaToken: Schema.optional(Schema.String),
+    captchaToken: Schema.optional(S.TokenInput),
   }),
-  Schema.Struct({ method: Schema.Literal("email-otp"), email: Schema.String, otp: Schema.String }),
+  Schema.Struct({
+    method: Schema.Literal("email-otp"),
+    email: S.IdentifierInput,
+    otp: S.TokenInput,
+  }),
   Schema.Struct({
     method: Schema.Literal("phone-otp"),
-    phoneNumber: Schema.String,
-    otp: Schema.String,
+    phoneNumber: S.IdentifierInput,
+    otp: S.TokenInput,
   }),
-  Schema.Struct({ method: Schema.Literal("magic-link"), token: Schema.String }),
+  Schema.Struct({ method: Schema.Literal("magic-link"), token: S.TokenInput }),
   Schema.Struct({ method: Schema.Literal("anonymous") }),
   Schema.Struct({
     method: Schema.Literal("google-one-tap"),
-    idToken: Schema.String,
-    nonce: Schema.String,
+    idToken: S.TokenInput,
+    nonce: S.TokenInput,
   }),
 ]);
 export type SignInCredential = typeof SignInCredential.Type;
@@ -159,7 +193,7 @@ export const SecondFactorVerificationDocument = Schema.Struct({
     type: Schema.Literal("second-factor-verifications"),
     attributes: Schema.Struct({
       method: Schema.Literals(["totp", "backup-code"]),
-      code: Schema.String,
+      code: S.TokenInput,
     }),
     relationships: Schema.Struct({
       /** The challenge to redeem: its id is the challenge token. */
@@ -184,20 +218,20 @@ export const OtpChallengeDocument = writeDocument(
   Schema.Union([
     Schema.Struct({
       channel: Schema.Literal("email"),
-      email: Schema.String,
+      email: S.IdentifierInput,
       purpose: S.EmailOtpPurpose,
-      captchaToken: Schema.optional(Schema.String),
+      captchaToken: Schema.optional(S.TokenInput),
     }),
     Schema.Struct({
       channel: Schema.Literal("phone"),
-      phoneNumber: Schema.String,
+      phoneNumber: S.IdentifierInput,
       purpose: S.PhoneOtpPurpose,
-      captchaToken: Schema.optional(Schema.String),
+      captchaToken: Schema.optional(S.TokenInput),
     }),
     Schema.Struct({
       channel: Schema.Literal("magic-link"),
-      email: Schema.String,
-      captchaToken: Schema.optional(Schema.String),
+      email: S.IdentifierInput,
+      captchaToken: Schema.optional(S.TokenInput),
     }),
   ]),
 );
@@ -206,14 +240,14 @@ export type OtpChallengeDocument = typeof OtpChallengeDocument.Type;
 /** The body of `POST /email-verifications`: the address to (re)send a link to. */
 export const EmailVerificationRequestDocument = writeDocument(
   "email-verifications",
-  Schema.Struct({ email: Schema.String }),
+  Schema.Struct({ email: S.IdentifierInput }),
 );
 export type EmailVerificationRequestDocument = typeof EmailVerificationRequestDocument.Type;
 
-/** The body of `POST /password-resets`: the address to send a reset link to. */
+/** The body of `POST /password-resets`: the address to send a reset link to, and an optional `captchaToken` for the captcha plugin. */
 export const PasswordResetRequestDocument = writeDocument(
   "password-resets",
-  Schema.Struct({ email: Schema.String }),
+  Schema.Struct({ email: S.IdentifierInput, captchaToken: Schema.optional(S.TokenInput) }),
 );
 export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.Type;
 
@@ -223,7 +257,7 @@ export type PasswordResetRequestDocument = typeof PasswordResetRequestDocument.T
  */
 export const EmailVerificationRedemptionDocument = writeDocument(
   "email-verification-redemptions",
-  Schema.Struct({ token: Schema.String }),
+  Schema.Struct({ token: S.TokenInput }),
 );
 export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemptionDocument.Type;
 
@@ -233,7 +267,7 @@ export type EmailVerificationRedemptionDocument = typeof EmailVerificationRedemp
  */
 export const PasswordResetRedemptionDocument = writeDocument(
   "password-reset-redemptions",
-  Schema.Struct({ token: Schema.String, newPassword: Schema.String }),
+  Schema.Struct({ token: S.TokenInput, newPassword: Schema.String }),
 );
 export type PasswordResetRedemptionDocument = typeof PasswordResetRedemptionDocument.Type;
 
@@ -369,7 +403,8 @@ export const otpChallengesGroup = Group.make(
  *   not the address has an account.
  * - `POST /email-verifications/redemptions`: verify with the link's token.
  *   Answers `201` with the new session when verification signs the user in,
- *   else `204`.
+ *   `202` with the second-factor challenge when the gate requires one, else
+ *   `204`.
  */
 export const emailVerificationsGroup = Group.make(
   "email-verifications",
@@ -382,7 +417,11 @@ export const emailVerificationsGroup = Group.make(
     .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("redeem", "/email-verifications/redemptions", {
     payload: jsonApiPayload(EmailVerificationRedemptionDocument),
-    success: [MediaType.asJsonApi(SignedInDocument, 201), HttpApiSchema.NoContent],
+    success: [
+      MediaType.asJsonApi(SignedInDocument, 201),
+      MediaType.asJsonApi(PendingDocument, 202),
+      HttpApiSchema.NoContent,
+    ],
     error: sendErrors,
   })
     .middleware(Middleware.ContentNegotiation)
@@ -393,7 +432,8 @@ export const emailVerificationsGroup = Group.make(
  * `password-resets`: reset a forgotten password.
  *
  * - `POST /password-resets`: send a reset link; `202` whether or not the address
- *   has an account.
+ *   has an account; `400` when a `beforeSendCode` plugin refuses the send (a
+ *   captcha that does not verify).
  * - `POST /password-resets/redemptions`: set the new password with the link's
  *   token; `204`.
  */
@@ -455,12 +495,19 @@ export const identifiersGroup = Group.make(
 export const usersGroup = Group.make(
   R.User,
   Endpoint.update(R.User, {
+    payload: boundedPayload(R.User.updatePayload, { name: S.NameInput, image: S.UrlInput }),
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
   HttpApiEndpoint.patch("changePassword", "/users/me/password", {
     payload: jsonApiPayload(PasswordChangeDocument),
     success: HttpApiSchema.NoContent,
-    error: [E.BadRequest.wire, E.Unauthorized.wire, E.InternalServerError.wire],
+    error: [
+      E.BadRequest.wire,
+      E.Unauthorized.wire,
+      E.Forbidden.wire,
+      E.TooManyRequests.wire,
+      E.InternalServerError.wire,
+    ],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -570,8 +617,11 @@ const accountErrors = [
  * `email-changes`: move the account to a new address, proved by a link sent
  * there.
  *
- * - `POST /email-changes`: signed in; `202` whether or not the new address is
- *   taken (anti-enumeration).
+ * - `POST /email-changes`: signed in and re-authenticated: `currentPassword`
+ *   for an account with a password (`400` when wrong), else a session
+ *   created in the last few minutes; `403` (`REAUTHENTICATION_REQUIRED`)
+ *   without it. Notifies the current address, then answers `202` whether or
+ *   not the new address is taken (anti-enumeration).
  * - `POST /email-changes/redemptions`: the link's token; `204`.
  *
  * `404` when account management is not configured.
@@ -581,7 +631,7 @@ export const emailChangesGroup = Group.make(
   HttpApiEndpoint.post("create", "/email-changes", {
     payload: jsonApiPayload(EmailChangeDocument),
     success: Accepted,
-    error: accountErrors,
+    error: [...accountErrors, E.Forbidden.wire, E.TooManyRequests.wire],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -854,7 +904,7 @@ export type ActiveOrganizationDocument = typeof ActiveOrganizationDocument.Type;
  */
 export const MemberCreateDocument = userLinkDocument(
   "organization-members",
-  Schema.Struct({ role: Schema.optional(Schema.String) }),
+  Schema.Struct({ role: Schema.optional(S.NameInput) }),
 );
 export type MemberCreateDocument = typeof MemberCreateDocument.Type;
 
@@ -901,6 +951,13 @@ export const InvitationTransitionDocument = Document.DataDocument(R.Invitation, 
   meta: Schema.Struct({ membership: Schema.optionalKey(R.OrganizationMember) }),
 });
 
+const organizationBounds = {
+  name: S.NameInput,
+  slug: S.NameInput,
+  logo: S.UrlInput,
+  metadata: S.AttributesInput,
+};
+
 /**
  * `organizations`: the organizations the signed-in user belongs to.
  *
@@ -942,7 +999,10 @@ export const organizationsGroup = Group.make(
   Endpoint.list(R.Organization, {
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.create(R.Organization, { errors: resourceErrors }),
+  Endpoint.create(R.Organization, {
+    payload: boundedPayload(R.Organization.createPayload, organizationBounds),
+    errors: resourceErrors,
+  }),
   HttpApiEndpoint.patch("setActive", "/organizations/active", {
     payload: jsonApiPayload(ActiveOrganizationDocument),
     success: HttpApiSchema.NoContent,
@@ -953,7 +1013,10 @@ export const organizationsGroup = Group.make(
   Endpoint.get(R.Organization, {
     errors: [E.Unauthorized, E.Forbidden, E.NotFound, E.InternalServerError],
   }),
-  Endpoint.update(R.Organization, { errors: resourceErrors }),
+  Endpoint.update(R.Organization, {
+    payload: boundedPayload(R.Organization.updatePayload, organizationBounds),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.Organization, { errors: resourceErrors }),
   childCollection("listMembers", "/organizations/:id/members", R.OrganizationMember),
   childCreate(
@@ -1015,7 +1078,10 @@ export const organizationsGroup = Group.make(
  */
 export const organizationMembersGroup = Group.make(
   R.OrganizationMember,
-  Endpoint.update(R.OrganizationMember, { errors: resourceErrors }),
+  Endpoint.update(R.OrganizationMember, {
+    payload: boundedPayload(R.OrganizationMember.updatePayload, { role: S.NameInput }),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.OrganizationMember, { errors: resourceErrors }),
   childCollection("listTeams", "/organization-members/:id/teams", R.Team),
 );
@@ -1048,6 +1114,7 @@ export const invitationsGroup = Group.make(
     errors: [E.Unauthorized, E.NotFound, E.InternalServerError],
   }),
   Endpoint.update(R.Invitation, {
+    payload: boundedPayload(R.Invitation.updatePayload, { token: S.TokenInput }),
     success: InvitationTransitionDocument,
     errors: resourceErrors,
   }),
@@ -1062,7 +1129,7 @@ export const invitationsGroup = Group.make(
 export const DomainAttestationDocument = Schema.Struct({
   data: Schema.Struct({
     type: Schema.Literal("organization-domains"),
-    attributes: Schema.Struct({ domain: Schema.String }),
+    attributes: Schema.Struct({ domain: S.IdentifierInput }),
     relationships: Schema.Struct({
       organization: Schema.Struct({
         data: Schema.Struct({ type: Schema.Literal("organizations"), id: Schema.String }),
@@ -1166,7 +1233,10 @@ export const organizationRolesGroup = Group.make(
  */
 export const teamsGroup = Group.make(
   R.Team,
-  Endpoint.update(R.Team, { errors: resourceErrors }),
+  Endpoint.update(R.Team, {
+    payload: boundedPayload(R.Team.updatePayload, { name: S.NameInput }),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.Team, { errors: resourceErrors }),
   childCollection("listMembers", "/teams/:id/members", R.TeamMember),
   childCreate(
@@ -1202,7 +1272,7 @@ export const AdminUserUpdateDocument = Schema.Struct({
   data: Schema.Struct({
     type: Schema.Literal("users"),
     id: Schema.String,
-    attributes: Schema.Struct({ role: Schema.String }),
+    attributes: Schema.Struct({ role: S.NameInput }),
   }),
 });
 export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
@@ -1225,7 +1295,7 @@ export const adminUsersGroup = Group.make(
   Endpoint.list(R.User, {
     path: "/admin/users",
     page: Query.Page.Offset,
-    filter: { email: Schema.optionalKey(Schema.String) },
+    filter: { email: Schema.optionalKey(S.IdentifierInput) },
     meta: AdminUsersMeta,
     errors: resourceErrors,
   }),
@@ -1252,7 +1322,7 @@ export const adminUsersGroup = Group.make(
 export const UserBanCreateDocument = userLinkDocument(
   "user-bans",
   Schema.Struct({
-    reason: Schema.optional(Schema.String),
+    reason: Schema.optional(S.TokenInput),
     expiresIn: Schema.optional(Schema.Finite),
   }),
 );
@@ -1338,10 +1408,12 @@ export const CurrentApiKeyDocument = Document.DataDocument(R.ApiKey, {
  *   `Cache-Control: no-store`.
  * - `GET /api-keys`: every key the caller owns.
  * - `POST /api-keys`: mint one; `201` with the key and, in `meta.key`, the
- *   plaintext key, shown this once. Minting needs an interactive credential
- *   (the session cookie): over a bearer credential it answers `403`.
+ *   plaintext key, shown this once. Minting needs an interactive session
+ *   (the class the session was issued with, whichever header carries its
+ *   token): a machine-issued session, such as the device grant's, gets `403`.
  * - `PATCH /api-keys/:id`: change its `name`, `enabled`, `expiresAt`,
- *   `permissions`, `metadata`, `remaining` or `rateLimit`.
+ *   `permissions`, `metadata`, `remaining` or `rateLimit`; it needs an
+ *   interactive session too (`403`).
  * - `DELETE /api-keys/:id`: delete it; `204`.
  *
  * A key the caller does not own answers `400`, as an unknown one does.
@@ -1365,9 +1437,18 @@ export const apiKeysGroup = Group.make(
     meta: Schema.Struct({ key: Schema.String }),
     errors: resourceErrors,
   }),
-  Endpoint.update(R.ApiKey, { errors: apiKeyErrors }),
+  // Widening a key takes the same interactive session minting does.
+  Endpoint.update(R.ApiKey, {
+    payload: boundedPayload(R.ApiKey.updatePayload, {
+      name: S.NameInput,
+      metadata: S.AttributesInput,
+    }),
+    errors: [...apiKeyErrors, E.Forbidden],
+  }),
   Endpoint.delete(R.ApiKey, { errors: apiKeyErrors }),
 );
+
+const oauthClientBounds = { name: S.NameInput, metadata: S.AttributesInput };
 
 /**
  * `oauth-clients`: the OIDC provider's registered clients. Every call needs
@@ -1388,10 +1469,14 @@ export const oauthClientsGroup = Group.make(
   R.OAuthClient,
   Endpoint.list(R.OAuthClient, { errors: resourceErrors }),
   Endpoint.create(R.OAuthClient, {
+    payload: boundedPayload(R.OAuthClient.createPayload, oauthClientBounds),
     meta: Schema.Struct({ clientSecret: Schema.optionalKey(Schema.String) }),
     errors: resourceErrors,
   }),
-  Endpoint.update(R.OAuthClient, { errors: resourceErrors }),
+  Endpoint.update(R.OAuthClient, {
+    payload: boundedPayload(R.OAuthClient.updatePayload, oauthClientBounds),
+    errors: resourceErrors,
+  }),
   Endpoint.delete(R.OAuthClient, { errors: resourceErrors }),
 );
 
@@ -1473,6 +1558,17 @@ export const tokensGroup = Group.make(
 );
 
 /**
+ * The body of `POST /device-authorizations/lookups`: the user code the device
+ * showed. The code travels in the body, never in the URL, so no access log or
+ * `Referer` carries it.
+ */
+export const DeviceAuthorizationLookupDocument = writeDocument(
+  "device-authorization-lookups",
+  Schema.Struct({ userCode: Schema.String }),
+);
+export type DeviceAuthorizationLookupDocument = typeof DeviceAuthorizationLookupDocument.Type;
+
+/**
  * The body of `POST /device-authorizations/decisions`: the user code the
  * device showed, and the decision. The code travels in the body, never in the
  * URL, so no access log or `Referer` carries it.
@@ -1480,36 +1576,50 @@ export const tokensGroup = Group.make(
 export const DeviceAuthorizationDecisionDocument = writeDocument(
   "device-authorization-decisions",
   Schema.Struct({
-    userCode: Schema.String,
+    userCode: S.TokenInput,
     decision: Schema.Literals(["approved", "denied"]),
   }),
 );
 export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDecisionDocument.Type;
 
+const deviceAuthorizationErrors = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.NotFound.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
+
 /**
  * `device-authorizations`: the verification page's side of the device grant
- * (RFC 8628 §3.3, which leaves its shape to the server).
+ * (RFC 8628 §3.3, which leaves its shape to the server). Both need a session.
  *
- * - `POST /device-authorizations/decisions`: approve (signed in: the device
- *   is granted the caller's session) or deny (no session needed) the pending
- *   authorization a user code names; `204`. An unknown or settled code
- *   answers `400`; each code allows 5 attempts per 15 minutes (`429`).
+ * - `POST /device-authorizations/lookups`: the pending request a user code
+ *   names, with the client and scopes it asks for, for the page to show
+ *   before the user decides; `200` with the `device-authorizations` resource.
+ * - `POST /device-authorizations/decisions`: approve (the device is granted a
+ *   session for the caller, recording the client and scopes) or deny the
+ *   pending request; `200` with the decided resource.
+ *
+ * An unknown, expired or already decided code answers `400`; each caller
+ * allows 10 lookups and decisions per 15 minutes together (`429`).
  *
  * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
  * 8628's wire format. `404` when device authorization is not enabled.
  */
 export const deviceAuthorizationsGroup = Group.make(
   "device-authorizations",
+  HttpApiEndpoint.post("lookup", "/device-authorizations/lookups", {
+    payload: jsonApiPayload(DeviceAuthorizationLookupDocument),
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("decide", "/device-authorizations/decisions", {
     payload: jsonApiPayload(DeviceAuthorizationDecisionDocument),
-    success: HttpApiSchema.NoContent,
-    error: [
-      E.BadRequest.wire,
-      E.Unauthorized.wire,
-      E.NotFound.wire,
-      E.TooManyRequests.wire,
-      E.InternalServerError.wire,
-    ],
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -1522,24 +1632,24 @@ export const deviceAuthorizationsGroup = Group.make(
  * formats are fixed by those specifications, so they are not JSON:API.
  */
 export const authGroup = HttpApiGroup.make("auth").add(
-  // Device authorization grant (RFC 8628). 404 when unconfigured.
+  // Device authorization grant (RFC 8628). 404 when unconfigured. Requests
+  // are form-encoded (or JSON); every refusal, a request that does not
+  // decode included, is an RFC 6749 §5.2 error object with status 400: `invalid_request`, `invalid_client`,
+  // `invalid_scope`, `unsupported_grant_type`, `invalid_grant`, and the
+  // poll's `authorization_pending`, `slow_down`, `access_denied` and
+  // `expired_token`.
   HttpApiEndpoint.post("deviceCode", "/device/code", {
-    payload: S.DeviceCodePayload,
+    payload: [S.DeviceCodePayload, S.DeviceCodePayload.pipe(HttpApiSchema.asFormUrlEncoded())],
     success: S.DeviceCodeView,
-    error: [S.NotFoundError, S.InternalError],
-  }),
-  // Poll: RFC error codes (authorization_pending/slow_down/...) -> 400.
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
+  // A successful poll answers a token response whose `access_token` is the
+  // session token, used as a bearer; no cookie is set.
   HttpApiEndpoint.post("deviceToken", "/device/token", {
-    payload: S.DeviceTokenPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
-  }),
+    payload: [S.DeviceTokenPayload, S.DeviceTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
+    success: S.DeviceTokenView,
+    error: [S.OAuthBadRequestError, S.NotFoundError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
   // --- Enterprise SSO callbacks (relying party). 404 when the module is
   // --- absent. The IdP sends the browser back here, so they keep their
   // --- binding's wire format.
@@ -1556,18 +1666,14 @@ export const authGroup = HttpApiGroup.make("auth").add(
     ],
   }),
   // SAML assertion consumer service: the form POST the IdP makes on the user's
-  // behalf. Same session-issuing tail as `ssoCallback`.
+  // behalf, a top-level navigation. Answers a 303 (to the app, with the
+  // session cookie, or to its error page with an `error` code), never a body:
+  // declared NoContent, the handler returns the raw redirect.
   HttpApiEndpoint.post("samlAcs", "/sso/saml/acs/:providerId", {
     params: { providerId: Schema.String },
     payload: S.SamlAcsPayload,
-    success: S.AuthSuccess,
-    error: [
-      S.NotFoundError,
-      S.BadRequestError,
-      S.ForbiddenError,
-      S.InternalError,
-      S.TooManyRequestsError,
-    ],
+    success: HttpApiSchema.NoContent,
+    error: [S.NotFoundError, S.TooManyRequestsError],
   }),
   // This SP's `EntityDescriptor` for a SAML connection, as XML.
   HttpApiEndpoint.get("samlMetadata", "/sso/saml/metadata/:providerId", {

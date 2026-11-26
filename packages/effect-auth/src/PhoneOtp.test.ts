@@ -2,6 +2,8 @@ import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-pl
 import { type RateLimitEntry, RateLimitStore } from "./RateLimit.ts";
 import { memoryRateLimitStore } from "./testing/MemoryStores.ts";
 import { Context, DateTime, Duration, Effect, Layer, MutableHashMap, Result } from "effect";
+import { exemptFromSecondFactor } from "./email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -274,7 +276,37 @@ describe("PhoneOtpService", () => {
     expect(createdWith).toEqual([
       { type: "phone", value: "+15551231111", verified: true, verifiedAt: expect.any(Date) },
     ]);
-    expect(result.session.userId).toBe(result.user.id);
+    expect(result.session?.userId).toBe(result.user.id);
+  });
+
+  it("answers a second-factor challenge, and no session, for a user the gate requires one of", async () => {
+    const testContext = await makeTestContext();
+    const user = seedPhoneUser("+15551235555", true);
+    const challenged: Array<string> = [];
+    const signIn = Effect.gen(function* () {
+      const service = yield* PhoneOtp.make({ sendOtp: recordingSend });
+      yield* service.send("+15551235555", "sign-in");
+      return yield* service.signIn("+15551235555", recorded(sentOtps).otp);
+    }).pipe(Effect.provide(testContext));
+
+    const gated = await Effect.runPromise(
+      signIn.pipe(Effect.provide(Layer.merge(TestHooks, enrolledGate(challenged)))),
+    );
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual([user.id]);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+
+    sentOtps.length = 0;
+    const exempt = await Effect.runPromise(
+      signIn.pipe(
+        Effect.provide(
+          Layer.mergeAll(TestHooks, enrolledGate(challenged), exemptFromSecondFactor("phone-otp")),
+        ),
+      ),
+    );
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.session?.userId).toBe(user.id);
   });
 
   it("runs beforeAuthenticate with the resolved user before the code is checked", async () => {

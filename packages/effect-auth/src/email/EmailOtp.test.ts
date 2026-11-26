@@ -1,6 +1,7 @@
 import { assert, describe, it, expect, beforeEach, afterEach, vi } from "vite-plus/test";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
-import { EmailPasswordStore } from "./EmailPassword.ts";
+import { EmailPasswordStore, exemptFromSecondFactor } from "./EmailPassword.ts";
+import { enrolledGate, testChallenge } from "../testing/SecondFactor.ts";
 import {
   memoryApiKeyStore,
   memoryEmailPasswordStore,
@@ -349,8 +350,8 @@ describe("EmailOtpService", () => {
     expect(createdWith).toEqual([
       { type: "email", value: "fresh@example.com", verified: true, verifiedAt: expect.any(Date) },
     ]);
-    expect(result.session.userId).toBe(result.user.id);
-    expect(result.session.attributes).toEqual({ device: "test" });
+    expect(result.session?.userId).toBe(result.user.id);
+    expect(result.session?.attributes).toEqual({ device: "test" });
     expect(MutableHashMap.size(sessions)).toBe(1);
     // One-time use: record consumed.
     expect(MutableHashMap.size(otpRecords)).toBe(0);
@@ -380,7 +381,43 @@ describe("EmailOtpService", () => {
 
     expect(result.user.id).toBe("user-known");
     expect(MutableHashMap.size(users)).toBe(1);
-    expect(result.session.userId).toBe("user-known");
+    expect(result.session?.userId).toBe("user-known");
+  });
+
+  it("answers a second-factor challenge, and no session, for a user the gate requires one of", async () => {
+    const testContext = await makeTestContext();
+    addUser({
+      id: "user-enrolled",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    });
+    addEmailIdentifier("user-enrolled", "enrolled@example.com", true);
+    const challenged: Array<string> = [];
+    const signIn = Effect.gen(function* () {
+      const service = yield* EmailOtp.make({ sendVerificationOtp: recordingSend });
+      yield* service.send("enrolled@example.com", "sign-in");
+      return yield* service.signIn("enrolled@example.com", recorded(sentOtps).otp);
+    }).pipe(Effect.provide(testContext));
+
+    const gated = await Effect.runPromise(
+      signIn.pipe(Effect.provide(Layer.merge(TestHooks, enrolledGate(challenged)))),
+    );
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual(["user-enrolled"]);
+
+    sentOtps.length = 0;
+    const exempt = await Effect.runPromise(
+      signIn.pipe(
+        Effect.provide(
+          Layer.mergeAll(TestHooks, enrolledGate(challenged), exemptFromSecondFactor("email-otp")),
+        ),
+      ),
+    );
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.session?.userId).toBe("user-enrolled");
+    expect(challenged).toEqual(["user-enrolled"]);
   });
 
   it("runs beforeAuthenticate with the resolved user before the code is checked", async () => {

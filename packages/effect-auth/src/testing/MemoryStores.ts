@@ -40,6 +40,10 @@ import {
 } from "../KeyValueStores.ts";
 import { type CreateUserInput, EmailPasswordStore } from "../email/EmailPassword.ts";
 import * as Errors from "../Errors.ts";
+import {
+  type DeviceAuthorizationRecord,
+  DeviceAuthorizationStore,
+} from "../DeviceAuthorization.ts";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { MultiFactorStore, type MultiFactorRecord } from "../multifactor/MultiFactor.ts";
 import { CredentialStore, type WebAuthnCredential } from "../multifactor/WebAuthn.ts";
@@ -236,8 +240,13 @@ export const memorySessionStore = (
   create: (session) =>
     Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
   get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  // Never creates: a session deleted since the caller read it stays deleted.
   update: (session) =>
-    Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
+    Effect.sync(() => {
+      if (MutableHashMap.has(sessions, session.id))
+        MutableHashMap.set(sessions, session.id, session);
+      return session;
+    }),
   touch: (sessionId, touch) =>
     Effect.sync(() =>
       Option.getOrNull(
@@ -566,7 +575,15 @@ export const memoryOAuthAccountStore = (
   const put = (account: OAuthAccount) =>
     void MutableHashMap.set(accounts, accountKey(account.provider, account.providerId), account);
   return {
-    create: (account) => Effect.sync(() => (put(account), account)),
+    // A plain insert: a pair already linked is refused, as a unique index would.
+    create: (account) =>
+      MutableHashMap.has(accounts, accountKey(account.provider, account.providerId))
+        ? Effect.fail(
+            new Errors.AuthError({
+              message: `OAuth account (${account.provider}) is already linked`,
+            }),
+          )
+        : Effect.sync(() => (put(account), account)),
     get: (provider, providerId) =>
       Effect.sync(() =>
         Option.getOrNull(MutableHashMap.get(accounts, accountKey(provider, providerId))),
@@ -577,8 +594,41 @@ export const memoryOAuthAccountStore = (
           (account) => account.userId === userId,
         ),
       ),
-    update: (account) => Effect.sync(() => (put(account), account)),
-    linkToUser: (userId, account) => Effect.sync(() => put({ ...account, userId })),
+    update: (account) =>
+      Effect.sync(() => {
+        const stored = Arr.findFirst(
+          MutableHashMap.values(accounts),
+          (candidate) => candidate.id === account.id,
+        );
+        if (Option.isNone(stored)) return null;
+        // Every field from `account` but the link's identity and owner.
+        const updated: OAuthAccount = {
+          ...account,
+          userId: stored.value.userId,
+          provider: stored.value.provider,
+          providerId: stored.value.providerId,
+          createdAt: stored.value.createdAt,
+        };
+        put(updated);
+        return updated;
+      }),
+    linkToUser: (userId, account) =>
+      Effect.suspend(() => {
+        const key = accountKey(account.provider, account.providerId);
+        const stored = MutableHashMap.get(accounts, key);
+        if (Option.isNone(stored)) return Effect.void;
+        if (stored.value.userId !== "" && stored.value.userId !== userId) {
+          return Effect.fail(
+            new Errors.AuthError({ message: "OAuth link belongs to another user" }),
+          );
+        }
+        MutableHashMap.set(accounts, key, {
+          ...stored.value,
+          userId,
+          updatedAt: account.updatedAt,
+        });
+        return Effect.void;
+      }),
     unlinkFromUser: (userId, provider) =>
       Effect.sync(() => {
         removeWhere(
@@ -686,6 +736,66 @@ export const memoryOidcConsentStore = (
     deleteByUserId: (userId) =>
       Effect.sync(() => {
         removeWhere(consents, (consent) => consent.userId === userId);
+      }),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Device authorization
+// ---------------------------------------------------------------------------
+
+/**
+ * `DeviceAuthorizationStore` over a `MutableHashMap` keyed by the device-code
+ * digest. `settle`, `touch` and `claimApproval` each read and write in one
+ * synchronous step, so they hold the store's conditional-write contract.
+ *
+ * @since 0.9.0
+ * @category constructors
+ */
+export const memoryDeviceAuthorizationStore = (
+  records: MutableHashMap.MutableHashMap<
+    string,
+    DeviceAuthorizationRecord
+  > = MutableHashMap.empty(),
+): typeof DeviceAuthorizationStore.Service => {
+  const byUserCode = (userCode: string) =>
+    Arr.findFirst(MutableHashMap.values(records), (r) => r.userCode === userCode);
+  return {
+    create: (record) =>
+      Effect.sync(() => {
+        MutableHashMap.set(records, record.deviceCode, record);
+        return record;
+      }),
+    getByDeviceCode: (deviceCode) =>
+      Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, deviceCode))),
+    getByUserCode: (userCode) => Effect.sync(() => Option.getOrNull(byUserCode(userCode))),
+    settle: (userCode, decision, now) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(byUserCode(userCode));
+        if (record === null || record.status !== "pending" || record.expiresAt < now) return null;
+        const settled: DeviceAuthorizationRecord = {
+          ...record,
+          status: decision.status,
+          userId: decision.userId,
+        };
+        MutableHashMap.set(records, record.deviceCode, settled);
+        return settled;
+      }),
+    touch: (deviceCode, touch) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
+        if (record === null) return null;
+        const touched: DeviceAuthorizationRecord = { ...record, ...touch };
+        MutableHashMap.set(records, deviceCode, touched);
+        return touched;
+      }),
+    delete: (deviceCode) => Effect.sync(() => void MutableHashMap.remove(records, deviceCode)),
+    claimApproval: (deviceCode) =>
+      Effect.sync(() => {
+        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
+        if (record === null || record.status !== "approved") return null;
+        MutableHashMap.remove(records, deviceCode);
+        return record;
       }),
   };
 };

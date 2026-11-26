@@ -15,6 +15,7 @@
 import { Clock, Context, Effect, Layer } from "effect";
 import { Digest, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
+import { sessionOrChallenge, type SessionOrChallenge } from "./email/EmailPassword.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -253,7 +254,8 @@ export const make = (
  *   Layer.succeed(SessionStore, {
  *     create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
  *     get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *     update: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
+ *     update: (session) =>
+ *       Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
  *     touch: (id, touch) =>
  *       Effect.sync(() => {
  *         const session = sessions.get(id)
@@ -278,10 +280,13 @@ export const make = (
  * ).pipe(Layer.provideMerge(Layer.mergeAll(stores, Hooks.Default)))
  *
  * // Redeem a token from a sign-in link: the session cookie is set on the response.
+ * // A user enrolled in a second factor gets `secondFactor` (a challenge) instead.
  * const redeem = (rawToken: string, response: Headers) =>
  *   Effect.gen(function* () {
  *     const { token, subject } = yield* redeemOneTimeTokenForSession(rawToken)
- *     response.append("set-cookie", `session=${token}; Path=/; HttpOnly; Secure`)
+ *     if (token !== undefined) {
+ *       response.append("set-cookie", `session=${token}; Path=/; HttpOnly; Secure`)
+ *     }
  *     return subject
  *   })
  *
@@ -309,6 +314,10 @@ export const make = (
  * been deleted is consumed and refused with the same `OneTimeTokenError` as an
  * unknown token, so no session is minted for a deleted account.
  *
+ * Like every sign-in, it consults the `SecondFactorGate` (method
+ * `"one-time-token"`): a user it requires a second factor of gets the
+ * challenge as `secondFactor`, and no session.
+ *
  * Requires `OneTimeTokenService`, `OneTimeTokenStore`, `SessionService` and
  * `UserStore` in the Effect context.
  */
@@ -316,13 +325,7 @@ export const redeemOneTimeTokenForSession = (
   rawToken: string,
   options?: { readonly sessionAttributes?: Types.Attributes },
 ): Effect.Effect<
-  {
-    readonly subject: string;
-    readonly session: Types.Session;
-    /** The raw session token, the credential the client presents; `session.id` is its digest. */
-    readonly token: string;
-    readonly metadata?: Types.JsonObject;
-  },
+  { readonly subject: string; readonly metadata?: Types.JsonObject } & SessionOrChallenge,
   Errors.OneTimeTokenError | Errors.AuthError | HookError,
   OneTimeTokenService | OneTimeTokenStore | SessionService | UserStore | Hooks
 > =>
@@ -332,12 +335,15 @@ export const redeemOneTimeTokenForSession = (
     const userStore = yield* UserStore;
     const result = yield* service.verify(rawToken);
     // Fail closed: a token outliving its user (deleted, or never one) mints no session.
-    if ((yield* userStore.get(result.subject)) === null) {
+    const user = yield* userStore.get(result.subject);
+    if (user === null) {
       return yield* new Errors.OneTimeTokenError({ message: "Invalid or expired token" });
     }
-    const { session, token } = yield* sessionService.createSession(
-      result.subject,
+    const issued = yield* sessionOrChallenge(
+      sessionService,
+      user,
+      "one-time-token",
       options?.sessionAttributes,
     );
-    return { ...result, session, token };
+    return { ...result, ...issued };
   });

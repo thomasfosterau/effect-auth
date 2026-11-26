@@ -28,9 +28,8 @@
  * socket address, so under `Http.make` the address comes only from
  * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
  * `services` include this plugin and `make` is given no `trustedProxy`, `make`
- * throws `ClientAddressConfigError`, and `allowMissingClientIp: true`
- * does not stand in for one: with no proxy no request has an address, so the
- * plugin would refuse every one of them.
+ * throws `ClientAddressConfigError`: with no proxy no request has an
+ * address, so the plugin would refuse every one of them.
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
@@ -84,11 +83,16 @@
  */
 import { Effect, Layer } from "effect";
 import * as Option from "effect/Option";
-import { ClientIP } from "../ClientIP.ts";
+import {
+  ClientIP,
+  DEFAULT_IPV6_RATE_LIMIT_PREFIX,
+  isIpv6RateLimitPrefix,
+  rateLimitAddressKey,
+} from "../ClientIP.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { type AuthenticateAttempt, Hooks, makePlugin } from "../Hooks.ts";
 import { recordClientAddressKeyed } from "../HooksClientAddress.ts";
-import { RateLimitError } from "../Errors.ts";
+import { RateLimitError, RateLimiterConfigError } from "../Errors.ts";
 import {
   type RateLimitConfig,
   RateLimitPresets,
@@ -119,6 +123,14 @@ export interface IPRateLimitPluginConfig {
   readonly signUp?: RateLimitConfig;
   /** IP-keyed rate limit for password-reset requests. Default: {@link RateLimitPresets.passwordReset}. */
   readonly passwordResetRequest?: RateLimitConfig;
+  /**
+   * How many leading bits of an IPv6 address make one client: every address
+   * in that prefix draws on one budget. An integer from 1 to 128; `128` keys
+   * each address on its own. IPv4 addresses are keyed as they are. Default:
+   * `64` ({@link DEFAULT_IPV6_RATE_LIMIT_PREFIX}). Any other value makes the
+   * layer build die with `RateLimiterConfigError`.
+   */
+  readonly ipv6PrefixLength?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +143,14 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
     Effect.gen(function* () {
       const rateLimiter = yield* RateLimiter;
       const store = yield* RateLimitStore;
+      const ipv6PrefixLength = config?.ipv6PrefixLength ?? DEFAULT_IPV6_RATE_LIMIT_PREFIX;
+      if (!isIpv6RateLimitPrefix(ipv6PrefixLength)) {
+        return yield* Effect.die(
+          new RateLimiterConfigError({
+            message: `IPRateLimitPlugin: ipv6PrefixLength must be an integer from 1 to 128, got ${String(ipv6PrefixLength)}`,
+          }),
+        );
+      }
 
       const check = (operation: string, limitConfig: RateLimitConfig) =>
         Effect.gen(function* () {
@@ -147,7 +167,7 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
               key: `ip:${operation}`,
             });
           }
-          const key = `ip:${operation}:${ip}`;
+          const key = `ip:${operation}:${rateLimitAddressKey(ip, ipv6PrefixLength)}`;
           return yield* rateLimiter
             .consumeToken(key, limitConfig)
             .pipe(Effect.provideService(RateLimitStore, store));
@@ -176,8 +196,9 @@ const ipRateLimitHooks = (config: IPRateLimitPluginConfig | undefined) =>
  * Hook-level IP rate limiter.
  *
  * Hooks `beforeAuthenticate`, `beforeSignUp`, and `beforeRequestPasswordReset`.
- * Keys are `ip:<operation>:<ip>` so they are separate from the per-email keys
- * used by {@link RateLimitPlugin}.
+ * Keys are `ip:<operation>:<address>` so they are separate from the per-email
+ * keys used by {@link RateLimitPlugin}. An IPv6 client is keyed on its /64
+ * (`ipv6PrefixLength`), so one customer's block cannot mint fresh budgets.
  *
  * Requires `RateLimiter` and `RateLimitStore` in the Layer graph.
  *

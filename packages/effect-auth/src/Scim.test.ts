@@ -30,7 +30,6 @@ import * as Scim from "./Scim.ts";
 import {
   memoryScimConnectionStore,
   ScimConnectionStore,
-  ScimDeactivatedPlugin,
   ScimError,
   ScimService,
   ScimUserStore,
@@ -43,6 +42,13 @@ import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import { UserService, UserServiceStore } from "./User.ts";
 import type * as Types from "./Types.ts";
 import { expectSpecJson } from "./testing/WireFormat.ts";
+import { ApiKeyStore, type ApiKey } from "./ApiKey.ts";
+import { OidcConsentStore, OidcTokenStore, type OidcToken } from "./OidcProvider.ts";
+import {
+  memoryApiKeyStore,
+  memoryOidcConsentStore,
+  memoryOidcTokenStore,
+} from "./testing/MemoryStores.ts";
 
 const ORG_A = "org-a";
 const ORG_B = "org-b";
@@ -54,8 +60,16 @@ const ORG_B = "org-b";
  * members and teams — and dies loudly on the rest, so a test that accidentally
  * exercises an unmapped path fails instead of quietly succeeding.
  */
-const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } = {}) => {
+const makeStores = (
+  options: {
+    readonly oneEmailPerUser?: boolean | undefined;
+    /** Give the organization store `listMembersByOrganizationPage`. */
+    readonly pagedMembers?: boolean | undefined;
+  } = {},
+) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
+  // How often SCIM read a user row and listed a whole organization.
+  const reads = { users: 0, fullMemberLists: 0 };
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const memory = memoryIdentifierStore(identifierRecords);
   // `oneEmailPerUser` refuses a user's second address as a single-table store
@@ -103,7 +117,11 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
         MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId) =>
+      Effect.sync(() => {
+        reads.users++;
+        return Option.getOrNull(MutableHashMap.get(usersById, userId));
+      }),
     update: (user) => Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
   };
 
@@ -164,7 +182,23 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     getMemberById: (memberId: string) =>
       Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     listMembersByOrganization: (organizationId: string) =>
-      Effect.succeed(members.filter((m) => m.organizationId === organizationId)),
+      Effect.sync(() => {
+        reads.fullMemberLists++;
+        return members.filter((m) => m.organizationId === organizationId);
+      }),
+    ...(options.pagedMembers === true && {
+      listMembersByOrganizationPage: (
+        organizationId: string,
+        page: { readonly offset: number; readonly limit: number },
+      ) =>
+        Effect.succeed(
+          members
+            .filter((m) => m.organizationId === organizationId)
+            .slice(page.offset, page.offset + page.limit),
+        ),
+    }),
+    countMembersByOrganization: (organizationId: string) =>
+      Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
     getTeam: (teamId: string) =>
       Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
@@ -207,7 +241,6 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     updateMember: unused,
     deleteMember: unused,
     listMembersByUser: unused,
-    countMembersByOrganization: unused,
     createInvitation: unused,
     getInvitation: unused,
     updateInvitation: unused,
@@ -292,6 +325,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
 
   return {
     layer,
+    reads,
     usersById,
     createdWith,
     organizations,
@@ -510,6 +544,62 @@ describe("ScimService — users", () => {
     );
     expect(miss.totalResults).toBe(0);
     expect(miss.resources).toEqual([]);
+  });
+
+  it("resolves userName eq through the identifier and the membership, reading one user", async () => {
+    const fx = await makeFixture();
+    await Arr.reduce(["a", "b", "c"], Promise.resolve(), async (previous, name) => {
+      await previous;
+      await fx.run(fx.service.createUser(fx.a.connection, { userName: `${name}@acme.test` }));
+    });
+    const outsider = await fx.run(
+      fx.service.createUser(fx.b.connection, { userName: "eve@other.test" }),
+    );
+    fx.reads.users = 0;
+    fx.reads.fullMemberLists = 0;
+
+    const found = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq "b@acme.test"' }),
+    );
+    expect(found.resources.map((r) => r.userName)).toEqual(["b@acme.test"]);
+    expect(fx.reads).toEqual({ users: 1, fullMemberLists: 0 });
+
+    // Another organization's user is not found, however the address is spelled.
+    const elsewhere = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq " EVE@other.test "' }),
+    );
+    expect(elsewhere).toEqual({ totalResults: 0, startIndex: 1, itemsPerPage: 0, resources: [] });
+    expect(outsider.userName).toBe("eve@other.test");
+  });
+
+  it("does not match userName eq on a user's other address", async () => {
+    const fx = await makeFixture();
+    await fx.run(
+      fx.service.createUser(fx.a.connection, {
+        userName: "ada@acme.test",
+        emails: [{ value: "ada@home.test" }],
+      }),
+    );
+    const byOther = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq "ada@home.test"' }),
+    );
+    expect(byOther.totalResults).toBe(0);
+  });
+
+  it("pages an unfiltered list at the store, reading only the page's users", async () => {
+    const fx = await makeFixture({ maxPageSize: 2 }, { pagedMembers: true });
+    await Arr.reduce(["a", "b", "c", "d", "e"], Promise.resolve(), async (previous, name) => {
+      await previous;
+      await fx.run(fx.service.createUser(fx.a.connection, { userName: `${name}@acme.test` }));
+    });
+    fx.reads.users = 0;
+    fx.reads.fullMemberLists = 0;
+
+    const page = await fx.run(fx.service.listUsers(fx.a.connection, { startIndex: 3, count: 50 }));
+    expect(page.totalResults).toBe(5);
+    expect(page.startIndex).toBe(3);
+    expect(page.resources.map((r) => r.userName)).toEqual(["c@acme.test", "d@acme.test"]);
+    expect(fx.reads).toEqual({ users: 2, fullMemberLists: 0 });
   });
 
   it("refuses a filter it cannot honour rather than returning the directory", async () => {
@@ -972,42 +1062,68 @@ describe("ScimService — groups", () => {
   });
 });
 
-describe("ScimDeactivatedPlugin", () => {
-  it("fails session validation for a deactivated user and passes everyone else", async () => {
-    const active: Types.SessionWithUser = {
-      session: {
-        id: "s1",
-        userId: "u1",
-        expiresAt: DateTime.toDateUtc(DateTime.add(DateTime.nowUnsafe(), { milliseconds: 1000 })),
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        lastActivityAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
-      },
-      user: {
-        id: "u1",
-        createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
-        attributes: {},
-      },
-    };
-    const deactivated: Types.SessionWithUser = {
-      ...active,
-      user: { ...active.user, attributes: { [SCIM_DEACTIVATED_ATTRIBUTE]: true } },
-    };
-
-    const layer = ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default));
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const hooks = yield* Hooks;
-        return {
-          allowed: yield* hooks.afterValidateSession(active),
-          blocked: yield* Effect.flip(hooks.afterValidateSession(deactivated)),
-        };
-      }).pipe(Effect.provide(layer)),
+describe("ScimService — deactivation revokes access", () => {
+  it("revokes the user's API keys and OIDC tokens and consents, and no one else's", async () => {
+    const stores = makeStores();
+    const keys = MutableHashMap.empty<string, ApiKey>();
+    const tokens = MutableHashMap.empty<string, OidcToken>();
+    const consentStore = memoryOidcConsentStore();
+    const service = await Effect.runPromise(
+      Scim.make({}).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stores.layer,
+            Layer.succeed(ApiKeyStore)(memoryApiKeyStore(keys)),
+            Layer.succeed(OidcTokenStore)(memoryOidcTokenStore(tokens)),
+            Layer.succeed(OidcConsentStore)(consentStore),
+          ),
+        ),
+      ),
     );
+    const connection = (await Effect.runPromise(service.createConnection(ORG_A))).connection;
+    const ada = await Effect.runPromise(service.createUser(connection, ADA));
+    const grace = await Effect.runPromise(
+      service.createUser(connection, { userName: "grace@acme.test", externalId: "okta-2" }),
+    );
+    const seedGrants = (userId: string) => {
+      MutableHashMap.set(keys, `key-${userId}`, {
+        id: `key-${userId}`,
+        start: "abcdef",
+        keyHash: `hash-${userId}`,
+        userId,
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      MutableHashMap.set(tokens, `token-${userId}`, {
+        tokenHash: `token-${userId}`,
+        kind: "access",
+        clientId: "client",
+        userId,
+        scopes: ["openid"],
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        createdAt: 0,
+      });
+      Effect.runSync(
+        consentStore.upsert({
+          userId,
+          clientId: "client",
+          scopes: ["openid"],
+          createdAt: 0,
+          updatedAt: 0,
+        }),
+      );
+    };
+    seedGrants(ada.id);
+    seedGrants(grace.id);
 
-    expect(result.allowed.user.id).toBe("u1");
-    expect(result.blocked._tag).toBe("UserBannedError");
+    await Effect.runPromise(service.deactivateUser(connection, ada.id));
+
+    expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual([`key-${grace.id}`]);
+    expect(Arr.fromIterable(MutableHashMap.keys(tokens))).toEqual([`token-${grace.id}`]);
+    expect(Effect.runSync(consentStore.get(ada.id, "client"))).toBeNull();
+    expect(Effect.runSync(consentStore.get(grace.id, "client"))).not.toBeNull();
   });
 });
 

@@ -51,10 +51,8 @@
  * revoked. Reactivation (`PATCH {"active": true}`) is then a single write, which
  * is what an IdP expects when someone returns from leave.
  *
- * Revoking sessions closes the door on anyone already signed in; to keep it
- * closed for *new* sign-ins, wire {@link ScimDeactivatedPlugin} into your hooks
- * stack. It mirrors `BannedUserPlugin` — a deactivated user fails session
- * validation instead of being silently let back in.
+ * Deactivation also revokes the user's API keys and OIDC grants, and
+ * `SessionService` refuses a deactivated user a session, with no plugin needed.
  *
  * @module scim
  */
@@ -87,8 +85,10 @@ import {
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { tokenHasher } from "./TokenHash.ts";
+import { revokeStandingAccess, userCredentialStores } from "./UserCredentials.ts";
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
+import { normalizeEmail } from "./utils.ts";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -142,23 +142,12 @@ export { SCIM_DEACTIVATED_ATTRIBUTE, isScimDeactivated };
 export const SCIM_EXTERNAL_ID_ATTRIBUTE = "scimExternalId";
 
 /**
- * Hooks plugin that blocks SCIM-deactivated users at session validation.
+ * A no-op, kept so existing hook stacks still compose: `SessionService`
+ * refuses a SCIM-deactivated user's sessions itself.
  *
- * {@link ScimService} already revokes a user's sessions the moment the IdP
- * deactivates them, which handles everyone already signed in. This plugin
- * closes the other half — it stops a deactivated user from establishing a new
- * session at all, in exactly the way `BannedUserPlugin` stops a banned one.
- *
- * Zero-dependency, so compose it like any other plugin:
- * `ScimDeactivatedPlugin.pipe(Layer.provide(Hooks.Default))`, or as one entry
- * in a `composePlugins([...])` stack.
+ * @deprecated Drop it from your hook stack; deactivation is enforced without it.
  */
-export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({
-  afterValidateSession: (sessionWithUser: Types.SessionWithUser) =>
-    isScimDeactivated(sessionWithUser.user)
-      ? Effect.fail(new Errors.UserBannedError({ message: "Your account has been deactivated" }))
-      : Effect.succeed(sessionWithUser),
-});
+export const ScimDeactivatedPlugin: Layer.Layer<Hooks, never, Hooks> = makePlugin({});
 
 // ---------------------------------------------------------------------------
 // Connections
@@ -641,8 +630,6 @@ const MEMBER_PATH_PATTERN = /^members\[\s*value\s+eq\s+(?:"([^"]*)"|'([^']*)')\s
 // Implementation
 // ---------------------------------------------------------------------------
 
-const normalizeEmail = (value: string): string => value.trim().toLowerCase();
-
 const parseBooleanString = (value: string): Option.Option<boolean> => {
   const lowered = value.trim().toLowerCase();
   return lowered === "true"
@@ -727,6 +714,7 @@ export const make = (
     const identifiers = yield* IdentifierStore;
     const orgs = yield* OrganizationStore;
     const sessions = yield* SessionService;
+    const credentials = yield* userCredentialStores;
     const crypto = yield* SecureRandom.SecureRandom;
 
     const randomId = (): Effect.Effect<string> => crypto.uuidV4();
@@ -820,10 +808,39 @@ export const make = (
         updatedAt: team.updatedAt,
       }));
 
+    /** A membership's user as a SCIM `User`; none for a stale row whose user is gone. */
+    const memberResource = (member: Member) =>
+      Effect.flatMap(users.get(member.userId), (user) =>
+        user === null
+          ? Effect.succeed(Option.none<ScimUserResource>())
+          : Effect.map(readUserResource(user), Option.some),
+      );
+
+    /**
+     * The organization's user whose `userName` is `userName` (normalized):
+     * the email identifier holding it, then a membership check, so a user of
+     * another organization is not found.
+     */
+    const findByUserName = (organizationId: string, userName: string) =>
+      Effect.gen(function* () {
+        const identifier = yield* lookupIdentifier(identifiers, "email", userName);
+        if (identifier === null) return Option.none<ScimUserResource>();
+        const member = yield* orgs.getMember(organizationId, identifier.userId);
+        if (member === null) return Option.none<ScimUserResource>();
+        const resource = yield* memberResource(member);
+        // The address may be one of the user's other emails, not its userName.
+        return Option.filter(resource, (found) => found.userName.toLowerCase() === userName);
+      });
+
+    /** A list request's 1-based `startIndex` and its `count`, capped at `maxPageSize`. */
+    const pageWindow = (query?: ScimListQuery) => ({
+      startIndex: Math.max(1, Math.trunc(query?.startIndex ?? 1)),
+      count: Math.max(0, Math.min(Math.trunc(query?.count ?? maxPageSize), maxPageSize)),
+    });
+
     /** Slice a filtered, ordered array into a SCIM `ListResponse` page. */
     const paginate = <A>(all: ReadonlyArray<A>, query?: ScimListQuery): ScimListResult<A> => {
-      const startIndex = Math.max(1, Math.trunc(query?.startIndex ?? 1));
-      const count = Math.max(0, Math.min(Math.trunc(query?.count ?? maxPageSize), maxPageSize));
+      const { startIndex, count } = pageWindow(query);
       const resources = all.slice(startIndex - 1, startIndex - 1 + count);
       return {
         totalResults: all.length,
@@ -869,8 +886,9 @@ export const make = (
       );
 
     /**
-     * Flip a user's `active` state. Deactivation revokes every live session, so
-     * the door closes now rather than whenever the session would have expired.
+     * Flip a user's `active` state. Deactivation revokes every live session,
+     * API key and OIDC grant, so the door closes now rather than whenever they
+     * would have expired; `SessionService` refuses the user a new session.
      */
     const setActive = (user: Types.User, active: boolean) =>
       Effect.gen(function* () {
@@ -881,7 +899,10 @@ export const make = (
           attributes[SCIM_DEACTIVATED_ATTRIBUTE] = true;
         }
         const updated = yield* writeAttributes(user, attributes);
-        if (!active) yield* sessions.invalidateUserSessions(user.id);
+        if (!active) {
+          yield* sessions.invalidateUserSessions(user.id);
+          yield* revokeStandingAccess(credentials, user.id);
+        }
         return updated;
       });
 
@@ -1304,28 +1325,51 @@ export const make = (
             ? null
             : yield* parseFilter(query.filter, ["userName", "externalId"]);
 
-        const members = yield* orgs.listMembersByOrganization(connection.organizationId);
-        const ordered = Arr.sort(members, byCreatedAt);
+        const organizationId = connection.organizationId;
 
-        const matched = yield* Effect.forEach(
-          ordered,
-          (member) =>
-            Effect.gen(function* () {
-              const user = yield* users.get(member.userId);
-              // A membership row whose user is gone is stale, not an error.
-              if (user === null) return Option.none<ScimUserResource>();
-              const resource = yield* readUserResource(user);
-              if (parsed === null) return Option.some(resource);
-              const matches =
-                parsed.attribute === "userName"
-                  ? resource.userName.toLowerCase() === parsed.value.trim().toLowerCase()
-                  : resource.externalId === parsed.value;
-              return matches ? Option.some(resource) : Option.none<ScimUserResource>();
-            }),
-          { concurrency: 1 },
+        // IdPs send `userName eq` on every sync: one identifier lookup and one
+        // membership check, never a scan of the directory.
+        if (parsed?.attribute === "userName") {
+          const found = yield* findByUserName(organizationId, normalizeEmail(parsed.value));
+          return paginate(Option.toArray(found), query);
+        }
+
+        if (parsed !== null) {
+          const members = Arr.sort(
+            yield* orgs.listMembersByOrganization(organizationId),
+            byCreatedAt,
+          );
+          const matched = yield* Effect.forEach(
+            members,
+            (member) =>
+              Effect.map(memberResource(member), (resource) =>
+                Option.filter(resource, ({ externalId }) => externalId === parsed.value),
+              ),
+            { concurrency: 1 },
+          );
+          return paginate(Arr.getSomes(matched), query);
+        }
+
+        // Unfiltered: read one page of memberships, and only that page's users.
+        const { startIndex, count } = pageWindow(query);
+        const page = { offset: startIndex - 1, limit: count };
+        const totalResults = yield* orgs.countMembersByOrganization(organizationId);
+        const members =
+          count === 0
+            ? []
+            : orgs.listMembersByOrganizationPage !== undefined
+              ? yield* orgs.listMembersByOrganizationPage(organizationId, page)
+              : Arr.take(
+                  Arr.drop(
+                    Arr.sort(yield* orgs.listMembersByOrganization(organizationId), byCreatedAt),
+                    page.offset,
+                  ),
+                  page.limit,
+                );
+        const resources = Arr.getSomes(
+          yield* Effect.forEach(Arr.take(members, count), memberResource, { concurrency: 1 }),
         );
-
-        return paginate(Arr.getSomes(matched), query);
+        return { totalResults, startIndex, itemsPerPage: resources.length, resources };
       }),
 
       replaceUser: Effect.fn("ScimService.replaceUser")(function* (

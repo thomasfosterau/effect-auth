@@ -35,13 +35,18 @@ import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import { SessionService } from "./SessionService.ts";
-import { EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordStore,
+  sessionOrChallenge,
+  type SessionOrChallenge,
+} from "./email/EmailPassword.ts";
 import { firstProofServices, proveAddress } from "./FirstProof.ts";
 import { OAuthUserStore, generateNonce, verifyIdToken } from "./oauth/OAuth.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { createUserWithIdentifier, UserStore } from "./UserStore.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
+import { normalizeEmail } from "./utils.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
 export class GoogleOneTapError extends Data.TaggedError("GoogleOneTapError")<{
@@ -102,15 +107,12 @@ export interface GoogleOneTapConfig {
 }
 
 /** Result of a completed One Tap sign-in. */
-export interface GoogleOneTapSignInResult {
+export type GoogleOneTapSignInResult = {
   readonly user: Types.User;
-  readonly session: Types.Session;
-  /** The raw session token, the credential the client presents; `session.id` is its digest. */
-  readonly token: string;
   readonly isNewUser: boolean;
   /** The verified id_token claims (sub, email, name, picture, ...). */
   readonly claims: Types.JsonObject;
-}
+} & SessionOrChallenge;
 
 /**
  * Google One Tap sign-in: issues a nonce, verifies the One Tap credential against Google's JWKS, and signs in by the verified email.
@@ -249,7 +251,7 @@ export const make = (
             message: "Google did not attest a verified email address",
           });
         }
-        const normalized = email.trim().toLowerCase();
+        const normalized = normalizeEmail(email);
 
         const { identifier, user: owner } = yield* findIdentifierOwner(
           identifiers,
@@ -288,8 +290,8 @@ export const make = (
           yield* proveAddress(firstProof, identifier);
         }
 
-        const { session, token } = yield* sessionManager.createSession(user.id);
-        return { user, session, token, isNewUser, claims };
+        const issued = yield* sessionOrChallenge(sessionManager, user, "google-one-tap");
+        return { user, ...issued, isNewUser, claims } satisfies GoogleOneTapSignInResult;
       }),
     };
   });

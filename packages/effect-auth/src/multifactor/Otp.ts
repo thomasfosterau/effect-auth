@@ -73,12 +73,12 @@ class OtpUriError extends Data.TaggedError("OtpUriError")<{
 
 const base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-/**
- * Split a string of `0`/`1` digits into consecutive groups of `size` bits; the
- * last group is shorter when `bits.length` is not a multiple of `size`.
- */
-const bitGroups = (bits: string, size: number): ReadonlyArray<string> =>
-  Arr.map(Arr.chunksOf(bits.split(""), size), (group) => group.join(""));
+/** `f` of `0` to `n - 1`; `Arr.makeBy` makes at least one. */
+const times = <A>(n: number, f: (i: number) => A): Array<A> => (n > 0 ? Arr.makeBy(n, f) : []);
+
+/** Consecutive groups of `size` (the last may be shorter), in linear time, unlike `Arr.chunksOf`. */
+const groupsOf = <A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A>> =>
+  times(Math.ceil(items.length / size), (i) => items.slice(i * size, (i + 1) * size));
 
 /**
  * Generate cryptographically secure random bytes for OTP secret
@@ -106,16 +106,16 @@ const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
  * Encode bytes to base32 (RFC 4648)
  * Used for encoding OTP secrets
  */
-export const encodeBase32 = (buffer: Uint8Array): string => {
-  // Each byte contributes 8 bits; every 5 bits is one character, and a final
-  // partial group is right-padded with zero bits.
-  const bits = Arr.map(Arr.fromIterable(buffer), (byte) => byte.toString(2).padStart(8, "0")).join(
-    "",
-  );
-  return Arr.map(bitGroups(bits, 5), (group) =>
-    base32Alphabet.charAt(parseInt(group.padEnd(5, "0"), 2)),
-  ).join("");
-};
+export const encodeBase32 = (buffer: Uint8Array): string =>
+  // Each 5 bytes are 40 bits, 8 characters: arithmetic on one number per
+  // group, so the work stays linear with no per-bit strings. A final partial
+  // group is right-padded with zero bits.
+  Arr.flatMap(groupsOf(Arr.fromIterable(buffer), 5), (group) => {
+    const value = Arr.reduce(group, 0, (acc, byte) => acc * 256 + byte) * 256 ** (5 - group.length);
+    return times(Math.ceil((group.length * 8) / 5), (i) =>
+      base32Alphabet.charAt(Math.floor(value / 2 ** (35 - 5 * i)) % 32),
+    );
+  }).join("");
 
 /**
  * Decode base32 string to bytes (RFC 4648)
@@ -136,18 +136,22 @@ export const decodeBase32 = (base32: string): Effect.Effect<Uint8Array, Errors.H
               }),
             }),
           ),
-        onNone: () => {
-          // Each character contributes 5 bits; every complete 8 bits is one
-          // byte, and trailing bits short of a byte are dropped.
-          const bits = Arr.map(chars, (char) =>
-            base32Alphabet.indexOf(char).toString(2).padStart(5, "0"),
-          ).join("");
-          const bytes = Arr.map(
-            Arr.filter(bitGroups(bits, 8), (group) => group.length === 8),
-            (group) => parseInt(group, 2),
-          );
-          return Effect.succeed(Uint8Array.from(bytes));
-        },
+        onNone: () =>
+          // Each 8 characters are 40 bits, 5 bytes, as in `encodeBase32`;
+          // trailing bits short of a byte are dropped.
+          Effect.succeed(
+            Uint8Array.from(
+              Arr.flatMap(groupsOf(chars, 8), (group) => {
+                const value =
+                  Arr.reduce(group, 0, (acc, char) => acc * 32 + base32Alphabet.indexOf(char)) *
+                  32 ** (8 - group.length);
+                return times(
+                  Math.floor((group.length * 5) / 8),
+                  (i) => Math.floor(value / 2 ** (32 - 8 * i)) % 256,
+                );
+              }),
+            ),
+          ),
       },
     );
   });

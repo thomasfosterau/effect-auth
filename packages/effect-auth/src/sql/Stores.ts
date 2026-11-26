@@ -35,7 +35,7 @@
  * bearer token.
  */
 
-import { Clock, DateTime, Duration, Effect, Layer, Order } from "effect";
+import { Clock, DateTime, Duration, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
@@ -157,7 +157,10 @@ interface UserRow {
   readonly updated_at: number;
 }
 
-const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.AuthError> =>
+const rowToUser = (
+  row: Omit<UserRow, "password_hash">,
+  label: string,
+): Effect.Effect<Auth.User, Auth.AuthError> =>
   Effect.all(
     {
       attributes: decodeAttributes(row.attributes, label),
@@ -978,28 +981,15 @@ export const makeOAuthAccountStore: Effect.Effect<
       sql<OAuthAccountRow>`SELECT * FROM auth_oauth_accounts WHERE provider = ${provider} AND provider_id = ${providerId}`,
     );
 
-  /**
-   * Atomic upsert keyed by the (provider, provider_id) unique index — a
-   * single statement, so concurrent upserts can't lose each other's writes.
-   */
-  const upsert = (account: Auth.OAuth.OAuthAccount, label: string) =>
-    asVoid(
-      label,
-      sql`INSERT INTO auth_oauth_accounts (id, user_id, provider, provider_id, email, name, picture, access_token, refresh_token, expires_at, created_at, updated_at)
-          VALUES (${account.id}, ${account.userId}, ${account.provider}, ${account.providerId}, ${account.email ?? null}, ${account.name ?? null}, ${account.picture ?? null}, ${account.accessToken}, ${account.refreshToken ?? null}, ${account.expiresAt ?? null}, ${account.createdAt}, ${account.updatedAt})
-          ON CONFLICT(provider, provider_id) DO UPDATE SET
-            user_id = ${account.userId},
-            email = ${account.email ?? null},
-            name = ${account.name ?? null},
-            picture = ${account.picture ?? null},
-            access_token = ${account.accessToken},
-            refresh_token = ${account.refreshToken ?? null},
-            expires_at = ${account.expiresAt ?? null},
-            updated_at = ${account.updatedAt}`,
-    );
-
   return {
-    create: (account) => upsert(account, "oauthAccount.create").pipe(Effect.as(account)),
+    // A plain insert: the (provider, provider_id) unique index refuses a
+    // second link, and the service reports it as a conflict.
+    create: (account) =>
+      asVoid(
+        "oauthAccount.create",
+        sql`INSERT INTO auth_oauth_accounts (id, user_id, provider, provider_id, email, name, picture, access_token, refresh_token, expires_at, created_at, updated_at)
+            VALUES (${account.id}, ${account.userId}, ${account.provider}, ${account.providerId}, ${account.email ?? null}, ${account.name ?? null}, ${account.picture ?? null}, ${account.accessToken}, ${account.refreshToken ?? null}, ${account.expiresAt ?? null}, ${account.createdAt}, ${account.updatedAt})`,
+      ).pipe(Effect.as(account)),
     get: (provider, providerId) =>
       read(provider, providerId, "oauthAccount.get").pipe(
         Effect.map((row) => (row ? rowToOAuthAccount(row) : null)),
@@ -1009,8 +999,48 @@ export const makeOAuthAccountStore: Effect.Effect<
         "oauthAccount.getByUserId",
         sql<OAuthAccountRow>`SELECT * FROM auth_oauth_accounts WHERE user_id = ${userId}`,
       ).pipe(Effect.map((rows) => rows.map(rowToOAuthAccount))),
-    update: (account) => upsert(account, "oauthAccount.update").pipe(Effect.as(account)),
-    linkToUser: (userId, account) => upsert({ ...account, userId }, "oauthAccount.linkToUser"),
+    update: (account) =>
+      firstRow(
+        "oauthAccount.update",
+        sql<OAuthAccountRow>`UPDATE auth_oauth_accounts SET
+            email = ${account.email ?? null},
+            name = ${account.name ?? null},
+            picture = ${account.picture ?? null},
+            access_token = ${account.accessToken},
+            refresh_token = ${account.refreshToken ?? null},
+            expires_at = ${account.expiresAt ?? null},
+            updated_at = ${account.updatedAt}
+          WHERE id = ${account.id}
+          RETURNING *`,
+      ).pipe(Effect.map((row) => (row ? rowToOAuthAccount(row) : null))),
+    // Only an unlinked link (empty user_id) or one `userId` already holds
+    // moves; a link another user holds is refused, never reassigned.
+    linkToUser: (userId, account) =>
+      firstRow(
+        "oauthAccount.linkToUser",
+        sql<{
+          readonly id: string;
+        }>`UPDATE auth_oauth_accounts SET user_id = ${userId}, updated_at = ${account.updatedAt}
+            WHERE provider = ${account.provider} AND provider_id = ${account.providerId}
+              AND (user_id = '' OR user_id = ${userId})
+            RETURNING id`,
+      ).pipe(
+        Effect.flatMap((moved) =>
+          moved
+            ? Effect.void
+            : read(account.provider, account.providerId, "oauthAccount.linkToUser").pipe(
+                Effect.flatMap((held) =>
+                  held
+                    ? Effect.fail(
+                        new Auth.AuthError({
+                          message: "oauthAccount.linkToUser: the link belongs to another user",
+                        }),
+                      )
+                    : Effect.void,
+                ),
+              ),
+        ),
+      ),
     unlinkFromUser: (userId, provider) =>
       asVoid(
         "oauthAccount.unlinkFromUser",
@@ -2245,15 +2275,13 @@ export const makeApiKeyStore: Effect.Effect<
 // AdminUserStore (reuses auth_users + auth_identifiers — no dedicated table)
 // ---------------------------------------------------------------------------
 
-interface UserRowWithEmail extends UserRow {
+/** A user row without `password_hash`, which `listUsers` never selects, and its earliest email. */
+interface ListedUserRow extends Omit<UserRow, "password_hash"> {
   readonly primary_email: string | null;
 }
 
-/** Orders by `email` with `localeCompare`, the order `listUsers` pages in. */
-const byEmail: Order.Order<{ readonly email: string }> = Order.make((a, b) => {
-  const compared = a.email.localeCompare(b.email);
-  return compared < 0 ? -1 : compared > 0 ? 1 : 0;
-});
+/** `value` as a `LIKE` pattern matching it as a literal substring (escape `\\`). */
+const likeSubstring = (value: string): string => `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 
 /** `Auth.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
 export const makeAdminUserStore: Effect.Effect<
@@ -2263,41 +2291,44 @@ export const makeAdminUserStore: Effect.Effect<
 > = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
 
+  // Each user with their earliest email identifier, the column `listUsers`
+  // searches and orders by.
+  const listed = sql`SELECT u.id, u.name, u.image, u.attributes, u.created_at, u.updated_at, (
+      SELECT value FROM auth_identifiers ie
+      WHERE ie.user_id = u.id AND ie.type = 'email'
+      ORDER BY ie.created_at ASC LIMIT 1
+    ) AS primary_email
+    FROM auth_users u`;
+
   return {
-    // No SQL-side pagination: matches/sorts on each user's earliest email
-    // identifier, which lives in a different table and isn't indexable as a
-    // plain column, so the candidate set is materialized once and paged in
-    // memory (mirrors the reference semantics in Admin.test.ts's test store).
+    // Search, order and page in SQL: one page of rows is read, never the table.
     listUsers: (query) =>
       Effect.gen(function* () {
+        const search = query.searchEmail?.toLowerCase();
+        const where =
+          search === undefined || search === ""
+            ? sql``
+            : sql`WHERE LOWER(COALESCE(l.primary_email, '')) LIKE ${likeSubstring(search)} ESCAPE '\\'`;
+        const offset = Math.max(0, Math.trunc(query.offset ?? 0));
+        // SQLite has no OFFSET without a LIMIT, so "no limit" is the largest one.
+        const limit = Math.max(0, Math.trunc(query.limit ?? Number.MAX_SAFE_INTEGER));
+        const counted = yield* firstRow(
+          "adminUser.listUsers",
+          sql<{
+            readonly total: number;
+          }>`SELECT CAST(COUNT(*) AS INTEGER) AS total FROM (${listed}) l ${where}`,
+        );
         const rows = yield* allRows(
           "adminUser.listUsers",
-          sql<UserRowWithEmail>`
-            SELECT u.*, (
-              SELECT value FROM auth_identifiers ie
-              WHERE ie.user_id = u.id AND ie.type = 'email'
-              ORDER BY ie.created_at ASC LIMIT 1
-            ) AS primary_email
-            FROM auth_users u`,
+          sql<ListedUserRow>`SELECT * FROM (${listed}) l ${where}
+            ORDER BY COALESCE(l.primary_email, ''), l.id
+            LIMIT ${limit} OFFSET ${offset}`,
         );
-        const decorated = yield* Effect.forEach(
-          rows,
-          (row) =>
-            rowToUser(row, "adminUser.listUsers").pipe(
-              Effect.map((user) => ({ user, email: row.primary_email ?? "" })),
-            ),
-          { concurrency: 1 },
-        );
-        const search = query.searchEmail?.toLowerCase();
-        const matching = Arr.sort(
-          decorated.filter(({ email }) => (search ? email.toLowerCase().includes(search) : true)),
-          byEmail,
-        );
-        const offset = query.offset ?? 0;
-        const limit = query.limit ?? matching.length;
         return {
-          users: matching.slice(offset, offset + limit).map(({ user }) => user),
-          total: matching.length,
+          users: yield* Effect.forEach(rows, (row) => rowToUser(row, "adminUser.listUsers"), {
+            concurrency: 1,
+          }),
+          total: counted?.total ?? 0,
         } satisfies Auth.ListUsersResult;
       }),
     createUser: (input) => users.create(input, "adminUser.createUser"),

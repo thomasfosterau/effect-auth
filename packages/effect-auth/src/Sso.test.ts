@@ -1,5 +1,6 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
+import { enrolledGate, testChallenge } from "./testing/SecondFactor.ts";
 import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
 import { DateTime, Effect, Exit, Layer, MutableHashMap, Result, Struct } from "effect";
@@ -15,7 +16,12 @@ import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
-import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  exemptFromSecondFactor,
+  type SecondFactorGate,
+} from "./email/EmailPassword.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { EmailVerificationService } from "./email/EmailVerification.ts";
 import { PasswordResetService } from "./password/PasswordReset.ts";
@@ -414,7 +420,7 @@ describe("SsoService", () => {
     expect(createdWith).toEqual([
       { type: "email", value: "worker@acme.test", verified: true, verifiedAt: expect.any(Date) },
     ]);
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
     expect(members).toEqual([
       { ...members[0], organizationId: "org-1", userId: first.user.id, role: "member" },
     ]);
@@ -446,7 +452,7 @@ describe("SsoService", () => {
       },
     };
     /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
-    const signIn = async (extra?: Layer.Layer<ApiKeyStore>) => {
+    const signIn = async <ROut = never>(extra?: Layer.Layer<ROut>) => {
       const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
       const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
       await Effect.runPromise(
@@ -560,8 +566,32 @@ describe("SsoService", () => {
     const result = await fx.signIn();
 
     expect(result.user.id).toBeTypeOf("string");
-    expect(result.session.userId).toBe(result.user.id);
+    expect(result.session?.userId).toBe(result.user.id);
     expect(fx.members).toEqual([]);
+  });
+
+  it("answers a second-factor challenge, and no session, when the gate requires one", async () => {
+    const challenged: Array<string> = [];
+    const fx = jitFixture();
+
+    const gated = await fx.signIn(enrolledGate(challenged));
+
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual([gated.user.id]);
+  });
+
+  it("issues a session past the gate when SSO is exempt from it", async () => {
+    const challenged: Array<string> = [];
+    const fx = jitFixture();
+
+    const exempt = await fx.signIn(
+      Layer.merge(enrolledGate(challenged), exemptFromSecondFactor("sso")),
+    );
+
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.session?.userId).toBe(exempt.user.id);
+    expect(challenged).toEqual([]);
   });
 
   it("populates endpoints from OIDC discovery", async () => {
@@ -880,7 +910,7 @@ describe("SsoService — SAML", () => {
     const first = await Effect.runPromise(signIn("_a1"));
     expect(first.isNewUser).toBe(true);
     expect(first.provider.protocol).toBe("saml");
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
     const identifier = await Effect.runPromise(
       fx.identifiers.getByValue("email", "worker@acme.test"),
     );
@@ -1057,6 +1087,54 @@ describe("SsoService — SAML", () => {
     expect(ok.isNewUser).toBe(true);
   });
 
+  it("binds an SP-initiated response to the browser that started it", async () => {
+    const fx = makeSamlFixture();
+    const sso = await runPromiseHttp(
+      Sso.make({ allowIdpInitiated: true }).pipe(Effect.provide(fx.layer)),
+    );
+    const providerId = (
+      await Effect.runPromise(
+        sso.registerSamlProvider("admin", ACME_SAML).pipe(Effect.provide(fx.layer)),
+      )
+    ).id;
+
+    /** Start a sign-in, then post its response from a browser holding `browserState`. */
+    const answer = (assertionId: string, browserState: (state: string) => string | undefined) =>
+      Effect.gen(function* () {
+        const start = yield* sso.signIn({ email: "worker@acme.test" });
+        const requestId = fx.requests[fx.requests.length - 1]?.requestId ?? "";
+        return yield* sso.handleSamlCallback(
+          providerId,
+          samlResponse({ id: assertionId, inResponseTo: requestId }),
+          start.state,
+          { browserState: browserState(start.state) },
+        );
+      }).pipe(Effect.provide(fx.layer));
+
+    // The attacker started the sign-in; the victim's browser holds no state,
+    // or the state of a sign-in of its own.
+    const none = await Effect.runPromise(Effect.flip(answer("_b1", () => undefined)));
+    assert.instanceOf(none, SsoError);
+    expect(none.message).toMatch(/did not start/);
+    const other = await Effect.runPromise(Effect.flip(answer("_b2", () => "another-state")));
+    assert.instanceOf(other, SsoError);
+    expect(other.message).toMatch(/did not start/);
+
+    const ok = await Effect.runPromise(answer("_b3", (state) => state));
+    expect(ok.user.id).toBeDefined();
+
+    // An IdP-initiated response answers no request, so no browser holds a
+    // state for it: `allowIdpInitiated` alone decides.
+    const unsolicited = await Effect.runPromise(
+      sso
+        .handleSamlCallback(providerId, samlResponse({ id: "_b4" }), undefined, {
+          browserState: undefined,
+        })
+        .pipe(Effect.provide(fx.layer)),
+    );
+    expect(unsolicited.user.id).toBe(ok.user.id);
+  });
+
   it("keeps the two protocols' callbacks apart", async () => {
     const fx = makeSamlFixture();
     const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
@@ -1183,7 +1261,12 @@ describe("memorySamlReplayStore", () => {
 // --- HTTP layer --------------------------------------------------------------
 
 /** A web handler wired with the SSO endpoints over in-memory stores. */
-const makeHttpFixture = () => {
+const makeHttpFixture = (
+  options: {
+    readonly sso?: HttpServer.SsoRedirectConfig;
+    readonly gate?: Layer.Layer<SecondFactorGate>;
+  } = {},
+) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const identifierStore = memoryIdentifierStore(identifierRecords);
@@ -1349,6 +1432,7 @@ const makeHttpFixture = () => {
     Layer.succeed(SamlVerifier)(stubSamlVerifier(samlRequests)),
     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
     testCryptoLayer,
+    options.gate ?? Layer.empty,
   );
 
   const ssoServiceLayer = SsoService.layer().pipe(Layer.provide([ssoDeps, globalFetchHttpClient]));
@@ -1361,8 +1445,12 @@ const makeHttpFixture = () => {
   return {
     seedUser,
     makeSession,
-    handler: HttpServer.make({ services: withSso, cookie: { secure: false }, ipRateLimit: false })
-      .handler,
+    handler: HttpServer.make({
+      services: withSso,
+      cookie: { secure: false },
+      ipRateLimit: false,
+      ...(options.sso !== undefined && { sso: options.sso }),
+    }).handler,
     handlerWithoutSso: HttpServer.make({
       services: withoutSso,
       cookie: { secure: false },
@@ -1374,13 +1462,26 @@ const makeHttpFixture = () => {
   };
 };
 
-const post = (path: string, body: Schema.Json, sessionId?: string): Request =>
-  new Request(`http://test${path}`, {
+/** Run `step` over `items` one after another. */
+const inSequence = <A>(items: ReadonlyArray<A>, step: (item: A) => Promise<void>): Promise<void> =>
+  Arr.reduce(items, Promise.resolve(), async (previous, item) => {
+    await previous;
+    await step(item);
+  });
+
+/** The pre-login cookie a started sign-in (`sso-authorizations`) sets, as a `Cookie` header. */
+const ssoStateCookie = (response: Response): string => {
+  const set = response.headers
+    .getSetCookie()
+    .find((cookie) => cookie.startsWith("conduit_session_sso_state="));
+  return set?.split(";")[0] ?? "";
+};
+
+/** `POST /sso/callback` from a browser that holds `cookie`. */
+const callbackPost = (body: Schema.Json, cookie: string): Request =>
+  new Request("http://test/sso/callback", {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(sessionId !== undefined ? { cookie: `conduit_session=${sessionId}` } : {}),
-    },
+    headers: { "content-type": "application/json", cookie },
     body: encodeJson(body),
   });
 
@@ -1440,6 +1541,15 @@ describe("HTTP SSO endpoints", () => {
     expect(signIn.headers.get("cache-control")).toBe("no-store");
     const { url, state } = await signInUrl(signIn);
     expect(new URL(url).origin).toBe("https://idp.acme.test");
+    // The pre-login cookie binds the flow to this browser. The SAML ACS is a
+    // cross-site POST, so it is `SameSite=None`, hence `Secure` even here.
+    const preLogin = signIn.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith("conduit_session_sso_state="));
+    expect(preLogin).toContain(`conduit_session_sso_state=${state}`);
+    expect(preLogin).toMatch(/HttpOnly/i);
+    expect(preLogin).toMatch(/SameSite=None/i);
+    expect(preLogin).toMatch(/Secure/i);
 
     // Callback provisions the user and sets a session cookie.
     const callback = await withFetch(
@@ -1452,15 +1562,45 @@ describe("HTTP SSO endpoints", () => {
           name: "Worker",
         },
       },
-      () => fx.handler(post("/sso/callback", { state, code: "auth-code" })),
+      () => fx.handler(callbackPost({ state, code: "auth-code" }, ssoStateCookie(signIn))),
     );
     expect(callback.status).toBe(200);
     expect(callback.headers.get("set-cookie")).toContain("conduit_session=");
+    // A finished sign-in clears the pre-login cookie.
+    expect(callback.headers.getSetCookie()).toContainEqual(
+      expect.stringMatching(/^conduit_session_sso_state=;.*Max-Age=0/i),
+    );
     // The callback keeps its own JSON answer, never a JSON:API document.
     const callbackBody = await expectSpecJson(callback, "application/json", ["user"]);
     expect(Schema.decodeUnknownSync(UserEmailBody)(callbackBody).user.email).toBe(
       "worker@acme.test",
     );
+  });
+
+  it("refuses a callback from a browser that did not start the sign-in", async () => {
+    const fx = makeHttpFixture();
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    await fx.handler(registerProvider(REGISTER_BODY, adminSid));
+
+    // The attacker starts a sign-in and completes the IdP leg as themselves;
+    // the victim's browser holds no pre-login cookie, or one of its own.
+    const attacker = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    const { state } = await signInUrl(attacker);
+    const victim = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+
+    await inSequence(["", ssoStateCookie(victim)], async (cookie) => {
+      const res = await withFetch(ACME_IDP_ROUTES, () =>
+        fx.handler(callbackPost({ state, code: "auth-code" }, cookie)),
+      );
+      expect(res.status).toBe(400);
+      expect(res.headers.get("set-cookie")).toBeNull();
+    });
+
+    // The state was not spent by the refusals: its own browser still finishes.
+    const own = await withFetch(ACME_IDP_ROUTES, () =>
+      fx.handler(callbackPost({ state, code: "auth-code" }, ssoStateCookie(attacker))),
+    );
+    expect(own.status).toBe(200);
   });
 
   it("takes the organization as the relationship, and answers it the same way", async () => {
@@ -1514,11 +1654,19 @@ const SAML_REGISTER_BODY = {
   acsUrl: SAML_ACS,
 };
 
-/** The IdP's ACS POST: an `application/x-www-form-urlencoded` browser form. */
-const acsPost = (providerId: string, fields: Record<string, string>): Request =>
+/**
+ * The IdP's ACS POST: an `application/x-www-form-urlencoded` browser form,
+ * posted from the IdP's page (so `Origin` is the IdP's) by a browser holding
+ * `cookie`.
+ */
+const acsPost = (providerId: string, fields: Record<string, string>, cookie = ""): Request =>
   new Request(`http://test/sso/saml/acs/${providerId}`, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      origin: "https://idp.acme.test",
+      ...(cookie !== "" && { cookie }),
+    },
     body: new URLSearchParams(fields).toString(),
   });
 
@@ -1569,7 +1717,7 @@ describe("HTTP SSO endpoints — SAML", () => {
     expect(errors[0]?.detail).toMatch(/idpCertificates/);
   });
 
-  it("completes the ACS form POST and issues a session cookie", async () => {
+  it("completes the cross-origin ACS form POST with a redirect and a session cookie", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
 
@@ -1583,20 +1731,31 @@ describe("HTTP SSO endpoints — SAML", () => {
     const { state } = await signInUrl(signIn);
     const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
 
+    // The IdP's origin is in no `trustedOrigins`: the ACS is exempt from the
+    // Origin gate and checks the pre-login cookie instead.
     const acs = await fx.handler(
-      acsPost(providerId, {
-        SAMLResponse: samlResponse({ id: "_http-a1", inResponseTo: requestId }),
-        RelayState: state,
-      }),
+      acsPost(
+        providerId,
+        {
+          SAMLResponse: samlResponse({ id: "_http-a1", inResponseTo: requestId }),
+          RelayState: state,
+        },
+        ssoStateCookie(signIn),
+      ),
     );
-    expect(acs.status).toBe(200);
-    expect(acs.headers.get("set-cookie")).toContain("conduit_session=");
-    // The IdP posts a form; the answer is plain JSON, never a JSON:API document.
-    const acsBody = await expectSpecJson(acs, "application/json", ["user"]);
-    expect(Schema.decodeUnknownSync(UserEmailBody)(acsBody).user.email).toBe("worker@acme.test");
+    // A top-level form POST is answered with a redirect, never a body.
+    expect(acs.status).toBe(303);
+    expect(acs.headers.get("location")).toBe("/");
+    expect(await acs.text()).toBe("");
+    expect(acs.headers.get("cache-control")).toBe("no-store");
+    const cookies = acs.headers.getSetCookie();
+    expect(cookies).toContainEqual(expect.stringMatching(/^conduit_session=/));
+    expect(cookies).toContainEqual(
+      expect.stringMatching(/^conduit_session_sso_state=;.*Max-Age=0/i),
+    );
   });
 
-  it("answers 400 when the ACS response cannot be trusted", async () => {
+  it("redirects to the error page when the ACS response cannot be trusted", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
     const registered = await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid));
@@ -1606,8 +1765,59 @@ describe("HTTP SSO endpoints — SAML", () => {
     const res = await fx.handler(
       acsPost(providerId, { SAMLResponse: samlResponse({ inResponseTo: "_never-issued" }) }),
     );
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/?error=access_denied");
     expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses an ACS POST from a browser that did not start the sign-in", async () => {
+    const fx = makeHttpFixture({
+      sso: { redirectTo: "https://app.test/home", errorRedirectTo: "/sign-in?next=%2Fhome" },
+    });
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const providerId = await providerIdOf(
+      await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid)),
+    );
+
+    // The attacker starts the sign-in and has the IdP sign a response for
+    // themselves; the victim's browser posts it holding no pre-login cookie,
+    // or one of its own.
+    const victim = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    await inSequence(
+      [
+        ["_csrf-1", ""],
+        ["_csrf-2", ssoStateCookie(victim)],
+      ] as const,
+      async ([id, cookie]) => {
+        const { state } = await signInUrl(
+          await fx.handler(startSignIn({ email: "worker@acme.test" })),
+        );
+        const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
+        const res = await fx.handler(
+          acsPost(
+            providerId,
+            { SAMLResponse: samlResponse({ id, inResponseTo: requestId }), RelayState: state },
+            cookie,
+          ),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/sign-in?next=%2Fhome&error=access_denied");
+        expect(res.headers.get("set-cookie")).toBeNull();
+      },
+    );
+
+    // The configured success target, for the browser that started it.
+    const { state } = await signInUrl(victim);
+    const requestId = fx.samlRequests[0]?.requestId ?? "";
+    const own = await fx.handler(
+      acsPost(
+        providerId,
+        { SAMLResponse: samlResponse({ id: "_own", inResponseTo: requestId }), RelayState: state },
+        ssoStateCookie(victim),
+      ),
+    );
+    expect(own.status).toBe(303);
+    expect(own.headers.get("location")).toBe("https://app.test/home");
   });
 
   it("serves SP metadata as XML", async () => {
@@ -1690,7 +1900,7 @@ describe("SSO callback state is single-use", () => {
   it("refuses a callback replayed after it signed the user in", async () => {
     const callback = await started();
     const first = await withFetch(ACME_IDP_ROUTES, () => Effect.runPromise(callback("code-1")));
-    expect(first.session.userId).toBe(first.user.id);
+    expect(first.session?.userId).toBe(first.user.id);
 
     const replay = await withFetch(ACME_IDP_ROUTES, () =>
       Effect.runPromise(Effect.flip(callback("code-1"))),
@@ -1732,15 +1942,17 @@ describe("SSO callback state is single-use", () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
     await fx.handler(registerProvider(REGISTER_BODY, adminSid));
-    const { state } = await signInUrl(await fx.handler(startSignIn({ email: "worker@acme.test" })));
+    const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    const { state } = await signInUrl(signIn);
+    const cookie = ssoStateCookie(signIn);
 
     const failed = await withFailingIdp(() =>
-      fx.handler(post("/sso/callback", { state, code: "code-1" })),
+      fx.handler(callbackPost({ state, code: "code-1" }, cookie)),
     );
     expect(failed.status).toBe(400);
 
     const replay = await withFetch(ACME_IDP_ROUTES, () =>
-      fx.handler(post("/sso/callback", { state, code: "code-2" })),
+      fx.handler(callbackPost({ state, code: "code-2" }, cookie)),
     );
     expect(replay.status).toBe(400);
     expect(replay.headers.get("set-cookie")).toBeNull();
@@ -1752,26 +1964,66 @@ describe("SSO callback state is single-use", () => {
     const providerId = await providerIdOf(
       await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid)),
     );
-    const { state } = await signInUrl(await fx.handler(startSignIn({ email: "worker@acme.test" })));
+    const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    const { state } = await signInUrl(signIn);
+    const cookie = ssoStateCookie(signIn);
     const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
     const form = {
       SAMLResponse: samlResponse({ id: "_replayed", inResponseTo: requestId }),
       RelayState: state,
     };
 
-    expect((await fx.handler(acsPost(providerId, form))).status).toBe(200);
-    const replay = await fx.handler(acsPost(providerId, form));
-    expect(replay.status).toBe(400);
+    expect((await fx.handler(acsPost(providerId, form, cookie))).headers.get("location")).toBe("/");
+    const replay = await fx.handler(acsPost(providerId, form, cookie));
+    expect(replay.headers.get("location")).toBe("/?error=access_denied");
     expect(replay.headers.get("set-cookie")).toBeNull();
 
     // A new assertion answering the same, spent request with the same
     // RelayState is refused too: the RelayState lives and dies with it.
     const fresh = await fx.handler(
-      acsPost(providerId, {
-        SAMLResponse: samlResponse({ id: "_fresh", inResponseTo: requestId }),
-        RelayState: state,
-      }),
+      acsPost(
+        providerId,
+        {
+          SAMLResponse: samlResponse({ id: "_fresh", inResponseTo: requestId }),
+          RelayState: state,
+        },
+        cookie,
+      ),
     );
-    expect(fresh.status).toBe(400);
+    expect(fresh.headers.get("location")).toBe("/?error=access_denied");
+  });
+
+  it("sends a browser that owes a second factor on with the challenge in the fragment", async () => {
+    const challenged: Array<string> = [];
+    const fx = makeHttpFixture({
+      gate: enrolledGate(challenged),
+      sso: { secondFactorRedirectTo: "/two-factor#stale" },
+    });
+    const adminSid = fx.makeSession(fx.seedUser("admin@acme.test", { role: "admin" }));
+    const providerId = await providerIdOf(
+      await fx.handler(registerProvider(SAML_REGISTER_BODY, adminSid)),
+    );
+    const signIn = await fx.handler(startSignIn({ email: "worker@acme.test" }));
+    const { state } = await signInUrl(signIn);
+    const requestId = fx.samlRequests[fx.samlRequests.length - 1]?.requestId ?? "";
+
+    const res = await fx.handler(
+      acsPost(
+        providerId,
+        { SAMLResponse: samlResponse({ inResponseTo: requestId }), RelayState: state },
+        ssoStateCookie(signIn),
+      ),
+    );
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(
+      `/two-factor#second_factor=${testChallenge.token}&expires_at=${testChallenge.expiresAt}`,
+    );
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    // No session: only the pre-login cookie is cleared.
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain("_sso_state=;");
+    expect(setCookie).not.toMatch(/(^|, )[a-z_]+_session=/);
+    expect(challenged).toHaveLength(1);
   });
 });

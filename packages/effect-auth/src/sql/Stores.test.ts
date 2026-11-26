@@ -826,7 +826,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
     });
 
-    it("OAuthAccountStore upserts, links, unlinks and reports hasPassword", async () => {
+    it("OAuthAccountStore creates, updates, links, unlinks and reports hasPassword", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
       const account: Auth.OAuth.OAuthAccount = {
         id: "acc-1",
@@ -847,6 +847,8 @@ const storeContract = (engine: StoreEngine): void => {
           const loaded = yield* store.get("github", "gh-123");
           yield* store.update({ ...account, accessToken: "token-2", updatedAt: now + 1 });
           const updated = yield* store.get("github", "gh-123");
+          yield* store.unlinkFromUser("user-1", "github");
+          yield* store.create({ ...account, userId: "" });
           yield* store.linkToUser("user-2", account);
           const linked = yield* store.getByUserId("user-2");
           yield* store.unlinkFromUser("user-2", "github");
@@ -1866,6 +1868,35 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.created.name).toBe("Carol");
       expect(result.created.attributes).toEqual({ role: "admin" });
       expect(result.hash).toBe("admin-hash");
+    });
+
+    it("AdminUserStore.listUsers matches LIKE wildcards literally and pages past an offset", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.AdminUserStore;
+          const underscore = yield* makeUser("a_b@example.com");
+          const plain = yield* makeUser("axb@example.com");
+          const percent = yield* makeUser("c%d@example.com");
+          return {
+            underscore,
+            plain,
+            percent,
+            byUnderscore: yield* store.listUsers({ searchEmail: "a_b" }),
+            byPercent: yield* store.listUsers({ searchEmail: "%" }),
+            upper: yield* store.listUsers({ searchEmail: "AXB@" }),
+            skipped: yield* store.listUsers({ offset: 2 }),
+            empty: yield* store.listUsers({ limit: 0 }),
+          };
+        }),
+      );
+      expect(result.byUnderscore.users.map((u) => u.id)).toEqual([result.underscore.id]);
+      expect(result.byUnderscore.total).toBe(1);
+      expect(result.byPercent.users.map((u) => u.id)).toEqual([result.percent.id]);
+      expect(result.upper.users.map((u) => u.id)).toEqual([result.plain.id]);
+      // a_b, axb, c%d in binary order; the offset skips the first two.
+      expect(result.skipped.users.map((u) => u.id)).toEqual([result.percent.id]);
+      expect(result.skipped.total).toBe(3);
+      expect(result.empty).toEqual({ users: [], total: 3 });
     });
 
     it("integration: SessionService runs over the aggregate layer", async () => {

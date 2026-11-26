@@ -29,12 +29,19 @@ import {
   type Identifier,
 } from "../Identifier.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { EmailPasswordService, EmailPasswordStore } from "../email/EmailPassword.ts";
+import {
+  EmailPasswordService,
+  EmailPasswordStore,
+  exemptFromSecondFactor,
+  type SecondFactorGate,
+} from "../email/EmailPassword.ts";
+import { enrolledGate, testChallenge } from "../testing/SecondFactor.ts";
 import { Hooks } from "../Hooks.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import {
   layer as memoryStores,
   memoryEmailPasswordStore,
+  memoryOAuthAccountStore,
   memoryUserTable,
 } from "../testing/MemoryStores.ts";
 import { SessionService } from "../SessionService.ts";
@@ -1949,6 +1956,62 @@ describe("OAuthService linking controls", () => {
     expect(createdWith).toEqual([{ type: "email", value: "user@example.com", verified: false }]);
   });
 
+  it("answers a second-factor challenge, and no session, for a linked user the gate requires one of", async () => {
+    const user = makeUser({ id: "enrolled-user" });
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+    const minted: Array<string> = [];
+    const challenged: Array<string> = [];
+    const signIn = (gate: Layer.Layer<SecondFactorGate>) =>
+      Effect.gen(function* () {
+        const service = yield* OAuth.make({ github: makeTestProvider("github") });
+        return yield* service.signInWithCallback("linked-state", "code-linked");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            makeStateLayer(makeState("github", "linked-state")),
+            makeAccountLayer({
+              id: "acc-enrolled",
+              userId: user.id,
+              provider: "github",
+              providerId: "gh-enrolled",
+              accessToken: "at-old",
+              createdAt: now,
+              updatedAt: now,
+            }),
+            Layer.succeed(OAuthUserStore, {
+              getUser: () => Effect.succeed(user),
+              createUser: () => Effect.die("no user is created"),
+            }),
+            makeIdentifiers({ userId: user.id, email: "enrolled@example.com", verified: true })
+              .layer,
+            makeCoreUserLayer(user),
+            makeSessionLayer(user.id, minted),
+            noPasswordsLayer,
+            testCryptoLayer,
+            gate,
+          ),
+        ),
+      );
+    const userInfo = mockUserInfo({ email: "enrolled@example.com", id: "gh-enrolled" });
+
+    const gated = await withProviderFetch(userInfo, () =>
+      runPromiseHttp(signIn(enrolledGate(challenged))),
+    );
+    expect(gated.secondFactor).toEqual(testChallenge);
+    expect(gated.session).toBeUndefined();
+    expect(challenged).toEqual([user.id]);
+    expect(minted).toEqual([]);
+
+    const exempt = await withProviderFetch(userInfo, () =>
+      runPromiseHttp(
+        signIn(Layer.merge(enrolledGate(challenged), exemptFromSecondFactor("oauth"))),
+      ),
+    );
+    expect(exempt.secondFactor).toBeUndefined();
+    expect(exempt.token).toBe("token-test");
+    expect(minted).toEqual([user.id]);
+  });
+
   it("an unclaimed email the provider verified creates a new user with a verified identifier", async () => {
     const newUser = makeUser({ id: "new-user-id" });
     const identifiers = makeIdentifiers();
@@ -2297,6 +2360,41 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
       expect(MutableHashMap.has(states, stateKey("st-1"))).toBe(false);
     });
 
+    it("reports a provider account linked concurrently as OAuthAccountConflictError and keeps its user", async () => {
+      const { store } = makeStateStore(liveState());
+      const rival: OAuthAccount = {
+        id: "acc-rival",
+        userId: "u-rival",
+        provider: "github",
+        providerId: "gh-9",
+        accessToken: "rival-at",
+        createdAt: 1,
+        updatedAt: 1,
+      };
+      const accounts = memoryOAuthAccountStore();
+      await Effect.runPromise(accounts.create(rival));
+      // The concurrent callback links the account after this one's lookup missed.
+      let lookups = 0;
+      const racing: typeof OAuthAccountStore.Service = {
+        ...accounts,
+        get: (provider, providerId) =>
+          lookups++ === 0 ? Effect.succeed(null) : accounts.get(provider, providerId),
+      };
+      const service = await makeService(store, racing);
+
+      const err = await providerFetch(
+        { access_token: "at-1", token_type: "bearer" },
+        { id: "gh-9", email: "new@example.com" },
+        () =>
+          Effect.runPromise(
+            Effect.flip(service.handleCallback("st-1", "code", { linkToUserId: "u-7" })),
+          ),
+      );
+
+      expect(err._tag).toBe("OAuthAccountConflictError");
+      expect(await Effect.runPromise(accounts.get("github", "gh-9"))).toEqual(rival);
+    });
+
     it("links a new account to linkToUserId and reports the user", async () => {
       const { store } = makeStateStore(liveState());
       const service = await makeService(store);
@@ -2566,7 +2664,7 @@ describe("OAuthService first proof over the real services", () => {
                   password: "squatter password 123",
                 }),
               ),
-              victimSession: yield* Effect.result(sessions.validateSession(victim.token)),
+              victimSession: yield* Effect.result(sessions.validateSession(victim.token ?? "")),
               address: yield* lookupIdentifier(identifiers, "email", "victim@example.com"),
             };
           }).pipe(Effect.provide(services)),

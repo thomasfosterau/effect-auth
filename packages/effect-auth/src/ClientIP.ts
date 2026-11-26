@@ -410,6 +410,68 @@ export const cidrContains = (cidr: string, ip: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
+// Public: rate-limit address keys
+// ---------------------------------------------------------------------------
+
+/**
+ * The IPv6 prefix length the address-keyed rate limits group a client by when
+ * none is configured: one /64, the smallest block a residential or cloud
+ * customer is usually given, so every address in it draws on one budget.
+ *
+ * @since 0.9.0
+ */
+export const DEFAULT_IPV6_RATE_LIMIT_PREFIX = 64;
+
+/**
+ * Whether `prefixLength` is a usable IPv6 grouping for the address-keyed rate
+ * limits: an integer from 1 to 128.
+ *
+ * @since 0.9.0
+ */
+export const isIpv6RateLimitPrefix = (prefixLength: number): boolean =>
+  Number.isInteger(prefixLength) && prefixLength >= 1 && prefixLength <= 128;
+
+/**
+ * The rate-limit key for a resolved client address. IPv4 is keyed as it is.
+ * IPv6 is keyed on its first `ipv6PrefixLength` bits (default
+ * {@link DEFAULT_IPV6_RATE_LIMIT_PREFIX}), written as the network in RFC 5952
+ * form with its length, so every address in one /64 shares one key. A
+ * `ipv6PrefixLength` of `128` keys each address on its own. A value that is
+ * not an IPv6 literal, or a length outside 1 to 128, is returned as
+ * `normalizeIp` gives it (an IPv4-mapped address as dotted IPv4).
+ *
+ * @example
+ * ```ts
+ * import assert from "node:assert/strict"
+ * import { rateLimitAddressKey } from "@thomasfosterau/effect-auth"
+ *
+ * assert.equal(rateLimitAddressKey("203.0.113.7"), "203.0.113.7")
+ * assert.equal(rateLimitAddressKey("2001:db8:1:1::d"), "2001:db8:1:1::/64")
+ * assert.equal(rateLimitAddressKey("2001:db8:1:1::d", 56), "2001:db8:1::/56")
+ * assert.equal(rateLimitAddressKey("2001:db8:1:1::d", 128), "2001:db8:1:1::d")
+ * ```
+ *
+ * @since 0.9.0
+ */
+export const rateLimitAddressKey = (
+  ip: string,
+  ipv6PrefixLength: number = DEFAULT_IPV6_RATE_LIMIT_PREFIX,
+): string => {
+  const address = normalizeIp(ip);
+  if (!address.includes(":") || !isIpv6RateLimitPrefix(ipv6PrefixLength)) return address;
+  const value = ipv6ToBigInt(address);
+  if (value === undefined) return address;
+  if (ipv6PrefixLength === 128) return canonicalIPv6(address) ?? address;
+  const hostBits = BigInt(128 - ipv6PrefixLength);
+  const network = (value >> hostBits) << hostBits;
+  const groups = Arr.makeBy(8, (i) =>
+    Number((network >> BigInt((7 - i) * 16)) & 0xffffn).toString(16),
+  );
+  const text = canonicalIPv6(groups.join(":")) ?? groups.join(":");
+  return `${text}/${ipv6PrefixLength}`;
+};
+
+// ---------------------------------------------------------------------------
 // Public: IP resolution
 // ---------------------------------------------------------------------------
 

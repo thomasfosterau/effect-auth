@@ -16,9 +16,13 @@ What the library guarantees, and what it leaves to the application, is in [ARCHI
 
 To invalidate every cache cookie at once, change `cookie.cache.version` and revoke the affected sessions (a valid session is simply re-cached). Without `cookie.cache.encrypt: true` the cookie is signed, not encrypted, so the browser can read what it carries.
 
+### A double-submitted OIDC refresh signs the client out
+
+The OIDC provider rotates refresh tokens and treats any second use of one as reuse (RFC 6819 §5.2.2.3): it revokes the whole token family, every access token with it, and answers `invalid_grant`. That includes two requests that present the same token at once: both are refused, and the tokens the faster one was about to receive go with the family, so timing never decides whether a stolen token's family survives. A client that retries a refresh or sends it from two tabs therefore loses its tokens and must sign in again. Clients should serialize their refreshes.
+
 ## Supply chain
 
 - pnpm holds new versions for 24 hours (`minimumReleaseAge`), runs dependency build scripts only for `allowBuilds`, and installs from a strict catalog with a frozen lockfile (pnpm's default in CI; the release jobs also pass `--frozen-lockfile`). CI runs `pnpm audit --audit-level high`.
 - The core depends on nothing but its `effect` peer; its optional peers are reached only from `/http` and `/saml`. Database, framework and native dependencies live in separate packages as peers.
-- Workflows default to `permissions: {}`, never persist checkout credentials, and pin actions by tag (locked to commits by `.github/workflows/actions.lock`). CI holds no secrets, so Dependabot PRs run it safely.
+- Workflows default to `permissions: {}`, never persist checkout credentials, pin actions by tag (locked to commits by `.github/workflows/actions.lock`), and pin the CI and devcontainer images by digest. CI holds no secrets, so Dependabot PRs run it safely.
 - Publishing is npm trusted publishing (OIDC), done by `vp pm publish` (pnpm) with provenance from the protected `release` environment; there is no `NPM_TOKEN`. A job without `id-token` installs (with `--ignore-scripts`), builds and packs; the publish job only downloads those tarballs and publishes them, with no install, build or cache, so no dependency code runs beside the publish credential ([PUBLISHING.md](PUBLISHING.md)).

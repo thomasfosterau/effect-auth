@@ -10,7 +10,6 @@ import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
-  BannedUserPlugin,
   isAdmin,
   isBanned,
   type AdminConfig,
@@ -33,7 +32,19 @@ import { SessionStore } from "./SessionStore.ts";
 import { type NewUserIdentifier, UserStore } from "./UserStore.ts";
 import type { Attributes, Session, SessionConfig, User } from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
-import { memorySessionStore } from "./testing/MemoryStores.ts";
+import {
+  memoryApiKeyStore,
+  memoryOidcConsentStore,
+  memoryOidcTokenStore,
+  memorySessionStore,
+} from "./testing/MemoryStores.ts";
+import { ApiKeyStore, type ApiKey } from "./ApiKey.ts";
+import {
+  OidcConsentStore,
+  OidcTokenStore,
+  type OidcConsent,
+  type OidcToken,
+} from "./OidcProvider.ts";
 import type { SessionTouch } from "./SessionStore.ts";
 
 const users = MutableHashMap.empty<string, User>();
@@ -494,15 +505,10 @@ describe("AdminService", () => {
     expect(Effect.runSync(isBanned(result.unbanned))).toBe(false);
   });
 
-  it("BannedUserPlugin blocks session validation for banned users", async () => {
+  it("SessionService refuses a banned user's sessions with no plugin wired", async () => {
     const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
     seedUser("user-1", "user@example.com");
-
-    // SessionService now resolves Hooks once, at construction time, so the
-    // plugin must be baked in when building the SessionService instance used
-    // by this test rather than layered over the whole program afterward.
-    const hooksWithPlugin = BannedUserPlugin.pipe(Layer.provide(Hooks.Default));
-    const testContext = await makeTestContext(hooksWithPlugin);
+    const testContext = await makeTestContext();
 
     const result = await Effect.runPromise(
       Effect.provide(
@@ -510,32 +516,102 @@ describe("AdminService", () => {
           const service = yield* Admin.make({});
           const sessionManager = yield* SessionService;
 
-          // Ban first (revokes existing sessions), then mint a fresh session to
-          // prove the plugin blocks validation even when a session exists.
+          // A session minted before the ban, kept out of the ban's revocation
+          // by stashing its record, stands for one a store failed to delete.
+          const before = yield* sessionManager.createSession("user-1");
           yield* service.banUser(admin, "user-1");
-          const bannedSession = yield* sessionManager.createSession("user-1");
-          const blocked = yield* Effect.result(sessionManager.validateSession(bannedSession.token));
+          const revoked = yield* Effect.result(sessionManager.validateSession(before.token));
+          MutableHashMap.set(sessions, before.session.id, before.session);
+          const blocked = yield* Effect.result(sessionManager.validateSession(before.token));
+          const refusedCreate = yield* Effect.result(sessionManager.createSession("user-1"));
 
           yield* service.unbanUser(admin, "user-1");
-          const allowed = yield* sessionManager.validateSession(bannedSession.token);
+          const allowed = yield* sessionManager.validateSession(before.token);
 
-          // A ban that has already lapsed does not block validation
+          // A ban that has already lapsed does not block anything.
           yield* service.banUser(admin, "user-1", { expiresIn: -1000 });
           const lapsedSession = yield* sessionManager.createSession("user-1");
           const lapsed = yield* Effect.result(sessionManager.validateSession(lapsedSession.token));
 
-          return { blocked, allowed, lapsed };
+          return { revoked, blocked, refusedCreate, allowed, lapsed };
         }),
         testContext,
       ),
     );
 
-    expect(result.blocked._tag).toBe("Failure");
+    assert(Result.isFailure(result.revoked));
+    expect(result.revoked.failure._tag).toBe("SessionNotFoundError");
     assert(Result.isFailure(result.blocked));
     expect(result.blocked.failure._tag).toBe("UserBannedError");
     expect(result.blocked.failure.message).toBe("Your account has been suspended");
+    assert(Result.isFailure(result.refusedCreate));
+    expect(result.refusedCreate.failure._tag).toBe("UserBannedError");
     expect(result.allowed.user.id).toBe("user-1");
     expect(result.lapsed._tag).toBe("Success");
+  });
+
+  it("a ban revokes the user's API keys and OIDC tokens and consents, and no one else's", async () => {
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "user@example.com");
+    seedUser("user-2", "other@example.com");
+    const keys = MutableHashMap.empty<string, ApiKey>();
+    const tokens = MutableHashMap.empty<string, OidcToken>();
+    const consents = MutableHashMap.empty<string, OidcConsent>();
+    const apiKeyStore = memoryApiKeyStore(keys);
+    const tokenStore = memoryOidcTokenStore(tokens);
+    const consentStore = memoryOidcConsentStore(consents);
+    const seedGrants = (userId: string) => {
+      MutableHashMap.set(keys, `key-${userId}`, {
+        id: `key-${userId}`,
+        start: "abcdef",
+        keyHash: `hash-${userId}`,
+        userId,
+        enabled: true,
+        metadata: {},
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      MutableHashMap.set(tokens, `token-${userId}`, {
+        tokenHash: `token-${userId}`,
+        kind: "refresh",
+        clientId: "client",
+        userId,
+        scopes: ["openid"],
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        createdAt: 0,
+      });
+      Effect.runSync(
+        consentStore.upsert({
+          userId,
+          clientId: "client",
+          scopes: ["openid"],
+          createdAt: 0,
+          updatedAt: 0,
+        }),
+      );
+    };
+    seedGrants("user-1");
+    seedGrants("user-2");
+    const testContext = (await makeTestContext()).pipe(
+      Context.add(ApiKeyStore, apiKeyStore),
+      Context.add(OidcTokenStore, tokenStore),
+      Context.add(OidcConsentStore, consentStore),
+    );
+
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* Admin.make({});
+          yield* service.banUser(admin, "user-1");
+        }),
+        testContext,
+      ),
+    );
+
+    expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual(["key-user-2"]);
+    expect(Arr.fromIterable(MutableHashMap.keys(tokens))).toEqual(["token-user-2"]);
+    expect(Effect.runSync(consentStore.get("user-1", "client"))).toBeNull();
+    expect(Effect.runSync(consentStore.get("user-2", "client"))).not.toBeNull();
   });
 
   it("removes a user along with their sessions, but never the actor", async () => {
@@ -1012,5 +1088,28 @@ describe("AdminService", () => {
       "carol@example.com",
     ]);
     expect(result.searchedPage.total).toBe(4);
+  });
+
+  it("caps a listing at maxListLimit, with or without a limit", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "alice@example.com");
+    seedUser("user-2", "bob@example.com");
+
+    const result = await runService(testContext, { maxListLimit: 2 }, (service) =>
+      Effect.all(
+        {
+          unlimited: service.listUsers(admin),
+          greedy: service.listUsers(admin, { limit: 1000 }),
+          small: service.listUsers(admin, { limit: 1 }),
+        },
+        { concurrency: 1 },
+      ),
+    );
+
+    expect(result.unlimited.users).toHaveLength(2);
+    expect(result.unlimited.total).toBe(3);
+    expect(result.greedy.users).toHaveLength(2);
+    expect(result.small.users).toHaveLength(1);
   });
 });
