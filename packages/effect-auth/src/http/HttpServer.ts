@@ -1719,6 +1719,7 @@ export const usersGroupLayer = (
                 AuthError: (e) => internalServerError(e),
                 HashingError: (e) => internalServerError(e),
                 PasswordPolicyError: passwordPolicyFailure,
+                ...hookFailures,
               }),
             );
         }).pipe(JsonApiErrors.mapHttpErrors),

@@ -25,6 +25,7 @@ import { EmailPasswordStore, SecondFactorGate } from "../email/EmailPassword.ts"
 import { Hooks, type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
+import { storedPasswordVerifier } from "../password/DecoyVerify.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
 import { constantTimeHashEqual, hashToken, tokenHasher } from "../TokenHash.ts";
@@ -467,7 +468,9 @@ export const make = (
     const store = yield* MultiFactorStore;
     const pendingStore = hashedPendingStore(yield* PendingMultiFactorStore, digestToken);
     const emailPasswordStore = yield* EmailPasswordStore;
-    const passwordHasher = yield* PasswordHasher;
+    // Through `MultiAlgorithmVerifier` when present, so a hash written by a
+    // previous hasher still verifies after a switch.
+    const verifyStoredPassword = yield* storedPasswordVerifier(yield* PasswordHasher);
     const userStore = yield* UserStore;
     const identifierStore = yield* IdentifierStore;
     const sessionManager = yield* SessionService;
@@ -554,7 +557,7 @@ export const make = (
           });
         }
 
-        const isValid = yield* passwordHasher.verify(password, passwordHash);
+        const isValid = yield* verifyStoredPassword(password, passwordHash);
         if (!isValid) {
           return yield* new Errors.InvalidCredentialsError({
             message: "Invalid password",

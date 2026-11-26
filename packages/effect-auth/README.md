@@ -965,7 +965,7 @@ export const HooksLive = plugins.pipe(
 );
 ```
 
-The captcha token is read from the optional `captchaToken` field on the sign-up input, on the email and username sign-in inputs, and on the send options of `EmailOtpService.send`, `PhoneOtpService.send` and `MagicLinkService.send` (over HTTP: the `SignUpPayload` schema, the `password` and `username` sign-in credentials, and the `POST /otp-challenges` attributes; in the client, `magicLink.send`, `emailOtp.send` and `phoneOtp.send`). Have I Been Pwned fails open on API errors by default (`failClosed: false`).
+The captcha token is read from the optional `captchaToken` field on the sign-up input, on the email and username sign-in inputs, and on the send options of `EmailOtpService.send`, `PhoneOtpService.send` and `MagicLinkService.send` (over HTTP: the `SignUpPayload` schema, the `password` and `username` sign-in credentials, and the `POST /otp-challenges` attributes; in the client, `magicLink.send`, `emailOtp.send` and `phoneOtp.send`). Have I Been Pwned checks every new password (sign-up, reset, change and set, through `beforeSignUp`, `beforeResetPassword`, `beforeChangePassword` and `beforeSetPassword`) and asks for padded responses. It fails open by default (`failClosed: false`) when the API cannot answer: a network error, a non-2xx status such as a `429`, or no answer within `timeout` (default 5 seconds).
 
 ### The `beforeAuthenticate` hook
 

@@ -9,7 +9,11 @@ import {
   type IdentifierType,
 } from "../Identifier.ts";
 import { PasswordHasher } from "../password/Password.ts";
-import { makeDecoyHash, verifyPasswordOrDecoy } from "../password/DecoyVerify.ts";
+import {
+  makeDecoyHash,
+  storedPasswordVerifier,
+  verifyPasswordOrDecoy,
+} from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 import { SessionService } from "../SessionService.ts";
@@ -334,7 +338,9 @@ export class EmailPasswordService extends Context.Service<
 
     /**
      * Change the password of a user that already has one, verifying the current
-     * password first. By default it then revokes the user's other sessions and
+     * password first (through `MultiAlgorithmVerifier` when present, so a hash
+     * written by a previous hasher verifies), then runs the
+     * `beforeChangePassword` hooks on the new one. By default it then revokes the user's other sessions and
      * every trusted device (`TrustedDeviceStore`, when present), so a session
      * or device cookie an attacker holds stops working; `revokeOtherSessions:
      * false` keeps them.
@@ -347,11 +353,13 @@ export class EmailPasswordService extends Context.Service<
       | Errors.HashingError
       | Errors.AuthError
       | Errors.PasswordPolicyError
+      | HookError
     >;
 
     /**
      * Set a password for a user that does not have one yet (e.g. an account
-     * created via OAuth). Fails if a password is already set.
+     * created via OAuth), after the `beforeSetPassword` hooks. Fails if a
+     * password is already set.
      */
     readonly setPassword: (
       userId: string,
@@ -362,6 +370,7 @@ export class EmailPasswordService extends Context.Service<
       | Errors.AuthError
       | Errors.PasswordPolicyError
       | Errors.PasswordAlreadySetError
+      | HookError
     >;
 
     /**
@@ -425,6 +434,7 @@ export const make = (
     const passwordHasher = yield* PasswordHasher;
     const sessionManager = yield* SessionService;
     const hooks = yield* Hooks;
+    const verifyStoredPassword = yield* storedPasswordVerifier(passwordHasher);
     const trustedDevices = Option.getOrUndefined(yield* Effect.serviceOption(TrustedDeviceStore));
     // The attributes a sign-up never stores from its input: the
     // configured server-only ones (the `UserService`'s when it is in context
@@ -702,14 +712,25 @@ export const make = (
           });
         }
 
-        const isValid = yield* passwordHasher.verify(input.currentPassword, currentHash);
+        const isValid = yield* verifyStoredPassword(input.currentPassword, currentHash);
         if (!isValid) {
           return yield* new Errors.InvalidCredentialsError({
             message: "Invalid password",
           });
         }
 
-        const hashedPassword = yield* passwordHasher.hash(input.newPassword);
+        // After the current password, so a plugin that calls out (the breach
+        // check) runs only for the account holder.
+        const { newPassword } = yield* hooks.beforeChangePassword({
+          userId: input.userId,
+          newPassword: input.newPassword,
+        });
+        yield* validatePasswordLength(newPassword, {
+          minPasswordLength: resolved.minPasswordLength,
+          maxPasswordLength: resolved.maxPasswordLength,
+        });
+
+        const hashedPassword = yield* passwordHasher.hash(newPassword);
         yield* store.setPasswordHash(input.userId, hashedPassword.hash);
 
         if (input.revokeOtherSessions ?? true) {
@@ -725,19 +746,23 @@ export const make = (
 
       setPassword: Effect.fn("EmailPasswordService.setPassword")(function* (
         userId: string,
-        newPassword: string,
+        rawNewPassword: string,
       ) {
-        yield* validatePasswordLength(newPassword, {
-          minPasswordLength: resolved.minPasswordLength,
-          maxPasswordLength: resolved.maxPasswordLength,
-        });
-
         const currentHash = yield* store.getPasswordHash(userId);
         if (currentHash) {
           return yield* new Errors.PasswordAlreadySetError({
             message: "User already has a password; use changePassword instead",
           });
         }
+
+        const { newPassword } = yield* hooks.beforeSetPassword({
+          userId,
+          newPassword: rawNewPassword,
+        });
+        yield* validatePasswordLength(newPassword, {
+          minPasswordLength: resolved.minPasswordLength,
+          maxPasswordLength: resolved.maxPasswordLength,
+        });
 
         const hashedPassword = yield* passwordHasher.hash(newPassword);
         return yield* store.setPasswordHash(userId, hashedPassword.hash);
