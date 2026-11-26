@@ -32,6 +32,7 @@ import { Clock, Context, Data, DateTime, Effect, Layer, Redacted } from "effect"
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest, SecureRandom } from "effect/crypto";
+import { HttpClient } from "effect/http";
 import { AuthError } from "./Errors.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -409,8 +410,13 @@ const toOAuthConfig = (provider: OidcSsoProvider): OAuthProviderConfig => ({
 
 export const make = (
   config: SsoConfig = {},
-): Effect.Effect<typeof SsoService.Service, never, SsoProviderStore | SecureRandom.SecureRandom> =>
+): Effect.Effect<
+  typeof SsoService.Service,
+  never,
+  SsoProviderStore | SecureRandom.SecureRandom | HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
+    const httpClient = yield* HttpClient.HttpClient;
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
     const samlRequestTtl = config.samlRequestTtl ?? 10 * 60 * 1000;
     const samlClockSkewMs = config.samlClockSkewMs ?? defaultClockSkewMs;
@@ -646,6 +652,7 @@ export const make = (
       ) {
         const discovered = input.discover
           ? yield* discoverOAuthEndpoints(input.issuer).pipe(
+              Effect.provideService(HttpClient.HttpClient, httpClient),
               Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
             )
           : undefined;
@@ -840,14 +847,18 @@ export const make = (
           toOAuthConfig(provider),
           provider.usePKCE,
         );
-        const tokens = yield* oauth
-          .exchangeCode(code, stateEntry.codeVerifier)
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+        const tokens = yield* oauth.exchangeCode(code, stateEntry.codeVerifier).pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+        );
         const profile = yield* oauth
           .getProfile(tokens, {
             ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
           })
-          .pipe(Effect.mapError((e) => new SsoError({ message: e.message, cause: e })));
+          .pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+            Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
+          );
 
         if (profile.email === undefined || profile.email_verified === false) {
           return yield* new SsoError({

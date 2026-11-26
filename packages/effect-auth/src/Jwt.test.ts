@@ -11,6 +11,7 @@ import * as Jwt from "./Jwt.ts";
 import * as Cipher from "./Cipher.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import type { User } from "./Types.ts";
+import { runPromiseHttp } from "./testing/HttpClient.ts";
 
 /** JSON text to and from a JSON object (a JOSE header or claims set). */
 const decodeJsonObject = Schema.decodeUnknownSync(
@@ -572,7 +573,7 @@ describe("RemoteJwksVerifier", () => {
   });
 
   it("should verify a valid JWT against the remote JWKS", async () => {
-    const payload = await Effect.runPromise(
+    const payload = await runPromiseHttp(
       Effect.gen(function* () {
         const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
@@ -597,7 +598,7 @@ describe("RemoteJwksVerifier", () => {
       }),
     ).toString("base64url");
 
-    const result = await Effect.runPromise(
+    const result = await runPromiseHttp(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -623,7 +624,7 @@ describe("RemoteJwksVerifier", () => {
       "base64url",
     );
 
-    const result = await Effect.runPromise(
+    const result = await runPromiseHttp(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -652,7 +653,7 @@ describe("RemoteJwksVerifier", () => {
       }),
     );
 
-    const result = await Effect.runPromise(
+    const result = await runPromiseHttp(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({
@@ -673,7 +674,7 @@ describe("RemoteJwksVerifier", () => {
   it("should reuse the cache across multiple verify calls", async () => {
     // Two verify calls on the same verifier instance should both succeed;
     // internal caching means only one network request was made.
-    const results = await Effect.runPromise(
+    const results = await runPromiseHttp(
       Effect.gen(function* () {
         const verifier = yield* Jwt.remoteJwksVerifier({
           jwksUri: jwksUrl,
@@ -692,7 +693,7 @@ describe("RemoteJwksVerifier", () => {
   });
 
   it("should reject an issuer mismatch via the remote verifier", async () => {
-    const result = await Effect.runPromise(
+    const result = await runPromiseHttp(
       Effect.result(
         Effect.gen(function* () {
           const verifier = yield* Jwt.remoteJwksVerifier({

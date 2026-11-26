@@ -54,6 +54,7 @@ import type * as Types from "./Types.ts";
 import { expectSpecJson, mediaTypeOf } from "./testing/WireFormat.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import type { SessionTouch } from "./SessionStore.ts";
+import { globalFetchHttpClient, runPromiseHttp } from "./testing/HttpClient.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -357,7 +358,7 @@ const ACME = {
 describe("SsoService", () => {
   it("registers a provider and routes sign-in by email domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -378,7 +379,7 @@ describe("SsoService", () => {
 
   it("provisions a user + org membership on first login and reuses on the second", async () => {
     const { layer, users, identifiers, createdWith, members } = makeStores();
-    const sso = await Effect.runPromise(
+    const sso = await runPromiseHttp(
       Sso.make({ defaultRole: "member" }).pipe(Effect.provide(layer)),
     );
 
@@ -447,7 +448,7 @@ describe("SsoService", () => {
     /** Sign in through the IdP; `extra` adds stores beside the fixture's. */
     const signIn = async (extra?: Layer.Layer<ApiKeyStore>) => {
       const layer = extra === undefined ? stores.layer : Layer.merge(stores.layer, extra);
-      const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+      const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
       await Effect.runPromise(
         sso.registerProvider("admin", withoutOrganization).pipe(Effect.provide(layer)),
       );
@@ -565,7 +566,7 @@ describe("SsoService", () => {
 
   it("populates endpoints from OIDC discovery", async () => {
     const { layer, providers } = makeStores();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
 
     const discovered = await withFetch(
       {
@@ -600,7 +601,7 @@ describe("SsoService", () => {
 
   it("fails sign-in for an unknown domain", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
     const err = await Effect.runPromise(
       Effect.flip(sso.signIn({ email: "nobody@unknown.test" })).pipe(Effect.provide(layer)),
     );
@@ -609,7 +610,7 @@ describe("SsoService", () => {
 
   it("rejects a callback whose profile email is unverified", async () => {
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
     await Effect.runPromise(sso.registerProvider("admin", ACME).pipe(Effect.provide(layer)));
 
     const err = await withFetch(
@@ -733,7 +734,7 @@ const makeSamlFixture = () => {
 describe("SsoService — SAML", () => {
   it("starts a SAML sign-in and records the request id one-time", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const { provider, start } = await Effect.runPromise(
       Effect.gen(function* () {
@@ -762,7 +763,7 @@ describe("SsoService — SAML", () => {
 
   it("provisions through the same tail as OIDC, then reuses the user", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const signIn = (assertionId: string) =>
       Effect.gen(function* () {
@@ -805,7 +806,7 @@ describe("SsoService — SAML", () => {
 
   it("refuses to spend the same assertion twice", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
@@ -832,7 +833,7 @@ describe("SsoService — SAML", () => {
 
   it("rejects a response answering an unknown or already-spent request", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const err = await Effect.runPromise(
       Effect.gen(function* () {
@@ -853,7 +854,7 @@ describe("SsoService — SAML", () => {
 
   it("rejects an assertion from a foreign issuer", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const err = await Effect.runPromise(
       Effect.gen(function* () {
@@ -875,7 +876,7 @@ describe("SsoService — SAML", () => {
 
   it("rejects a RelayState that does not match the one it minted", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const err = await Effect.runPromise(
       Effect.gen(function* () {
@@ -897,8 +898,8 @@ describe("SsoService — SAML", () => {
 
   it("refuses an unsolicited (IdP-initiated) response unless configured for it", async () => {
     const fx = makeSamlFixture();
-    const strict = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
-    const permissive = await Effect.runPromise(
+    const strict = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
+    const permissive = await runPromiseHttp(
       Sso.make({ allowIdpInitiated: true }).pipe(Effect.provide(fx.layer)),
     );
 
@@ -926,7 +927,7 @@ describe("SsoService — SAML", () => {
 
   it("keeps the two protocols' callbacks apart", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const errors = await Effect.runPromise(
       Effect.gen(function* () {
@@ -947,7 +948,7 @@ describe("SsoService — SAML", () => {
     // No SamlVerifier / SamlReplayStore in context: the OIDC half still works,
     // and the SAML half says exactly what is missing.
     const { layer } = makeStores();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
 
     const err = await Effect.runPromise(
       Effect.gen(function* () {
@@ -961,7 +962,7 @@ describe("SsoService — SAML", () => {
 
   it("validates a SAML registration before storing it", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const errors = await Effect.runPromise(
       Effect.gen(function* () {
@@ -984,7 +985,7 @@ describe("SsoService — SAML", () => {
 
   it("renders SP metadata for a connection", async () => {
     const fx = makeSamlFixture();
-    const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(fx.layer)));
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));
 
     const xml = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1218,7 +1219,7 @@ const makeHttpFixture = () => {
     PlatformCrypto.layer,
   );
 
-  const ssoServiceLayer = SsoService.layer().pipe(Layer.provide(ssoDeps));
+  const ssoServiceLayer = SsoService.layer().pipe(Layer.provide([ssoDeps, globalFetchHttpClient]));
 
   const ssoLayer = Layer.mergeAll(ssoDeps, ssoServiceLayer);
 
@@ -1543,7 +1544,7 @@ const ACME_IDP_ROUTES = {
 /** A registered OIDC connection, and the callback of a started sign-in. */
 const started = async () => {
   const stores = makeStores();
-  const sso = await Effect.runPromise(Sso.make().pipe(Effect.provide(stores.layer)));
+  const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(stores.layer)));
   const { state } = await Effect.runPromise(
     Effect.gen(function* () {
       yield* sso.registerProvider("admin", ACME);

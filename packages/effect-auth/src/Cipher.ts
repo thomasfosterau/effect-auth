@@ -49,6 +49,7 @@ export interface TokenCipher {
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Redacted } from "effect"
+ * import { FetchHttpClient } from "effect/http"
  * import {
  *   aes256GcmCipher,
  *   Hooks,
@@ -78,7 +79,9 @@ export interface TokenCipher {
  * // TOTP secret at rest
  * const totpLayer = MultiFactorService.layer({ issuer: "MyApp", encryptSecret: { cipher } })
  * // OAuth tokens at rest
- * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } })
+ * const oauthLayer = OAuthService.layer(providers, { encryptTokens: { cipher } }).pipe(
+ *   Layer.provide(FetchHttpClient.layer),
+ * )
  *
  * // The three services with the cipher wired in, over the app's persistence
  * // stores: here the in-memory reference stores.

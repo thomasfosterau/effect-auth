@@ -70,6 +70,8 @@ import {
   HuggingFaceProvider,
 } from "./OAuth.ts";
 import * as OAuth from "./OAuth.ts";
+import type { HttpClient } from "effect/http";
+import { runPromiseExitHttp, runPromiseHttp } from "../testing/HttpClient.ts";
 
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
@@ -97,6 +99,16 @@ const runWithState = <A, E>(
   );
 
 /** A single captured fetch call. */
+/** A request body as `fetch` received it, as text (`null` without one). */
+const requestBodyText = (body: BodyInit | null | undefined): string | null =>
+  P.isString(body)
+    ? body
+    : body instanceof Uint8Array
+      ? new TextDecoder().decode(body)
+      : body instanceof URLSearchParams
+        ? body.toString()
+        : null;
+
 interface Captured {
   url: string;
   method: string;
@@ -121,7 +133,7 @@ const withFetch = async <A>(
       url,
       method: init?.method ?? "GET",
       headers: new Headers(init?.headers),
-      body: P.isString(body) ? body : null,
+      body: requestBodyText(body),
     });
     return Promise.resolve(handler(url, init));
   };
@@ -295,7 +307,7 @@ describe("OAuth token exchange", () => {
     await withFetch(
       () => json(token),
       async (calls) => {
-        const result = await Effect.runPromise(SpotifyProvider(CLIENT).exchangeCode("the-code"));
+        const result = await runPromiseHttp(SpotifyProvider(CLIENT).exchangeCode("the-code"));
         expect(result.access_token).toBe("at");
         const [call] = calls;
         assert(call !== undefined, "the provider called fetch");
@@ -312,7 +324,7 @@ describe("OAuth token exchange", () => {
     await withFetch(
       () => json(token),
       async (calls) => {
-        await Effect.runPromise(GitLabProvider(CLIENT).exchangeCode("the-code", "verifier"));
+        await runPromiseHttp(GitLabProvider(CLIENT).exchangeCode("the-code", "verifier"));
         const [call] = calls;
         assert(call !== undefined, "the provider called fetch");
         expect(call.headers.get("authorization")).toBeNull();
@@ -332,8 +344,10 @@ describe("OAuth provider bodies", () => {
       headers: { "content-type": "text/html" },
     });
 
-  const expectProviderError = async (run: Effect.Effect<unknown, unknown>) => {
-    const exit = await Effect.runPromiseExit(run);
+  const expectProviderError = async (
+    run: Effect.Effect<unknown, unknown, HttpClient.HttpClient>,
+  ) => {
+    const exit = await runPromiseExitHttp(run);
     assert(Exit.isFailure(exit), "the call fails");
     // A typed failure, not a defect.
     const failure = Cause.findErrorOption(exit.cause);
@@ -357,7 +371,7 @@ describe("OAuth provider bodies", () => {
     const key = await makeSigningKey("ES256");
     const token = await signIdToken("ES256", key.privateKey, baseClaims(1_700_000_000_000));
     const error = await withFetch(html, () =>
-      Effect.runPromise(
+      runPromiseHttp(
         Effect.flip(
           verifyIdToken(token, {
             provider: "gitlab",
@@ -380,7 +394,7 @@ describe("OAuth provider bodies", () => {
           refresh_token: null,
         }),
       async () => {
-        const tokens = await Effect.runPromise(GitLabProvider(CLIENT).exchangeCode("the-code"));
+        const tokens = await runPromiseHttp(GitLabProvider(CLIENT).exchangeCode("the-code"));
         expect(tokens).toEqual({
           access_token: "at",
           token_type: "Bearer",
@@ -398,7 +412,7 @@ describe("OAuth profile mapping", () => {
     withFetch(
       () => json(body),
       async (calls) => {
-        const info = await Effect.runPromise(
+        const info = await runPromiseHttp(
           provider.getProfile({ access_token: "at", token_type: "bearer" }),
         );
         expect(calls[0]?.method).toBe(method);
@@ -578,7 +592,7 @@ describe("profile-mapping helpers (str / nested / profile / ProfileMap)", () => 
       await withFetch(
         () => json(rawPayload),
         async () => {
-          const info = await Effect.runPromise(
+          const info = await runPromiseHttp(
             customProvider.getProfile({ access_token: "tok", token_type: "bearer" }),
           );
           expect(info).toMatchObject({
@@ -670,7 +684,7 @@ describe("verifyIdToken", () => {
       const claims = await withFetch(
         () => json(key.jwks),
         () =>
-          Effect.runPromise(
+          runPromiseHttp(
             verifyIdToken(token, {
               provider: "idp",
               jwksEndpoint: JWKS_URL,
@@ -692,7 +706,7 @@ describe("verifyIdToken", () => {
   ) =>
     withFetch(
       () => json(jwks),
-      () => Effect.runPromise(Effect.flip(verifyIdToken(token, params))),
+      () => runPromiseHttp(Effect.flip(verifyIdToken(token, params))),
     );
 
   it("rejects a tampered signature", async () => {
@@ -790,7 +804,7 @@ describe("getProfile via id_token", () => {
     const info = await withFetch(
       () => json(key.jwks),
       (calls) =>
-        Effect.runPromise(
+        runPromiseHttp(
           provider.getProfile({ access_token: "at", token_type: "bearer", id_token: token }),
         ).then((result) => {
           // Only the JWKS was fetched — no userinfo call.
@@ -818,7 +832,7 @@ describe("discoverOAuthEndpoints", () => {
         expect(url).toBe("https://idp/.well-known/openid-configuration");
         return json(doc);
       },
-      () => Effect.runPromise(discoverOAuthEndpoints("https://idp/")),
+      () => runPromiseHttp(discoverOAuthEndpoints("https://idp/")),
     );
     expect(endpoints).toEqual({
       issuer: "https://idp",
@@ -842,7 +856,7 @@ describe("discoverOAuthEndpoints", () => {
   it("fails when the document lacks required endpoints", async () => {
     const err = await withFetch(
       () => json({ issuer: "https://idp" }),
-      () => Effect.runPromise(Effect.flip(discoverOAuthEndpoints("https://idp"))),
+      () => runPromiseHttp(Effect.flip(discoverOAuthEndpoints("https://idp"))),
     );
     expect(err.message).toMatch(/missing/i);
   });
@@ -1023,7 +1037,7 @@ describe("OAuthService encryptTokens", () => {
       updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make(
         { github: githubProvider },
         { encryptTokens: { secret: Redacted.make(TEST_SECRET) } },
@@ -1035,8 +1049,8 @@ describe("OAuthService encryptTokens", () => {
 
     const newAccessToken = await withFetch(
       (_url, init) => {
-        const body = init?.body;
-        if (P.isString(body)) {
+        const body = requestBodyText(init?.body);
+        if (body !== null) {
           capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);
@@ -1077,7 +1091,7 @@ describe("OAuthService encryptTokens", () => {
       updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: githubProvider }).pipe(
         Effect.provide(Layer.mergeAll(accountStoreLive, unusedDepsLayer)),
       ),
@@ -1118,7 +1132,7 @@ describe("OAuthService encryptTokens", () => {
       updatedAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: githubProvider }, { encryptTokens: { cipher: customCipher } }).pipe(
         Effect.provide(Layer.mergeAll(accountStoreLive, unusedDepsLayer)),
       ),
@@ -1129,8 +1143,8 @@ describe("OAuthService encryptTokens", () => {
 
     await withFetch(
       (_url, init) => {
-        const body = init?.body;
-        if (P.isString(body)) {
+        const body = requestBodyText(init?.body);
+        if (body !== null) {
           capturedRefreshToken = new URLSearchParams(body).get("refresh_token");
         }
         return json(tokenResp);
@@ -1227,7 +1241,7 @@ describe("OAuthService unlinkAccount guard", () => {
   };
 
   const buildService = (accountLayer: Layer.Layer<OAuthAccountStore>) =>
-    Effect.runPromise(
+    runPromiseHttp(
       OAuth.make({ github: githubProvider }).pipe(
         Effect.provide(Layer.mergeAll(accountLayer, unusedDeps)),
       ),
@@ -1483,7 +1497,7 @@ describe("OAuthService linking controls", () => {
   it("allowDifferentEmails: false (default) rejects linking when emails differ", async () => {
     const user = makeUser();
     const identifiers = makeIdentifiers({ userId: user.id, email: "other@example.com" });
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1510,7 +1524,7 @@ describe("OAuthService linking controls", () => {
   it("allowDifferentEmails: true allows linking when emails differ", async () => {
     const user = makeUser();
     const identifiers = makeIdentifiers({ userId: user.id, email: "other@example.com" });
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }, { allowDifferentEmails: true }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1537,7 +1551,7 @@ describe("OAuthService linking controls", () => {
   it("allowDifferentEmails: false succeeds when emails match", async () => {
     const user = makeUser();
     const identifiers = makeIdentifiers({ userId: user.id, email: "user@example.com" });
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1584,7 +1598,7 @@ describe("OAuthService linking controls", () => {
     const table = memoryUserTable();
     MutableHashMap.set(table.passwordHashes, existingUser.id, "squatter-hash");
     const passwords = memoryEmailPasswordStore(table);
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }, options).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1785,7 +1799,7 @@ describe("OAuthService linking controls", () => {
       },
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }, { trustedProviders: [] }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1830,7 +1844,7 @@ describe("OAuthService linking controls", () => {
       },
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1901,7 +1915,7 @@ describe("OAuthService linking controls", () => {
         }),
     });
 
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1936,7 +1950,7 @@ describe("OAuthService linking controls", () => {
   it("updateUserInfoOnLink: false (default) does not update the user profile", async () => {
     let updateCalled = false;
     const user = makeUser();
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make({ github: makeTestProvider("github") }, { allowDifferentEmails: true }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1966,7 +1980,7 @@ describe("OAuthService linking controls", () => {
   it("updateUserInfoOnLink: true updates the user name and image from the provider", async () => {
     const updates: { name?: string; image?: string }[] = [];
     const user = makeUser();
-    const service = await Effect.runPromise(
+    const service = await runPromiseHttp(
       OAuth.make(
         { github: makeTestProvider("github") },
         { allowDifferentEmails: true, updateUserInfoOnLink: true },
@@ -2078,7 +2092,7 @@ describe("OAuthService handleCallback and generateAuthorizationUrl", () => {
     stateStore: typeof OAuthStateStore.Service,
     accountStore: typeof OAuthAccountStore.Service = makeAccounts().store,
   ) =>
-    Effect.runPromise(
+    runPromiseHttp(
       OAuth.make({ github }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -2361,7 +2375,7 @@ describe("OAuthService first proof over the real services", () => {
           ? json({ access_token: "at", token_type: "bearer" })
           : json({ id: "gh-victim", email: "victim@example.com", email_verified: true }),
       () =>
-        Effect.runPromise(
+        runPromiseHttp(
           Effect.gen(function* () {
             const emailPassword = yield* EmailPasswordService;
             const sessions = yield* SessionService;
@@ -2415,7 +2429,7 @@ describe("OAuthService first proof over the real services", () => {
           ? json({ access_token: "at", token_type: "bearer" })
           : json({ id: "gh-victim", email: "victim@example.com", email_verified: true }),
       () =>
-        Effect.runPromise(
+        runPromiseHttp(
           Effect.gen(function* () {
             const emailPassword = yield* EmailPasswordService;
             const oauth = yield* OAuth.OAuthService;

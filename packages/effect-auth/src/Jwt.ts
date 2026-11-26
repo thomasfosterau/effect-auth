@@ -43,6 +43,7 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
+import { HttpClient, type HttpClientError } from "effect/http";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -50,6 +51,7 @@ import type * as Errors from "./Errors.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Types from "./Types.ts";
 import * as Obs from "./Observability.ts";
+import * as OutboundHttp from "./OutboundHttp.ts";
 
 /**
  * JWT error
@@ -621,7 +623,8 @@ export interface RemoteJwksConfig {
 }
 
 /**
- * A stand-alone JWT verifier backed by a remote JWKS document.
+ * A stand-alone JWT verifier backed by a remote JWKS document, fetched
+ * through the `HttpClient` the application provides (`FetchHttpClient.layer`).
  */
 export class RemoteJwksVerifier extends Context.Service<
   RemoteJwksVerifier,
@@ -648,24 +651,23 @@ interface JwksCache {
 const jwksFetchError = (cause: unknown): JwtError =>
   new JwtError({ message: "Failed to fetch JWKS", cause });
 
-const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
-  Effect.tryPromise({
-    try: () => fetch(uri, { headers: { Accept: "application/json" } }),
-    catch: jwksFetchError,
-  }).pipe(
-    Effect.flatMap((res) =>
-      res.ok
-        ? Effect.tryPromise({ try: () => res.json(), catch: jwksFetchError })
+const fetchJwks = (
+  client: HttpClient.HttpClient,
+  uri: string,
+): Effect.Effect<JwksCache, JwtError> =>
+  OutboundHttp.send(client, OutboundHttp.getJson(uri)).pipe(
+    Effect.flatMap((res): Effect.Effect<unknown, HttpClientError.HttpClientError | JwksHttpError> =>
+      OutboundHttp.isOk(res)
+        ? res.json
         : Effect.fail(
-            jwksFetchError(
-              new JwksHttpError({
-                message: `JWKS endpoint returned HTTP ${res.status}`,
-                status: res.status,
-              }),
-            ),
+            new JwksHttpError({
+              message: `JWKS endpoint returned HTTP ${res.status}`,
+              status: res.status,
+            }),
           ),
     ),
-    Effect.flatMap((body) => decodeJwksDocument(body).pipe(Effect.mapError(jwksFetchError))),
+    Effect.flatMap((body) => decodeJwksDocument(body)),
+    Effect.mapError(jwksFetchError),
     Effect.zipWith(Clock.currentTimeMillis, (data, fetchedAt) => ({ keys: data.keys, fetchedAt })),
   );
 
@@ -676,8 +678,9 @@ const fetchJwks = (uri: string): Effect.Effect<JwksCache, JwtError> =>
  */
 export const remoteJwksVerifier = (
   config: RemoteJwksConfig,
-): Effect.Effect<typeof RemoteJwksVerifier.Service> =>
+): Effect.Effect<typeof RemoteJwksVerifier.Service, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
     const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
     const leewayMs = config.clockSkewLeeway ?? 0;
 
@@ -709,7 +712,7 @@ export const remoteJwksVerifier = (
         }
 
         // Leader: perform the fetch
-        const result = yield* fetchJwks(config.jwksUri).pipe(
+        const result = yield* fetchJwks(client, config.jwksUri).pipe(
           Effect.onError((cause) =>
             Effect.gen(function* () {
               yield* Deferred.failCause(deferred, cause);

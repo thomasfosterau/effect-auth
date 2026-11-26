@@ -19,6 +19,8 @@ The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-
 - the **`nodejs_compat`** compatibility flag (on by default from compatibility date 2026-08-04), and
 - a **compatibility date of 2023-01-01 or later**.
 
+Outbound requests (the OAuth and OIDC provider endpoints, SSO discovery, `RemoteJwksVerifier`, Cloudflare Access's key set, Google One Tap's JWKS) go through `effect/http`'s `HttpClient`, so the layers that make them require one: provide `FetchHttpClient.layer`, which works on Workers, Node and in browsers, or a stub in tests.
+
 Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
 
 The core never relies on the Node globals `nodejs_compat` sets only from 2024-09-23 (`Buffer`, `process`), so an older date works. Every primitive (PBKDF2 and scrypt hashing and verification, `hashToken` and the constant-time comparisons, AES-256-GCM, HMAC, the WebAuthn signature checks, and ES256, EdDSA and RS256 JWS through `JwtService`, `verifyJws` and the Apple client secret) is tested inside a real workerd at 2023-01-01 and at workerd's newest date (`src/Workerd.test.ts`). Releases up to 0.4.0 fail there: ES256 signing and verification on every date, JWT key generation from 2025-12-03, and password hashing, AES-GCM and the WebAuthn checks before 2024-09-23.
@@ -557,7 +559,8 @@ What the service enforces:
 ## OAuth 2.0 social login
 
 ```typescript
-import { Effect, Redacted } from "effect";
+import { Effect, Layer, Redacted } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const providers = {
@@ -576,8 +579,11 @@ const providers = {
 // Requires OAuthStateStore (temporary, about 10 minutes), OAuthAccountStore,
 // OAuthUserStore, IdentifierStore, UserStore, EmailPasswordStore (to clear an
 // unproven sign-up's password) and SessionService; a storage adapter
-// such as @thomasfosterau/effect-auth/sql provides the stores.
-const OAuthLive = Auth.OAuth.OAuthService.layer(providers);
+// such as @thomasfosterau/effect-auth/sql provides the stores. The token,
+// userinfo and JWKS requests go through effect/http's HttpClient.
+const OAuthLive = Auth.OAuth.OAuthService.layer(providers).pipe(
+  Layer.provide(FetchHttpClient.layer),
+);
 
 // Step 1: redirect the user to the provider (PKCE and `state` are handled for you).
 const begin = Effect.gen(function* () {
@@ -629,6 +635,7 @@ An application behind [Cloudflare Access](https://developers.cloudflare.com/clou
 
 ```typescript
 import { Effect, Layer, Option } from "effect";
+import { FetchHttpClient } from "effect/http";
 import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth";
 
 const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
@@ -636,7 +643,7 @@ const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
   audience: "<the Access application's AUD tag>",
   // Read the browser cookie too, for pages Access does not gate.
   sources: ["header", "cookie"],
-});
+}).pipe(Layer.provide(FetchHttpClient.layer));
 
 // Per request: the identity, if any, and the effect-auth user it belongs to.
 const viewer = (request: Request) =>
@@ -1515,6 +1522,7 @@ sessions. Only the XML job lives here.
 
 ```ts
 import { Layer } from "effect";
+import { FetchHttpClient } from "effect/http";
 import * as Saml from "@thomasfosterau/effect-auth/saml";
 import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
 
@@ -1523,7 +1531,9 @@ const samlSupport = Layer.mergeAll(
   Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
 );
 
-const ssoLayer = SsoService.layer().pipe(Layer.provide(samlSupport));
+// OIDC connections reach the IdP (discovery, token, userinfo, JWKS) through
+// effect/http's HttpClient.
+const ssoLayer = SsoService.layer().pipe(Layer.provide([samlSupport, FetchHttpClient.layer]));
 ```
 
 Register a connection, then start and finish sign-ins:

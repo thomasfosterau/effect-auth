@@ -45,13 +45,14 @@
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Option } from "effect"
+ * import { Effect, Layer, Option } from "effect"
+ * import { FetchHttpClient } from "effect/http"
  * import { CloudflareAccess, SessionResolution } from "@thomasfosterau/effect-auth"
  *
  * const AccessLive = CloudflareAccess.CloudflareAccessVerifier.layer({
  *   teamDomain: "example-team.cloudflareaccess.com",
  *   audience: "4714c1358e65fe4b408ad6d432a5f878f08194bdb4752441fd56faefa9b2b6f2",
- * })
+ * }).pipe(Layer.provide(FetchHttpClient.layer))
  *
  * // A request with no Access token is anonymous, and nothing is fetched.
  * const request = new Request("https://example.com/notes/1")
@@ -73,10 +74,12 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import { HttpClient } from "effect/http";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts";
 import * as Cipher from "./Cipher.ts";
 import type { AuthError } from "./Errors.ts";
 import { IdentifierStore, lookupIdentifier } from "./Identifier.ts";
+import * as OutboundHttp from "./OutboundHttp.ts";
 import type { CredentialSource } from "./SessionResolution.ts";
 import { type CurrentUser, userLayer } from "./SessionContext.ts";
 import type * as Types from "./Types.ts";
@@ -249,7 +252,8 @@ export class CloudflareAccessVerifier extends Context.Service<
 >()("@effect-auth/CloudflareAccessVerifier") {
   /**
    * A layer over {@link make}. Fails with a `"config"` {@link CloudflareAccessError}
-   * when the team domain or audience is unusable.
+   * when the team domain or audience is unusable. The key set is fetched
+   * through the `HttpClient` the application provides (`FetchHttpClient.layer`).
    */
   static readonly layer = (config: CloudflareAccessConfig) =>
     Layer.effect(CloudflareAccessVerifier, make(config));
@@ -369,7 +373,11 @@ const claimFailure = (
  */
 export const make = (
   config: CloudflareAccessConfig,
-): Effect.Effect<typeof CloudflareAccessVerifier.Service, CloudflareAccessError> =>
+): Effect.Effect<
+  typeof CloudflareAccessVerifier.Service,
+  CloudflareAccessError,
+  HttpClient.HttpClient
+> =>
   Effect.gen(function* () {
     const issuer = issuerOf(config.teamDomain);
     if (issuer === undefined) {
@@ -400,16 +408,14 @@ export const make = (
       attemptedAt: Number.NEGATIVE_INFINITY,
     });
 
-    const fetchKeys = Effect.tryPromise({
-      try: (signal) => fetch(certsUrl, { headers: { Accept: "application/json" }, signal }),
-      catch: (cause) => fail("jwks", "Failed to fetch the Cloudflare Access keys", cause),
-    }).pipe(
+    const client = yield* HttpClient.HttpClient;
+    const fetchKeys = OutboundHttp.send(client, OutboundHttp.getJson(certsUrl)).pipe(
+      Effect.mapError((cause) => fail("jwks", "Failed to fetch the Cloudflare Access keys", cause)),
       Effect.flatMap((response) =>
-        response.ok
-          ? Effect.tryPromise({
-              try: () => response.json(),
-              catch: (cause) => fail("jwks", "Invalid Cloudflare Access key set", cause),
-            })
+        OutboundHttp.isOk(response)
+          ? response.json.pipe(
+              Effect.mapError((cause) => fail("jwks", "Invalid Cloudflare Access key set", cause)),
+            )
           : Effect.fail(
               fail(
                 "jwks",
