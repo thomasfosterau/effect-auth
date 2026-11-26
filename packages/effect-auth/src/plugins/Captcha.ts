@@ -29,7 +29,8 @@
 import { Effect, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClientRequest } from "effect/http";
+import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import {
   type AuthenticateAttempt,
@@ -83,27 +84,27 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
 
   return makePlugin(
     Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
+      const outbound = yield* OutboundHttp.resolve();
 
       const verify = (token: string | undefined): Effect.Effect<void, CaptchaError> =>
         Effect.gen(function* () {
           if (token === undefined || token === "") {
             return yield* new CaptchaError({ message: "Captcha verification failed" });
           }
-          const success = yield* client
-            .execute(
-              HttpClientRequest.post(url).pipe(
-                HttpClientRequest.bodyUrlParams({
-                  secret: Redacted.value(config.secretKey),
-                  response: token,
-                }),
-              ),
-            )
-            .pipe(
-              Effect.flatMap((response) => response.json),
-              Effect.map((body) => P.hasProperty(body, "success") && body.success === true),
-              Effect.catch(() => Effect.succeed(false)),
-            );
+          const success = yield* OutboundHttp.send(
+            outbound.client,
+            HttpClientRequest.post(url).pipe(
+              HttpClientRequest.bodyUrlParams({
+                secret: Redacted.value(config.secretKey),
+                response: token,
+              }),
+            ),
+            outbound.limits,
+          ).pipe(
+            Effect.flatMap((response) => OutboundHttp.parseJson(response.body)),
+            Effect.map((body) => P.hasProperty(body, "success") && body.success === true),
+            Effect.catch(() => Effect.succeed(false)),
+          );
           if (!success) {
             return yield* new CaptchaError({ message: "Captcha verification failed" });
           }

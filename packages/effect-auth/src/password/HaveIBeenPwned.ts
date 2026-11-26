@@ -17,7 +17,8 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest } from "effect/crypto";
 import { Hex } from "effect/encoding";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClientRequest } from "effect/http";
+import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import { makePlugin, type ResetPasswordArgs } from "../Hooks.ts";
 import { AuthError, PwnedPasswordError } from "../Errors.ts";
@@ -44,7 +45,7 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
 
   return makePlugin(
     Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
+      const outbound = yield* OutboundHttp.resolve();
       const digest = yield* Digest.Digest;
 
       const sha1Upper = (password: string): Effect.Effect<string> =>
@@ -57,8 +58,13 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
           const hash = yield* sha1Upper(password);
           const prefix = hash.slice(0, 5);
           const suffix = hash.slice(5);
-          return yield* client.execute(HttpClientRequest.get(`${RANGE_URL}/${prefix}`)).pipe(
-            Effect.flatMap((response) => response.text),
+          return yield* OutboundHttp.send(
+            outbound.client,
+            HttpClientRequest.get(`${RANGE_URL}/${prefix}`),
+            outbound.limits,
+          ).pipe(
+            Effect.filterOrFail(OutboundHttp.isOk),
+            Effect.map((response) => response.body),
             Effect.map((body) =>
               Arr.findFirst(body.split("\n"), (line) => {
                 const [suf, count] = line.trim().split(":");

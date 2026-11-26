@@ -1,7 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
-import { DateTime, Effect, Layer, MutableHashMap, Result, Struct } from "effect";
+import { DateTime, Effect, Exit, Layer, MutableHashMap, Result, Struct } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -596,6 +596,101 @@ describe("SsoService", () => {
     expect(discovered.authorizationEndpoint).toBe("https://idp.acme.test/auth");
     expect(discovered.tokenEndpoint).toBe("https://idp.acme.test/tok");
     expect(discovered.userInfoEndpoint).toBe("https://idp.acme.test/ui");
+    expect(MutableHashMap.size(providers)).toBe(1);
+  });
+
+  it("refuses to register a connection whose endpoints name a private or plain-http host", async () => {
+    const { layer, providers } = makeStores();
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
+    const register = (overrides: {
+      readonly tokenEndpoint?: string;
+      readonly jwksEndpoint?: string;
+    }) =>
+      Effect.runPromise(
+        sso.registerProvider("admin", { ...ACME, ...overrides }).pipe(
+          Effect.flip,
+          Effect.map((e) => e.message),
+          Effect.provide(layer),
+        ),
+      );
+
+    const refused = await Promise.all(
+      [
+        "http://idp.acme.test/token",
+        "https://127.0.0.1/token",
+        "https://169.254.169.254/latest/meta-data",
+        "https://[::1]/token",
+        "https://10.0.0.5/token",
+        "https://localhost/token",
+        "https://idp.internal/token",
+        "https://intranet/token",
+        "https://user:pw@idp.acme.test/token",
+      ].map((tokenEndpoint) => register({ tokenEndpoint })),
+    );
+    expect(refused).toHaveLength(9);
+    expect(refused.filter((message) => !message.startsWith("IdP URL"))).toEqual([]);
+    expect(await register({ jwksEndpoint: "https://192.168.1.1/jwks" })).toMatch(/^IdP URL/);
+    expect(MutableHashMap.size(providers)).toBe(0);
+  });
+
+  it("checks discovery and the URLs it names before fetching them", async () => {
+    const { layer, providers } = makeStores();
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(layer)));
+    const requested: Array<string> = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (input) => {
+      requested.push(P.isString(input) ? input : input instanceof URL ? input.href : input.url);
+      return Promise.resolve(
+        Response.json({
+          issuer: "https://idp.acme.test",
+          authorization_endpoint: "https://idp.acme.test/auth",
+          token_endpoint: "https://10.1.2.3/token",
+        }),
+      );
+    };
+    const attempts = (async () => {
+      const privateIssuer = await Effect.runPromiseExit(
+        sso
+          .registerProvider("admin", { ...ACME, issuer: "https://10.0.0.1", discover: true })
+          .pipe(Effect.provide(layer)),
+      );
+      expect(Exit.isFailure(privateIssuer)).toBe(true);
+      expect(requested).toEqual([]);
+
+      const privateToken = await Effect.runPromiseExit(
+        sso
+          .registerProvider("admin", {
+            issuer: ACME.issuer,
+            domain: ACME.domain,
+            clientId: ACME.clientId,
+            clientSecret: ACME.clientSecret,
+            redirectUri: ACME.redirectUri,
+            discover: true,
+          })
+          .pipe(Effect.provide(layer)),
+      );
+      expect(Exit.isFailure(privateToken)).toBe(true);
+      expect(MutableHashMap.size(providers)).toBe(0);
+    })();
+    await attempts.finally(() => {
+      globalThis.fetch = original;
+    });
+  });
+
+  it("accepts a private IdP with allowPrivateIdpUrls", async () => {
+    const { layer, providers } = makeStores();
+    const sso = await runPromiseHttp(
+      Sso.make({ allowPrivateIdpUrls: true }).pipe(Effect.provide(layer)),
+    );
+    await Effect.runPromise(
+      sso
+        .registerProvider("admin", {
+          ...ACME,
+          tokenEndpoint: "http://10.0.0.5:8080/token",
+          userInfoEndpoint: "http://localhost:8080/userinfo",
+        })
+        .pipe(Effect.provide(layer)),
+    );
     expect(MutableHashMap.size(providers)).toBe(1);
   });
 

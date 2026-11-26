@@ -7,16 +7,18 @@
 
 import { Clock, Config, Context, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { Digest, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
 import * as Cipher from "../Cipher.ts";
 import * as Obs from "../Observability.ts";
 import * as OutboundHttp from "../OutboundHttp.ts";
+import * as RemoteJwks from "../RemoteJwks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
@@ -378,29 +380,17 @@ const invalidBody = (provider: string, what: string, cause?: unknown) =>
     ...(cause !== undefined && { cause }),
   });
 
-/** A response body as text. A failed read is an `OAuthProviderError`. */
-const readText = (
-  provider: string,
-  response: HttpClientResponse.HttpClientResponse,
-  what = "response body",
-): Effect.Effect<string, OAuthProviderError> =>
-  response.text.pipe(Effect.mapError((cause) => invalidBody(provider, what, cause)));
-
-const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
-
 /**
- * A response body parsed as JSON. A failed read or a body that is not JSON is
- * an `OAuthProviderError`, never a defect: the body is outside input.
+ * A response body parsed as JSON. A body that is not JSON is an
+ * `OAuthProviderError`, never a defect: the body is outside input.
  */
 const readJson = (
   provider: string,
-  response: HttpClientResponse.HttpClientResponse,
+  response: OutboundHttp.Response,
   what = "response body",
 ): Effect.Effect<Schema.Json, OAuthProviderError> =>
-  readText(provider, response, what).pipe(
-    Effect.flatMap((text) =>
-      decodeJsonString(text).pipe(Effect.mapError((cause) => invalidBody(provider, what, cause))),
-    ),
+  OutboundHttp.parseJson(response.body).pipe(
+    Effect.mapError((cause) => invalidBody(provider, what, cause)),
   );
 
 /** An optional member a provider may also send as `null`, which reads as absent. */
@@ -426,7 +416,7 @@ const decodeTokenResponseBody = Schema.decodeUnknownEffect(TokenResponseBody);
 /** A 2xx token endpoint's body, decoded. Anything else is an `OAuthProviderError`. */
 const readTokenResponse = (
   provider: string,
-  response: HttpClientResponse.HttpClientResponse,
+  response: OutboundHttp.Response,
 ): Effect.Effect<OAuthTokenResponse, OAuthProviderError> =>
   readJson(provider, response, "token response").pipe(
     Effect.flatMap((json) =>
@@ -480,49 +470,65 @@ const splitIdToken = (idToken: string): readonly [string, string, string] | unde
     : [headerSeg, payloadSeg, signatureSeg];
 };
 
+/** Fetch a provider's JWKS document and read its keys. */
+const fetchProviderJwks = (
+  provider: string,
+  jwksEndpoint: string,
+): Effect.Effect<ReadonlyArray<Types.JsonObject>, OAuthProviderError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* OutboundHttp.sendWith(OutboundHttp.getJson(jwksEndpoint)).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Failed to fetch JWKS for ${provider}`,
+            provider,
+            cause,
+          }),
+      ),
+    );
+    if (!OutboundHttp.isOk(response)) {
+      yield* OutboundHttp.logUpstreamFailure("JWKS request failed", response, { provider });
+      return yield* new OAuthProviderError({
+        message: `JWKS request failed with status ${response.status}`,
+        provider,
+      });
+    }
+    const jwks = yield* readJson(provider, response, "JWKS document").pipe(
+      Effect.flatMap((json) => decodeProviderJwks(json)),
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Invalid JWKS document for ${provider}`,
+            provider,
+            cause,
+          }),
+      ),
+    );
+    return jwks.keys ?? [];
+  });
+
 /**
- * Fetch the provider's JWKS and pick the key for the header's `kid` (or the
- * only key when the document holds just one).
+ * The provider's key for the header's `kid` (or the only key when the
+ * document holds just one). Under a service's {@link RemoteJwks.KeySets} the
+ * JWKS is cached per URL, refetched for an unknown `kid` at most once per
+ * refetch interval and kept when a refetch fails; without one (a direct
+ * {@link verifyIdToken} call) it is fetched each time.
  */
 const fetchIdTokenJwk = (
   params: IdTokenParams,
   header: Types.JsonObject,
 ): Effect.Effect<Types.JsonObject, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(
-      client,
-      OutboundHttp.getJson(params.jwksEndpoint),
-    ).pipe(
-      Effect.mapError(
-        (cause) =>
-          new OAuthProviderError({
-            message: `Failed to fetch JWKS for ${params.provider}`,
-            provider: params.provider,
-            cause,
-          }),
-      ),
-    );
-    if (!OutboundHttp.isOk(response)) {
-      return yield* new OAuthProviderError({
-        message: `JWKS request failed with status ${response.status}`,
-        provider: params.provider,
-      });
-    }
-    const jwks = yield* readJson(params.provider, response, "JWKS document").pipe(
-      Effect.flatMap((json) => decodeProviderJwks(json)),
-      Effect.mapError(
-        (cause) =>
-          new OAuthProviderError({
-            message: `Invalid JWKS document for ${params.provider}`,
-            provider: params.provider,
-            cause,
-          }),
-      ),
-    );
-    const keys = jwks.keys ?? [];
     const kid = header["kid"];
-    const jwk = keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    const pick: RemoteJwks.Pick = (keys) =>
+      keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    const fetch = fetchProviderJwks(params.provider, params.jwksEndpoint);
+    const keySets = yield* Effect.serviceOption(RemoteJwks.KeySets);
+    const jwk = Option.isSome(keySets)
+      ? yield* Effect.flatMap(OutboundHttp.provideCurrent(fetch), (cached) =>
+          Effect.flatMap(keySets.value.forUrl(params.jwksEndpoint, cached), (set) => set.key(pick)),
+        )
+      : pick(yield* fetch);
     if (!jwk) {
       return yield* new OAuthProviderError({
         message: "No matching JWKS key for id_token",
@@ -694,21 +700,18 @@ const tokenRequest = (
 
 /**
  * Send a request to a provider endpoint, failing with `fetchFailure` when the
- * request cannot be sent and with `statusFailure` plus the response text on a
- * non-2xx answer.
+ * request cannot be sent and with `statusFailure` on a non-2xx answer. The
+ * answer's body goes to the log, never into the error: an IdP's error page
+ * is not for the end user, and a tenant-registered URL must not read back
+ * whatever it points at.
  */
 const fetchProviderOk = (
   provider: string,
   request: HttpClientRequest.HttpClientRequest,
   failures: { readonly fetchFailure: string; readonly statusFailure: string },
-): Effect.Effect<
-  HttpClientResponse.HttpClientResponse,
-  OAuthProviderError,
-  HttpClient.HttpClient
-> =>
+): Effect.Effect<OutboundHttp.Response, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(client, request).pipe(
+    const response = yield* OutboundHttp.sendWith(request).pipe(
       Effect.mapError(
         (cause) =>
           new OAuthProviderError({
@@ -720,9 +723,9 @@ const fetchProviderOk = (
     );
 
     if (!OutboundHttp.isOk(response)) {
-      const errorText = yield* readText(provider, response);
+      yield* OutboundHttp.logUpstreamFailure(failures.statusFailure, response, { provider });
       return yield* new OAuthProviderError({
-        message: `${failures.statusFailure}: ${errorText}`,
+        message: `${failures.statusFailure} with status ${response.status}`,
         provider,
       });
     }
@@ -1085,7 +1088,7 @@ export const make = (
   | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
+    const outbound = yield* OutboundHttp.resolve();
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
     const trustedProviders = options.trustedProviders ?? [];
     const allowDifferentEmails = options.allowDifferentEmails ?? false;
@@ -1186,7 +1189,7 @@ export const make = (
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
         return { tokens, userInfo };
-      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+      }).pipe(OutboundHttp.provide(outbound));
 
     /**
      * Shared callback plumbing: consume the state, exchange the code and
@@ -1643,7 +1646,7 @@ export const make = (
             const response = yield* fetchProviderOk(provider, tokenRequest(rConfig, params), {
               fetchFailure: `Failed to refresh token for ${provider}`,
               statusFailure: "Token refresh failed",
-            }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+            }).pipe(OutboundHttp.provide(outbound));
 
             const data = yield* readTokenResponse(provider, response);
 
@@ -2231,8 +2234,7 @@ export const discoverOAuthEndpoints = (
   Effect.gen(function* () {
     const base = issuerUrl.replace(/\/$/, "");
     const url = `${base}/.well-known/openid-configuration`;
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(client, OutboundHttp.getJson(url)).pipe(
+    const response = yield* OutboundHttp.sendWith(OutboundHttp.getJson(url)).pipe(
       Effect.mapError(
         (cause) =>
           new OAuthProviderError({
@@ -2243,6 +2245,9 @@ export const discoverOAuthEndpoints = (
       ),
     );
     if (!OutboundHttp.isOk(response)) {
+      yield* OutboundHttp.logUpstreamFailure("OIDC discovery request failed", response, {
+        issuer: issuerUrl,
+      });
       return yield* new OAuthProviderError({
         message: `OIDC discovery request failed with status ${response.status}`,
         provider: issuerUrl,

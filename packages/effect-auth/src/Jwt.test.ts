@@ -537,6 +537,7 @@ describe("RemoteJwksVerifier", () => {
   let server: Server;
   let jwksUrl: string;
   let signedToken: string;
+  let jwksRequests = 0;
 
   beforeAll(async () => {
     // Sign a token to trigger lazy key-pair creation in the remote store.
@@ -557,6 +558,7 @@ describe("RemoteJwksVerifier", () => {
     );
 
     server = createServer((_req, res) => {
+      jwksRequests++;
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(encodeJson(jwks));
     });
@@ -640,6 +642,33 @@ describe("RemoteJwksVerifier", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("JwtError");
     expect(result.failure.message).toContain("kid");
+  });
+
+  it("fetches once for a burst of forged kids, and keeps verifying real ones", async () => {
+    const [hdr, pay, sig] = jwsSegments(signedToken.split("."));
+    const parsedHeader = decodeJsonObject(Buffer.from(hdr, "base64url").toString("utf8"));
+    const forged = (kid: string) =>
+      `${Buffer.from(encodeJson({ ...parsedHeader, kid })).toString("base64url")}.${pay}.${sig}`;
+    const before = jwksRequests;
+
+    const subject = await runPromiseHttp(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: jwksUrl,
+          issuer: baseConfig.issuer,
+          ...(baseConfig.audience !== undefined && { audience: baseConfig.audience }),
+        });
+        yield* Effect.forEach(
+          Array.from({ length: 20 }, (_, i) => forged(`forged-${i}`)),
+          (token) => Effect.flip(verifier.verify(token)),
+          { concurrency: 1 },
+        );
+        return (yield* verifier.verify(signedToken))["sub"];
+      }),
+    );
+
+    expect(subject).toBe("user-1");
+    expect(jwksRequests - before).toBe(1);
   });
 
   it("should reject a token with a future nbf via the remote verifier", async () => {

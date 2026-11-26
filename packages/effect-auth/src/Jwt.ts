@@ -43,7 +43,7 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { SecureRandom } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
-import { HttpClient, type HttpClientError } from "effect/http";
+import type { HttpClient } from "effect/http";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import * as Cipher from "./Cipher.ts";
 import type { TokenCipher } from "./Cipher.ts";
@@ -52,6 +52,7 @@ import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Types from "./Types.ts";
 import * as Obs from "./Observability.ts";
 import * as OutboundHttp from "./OutboundHttp.ts";
+import * as RemoteJwks from "./RemoteJwks.ts";
 
 /**
  * JWT error
@@ -616,6 +617,12 @@ export interface RemoteJwksConfig {
   /** How long to cache a fetched JWKS in milliseconds (default: 5 minutes) */
   readonly cacheTtlMs?: number;
   /**
+   * The least time between two fetches in milliseconds (default: 30
+   * seconds). A token whose `kid` the cache lacks refetches early, at most
+   * this often, so forged `kid`s cannot turn every request into a fetch.
+   */
+  readonly minRefreshIntervalMs?: number;
+  /**
    * Clock-skew tolerance in milliseconds applied to `exp` and `nbf` checks
    * (default: 0).
    */
@@ -632,8 +639,9 @@ export class RemoteJwksVerifier extends Context.Service<
     /**
      * Verify a compact JWS against the remote JWKS. On first call (or after
      * cache expiry) the JWKS is fetched and cached. If the `kid` from the
-     * token header is absent in the cached JWKS, the cache is refreshed once to
-     * handle key rotation before failing.
+     * token header is absent in the cached JWKS, the cache is refreshed to
+     * handle key rotation, at most once per `minRefreshIntervalMs`, before
+     * failing; a failed refresh keeps the keys already held.
      */
     readonly verify: (token: string) => Effect.Effect<Types.JsonObject, JwtError>;
   }
@@ -642,90 +650,58 @@ export class RemoteJwksVerifier extends Context.Service<
     Layer.effect(RemoteJwksVerifier, remoteJwksVerifier(config));
 }
 
-interface JwksCache {
-  readonly keys: ReadonlyArray<JsonObject>;
-  readonly fetchedAt: number;
-}
-
 /** Wrap any failure to fetch or read the JWKS document. */
 const jwksFetchError = (cause: unknown): JwtError =>
   new JwtError({ message: "Failed to fetch JWKS", cause });
 
 const fetchJwks = (
-  client: HttpClient.HttpClient,
+  outbound: OutboundHttp.Outbound,
   uri: string,
-): Effect.Effect<JwksCache, JwtError> =>
-  OutboundHttp.send(client, OutboundHttp.getJson(uri)).pipe(
-    Effect.flatMap((res): Effect.Effect<unknown, HttpClientError.HttpClientError | JwksHttpError> =>
-      OutboundHttp.isOk(res)
-        ? res.json
-        : Effect.fail(
-            new JwksHttpError({
-              message: `JWKS endpoint returned HTTP ${res.status}`,
-              status: res.status,
-            }),
-          ),
+): Effect.Effect<ReadonlyArray<JsonObject>, JwtError> =>
+  OutboundHttp.send(outbound.client, OutboundHttp.getJson(uri), outbound.limits).pipe(
+    Effect.flatMap(
+      (
+        res,
+      ): Effect.Effect<
+        unknown,
+        OutboundHttp.OutboundHttpError | JwksHttpError | Schema.SchemaError
+      > =>
+        OutboundHttp.isOk(res)
+          ? OutboundHttp.parseJson(res.body)
+          : OutboundHttp.logUpstreamFailure("JWKS request failed", res, { jwksUri: uri }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new JwksHttpError({
+                    message: `JWKS endpoint returned HTTP ${res.status}`,
+                    status: res.status,
+                  }),
+                ),
+              ),
+            ),
     ),
     Effect.flatMap((body) => decodeJwksDocument(body)),
+    Effect.map((data) => data.keys),
     Effect.mapError(jwksFetchError),
-    Effect.zipWith(Clock.currentTimeMillis, (data, fetchedAt) => ({ keys: data.keys, fetchedAt })),
   );
 
 /**
  * Create a {@link RemoteJwksVerifier} that fetches the JWKS at
  * `config.jwksUri`, caches it for `cacheTtlMs`, and verifies tokens against
- * it. Concurrent fetch requests are deduplicated via a Deferred.
+ * it. A token naming a `kid` the cache lacks refetches at most once per
+ * `minRefreshIntervalMs`, and a failed refetch keeps the keys already held.
+ * Refetches are serialised, so concurrent requests share one.
  */
 export const remoteJwksVerifier = (
   config: RemoteJwksConfig,
 ): Effect.Effect<typeof RemoteJwksVerifier.Service, never, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const cacheTtlMs = config.cacheTtlMs ?? 5 * 60 * 1000;
+    const outbound = yield* OutboundHttp.resolve();
     const leewayMs = config.clockSkewLeeway ?? 0;
-
-    const cacheRef = yield* Ref.make<JwksCache | null>(null);
-
-    // Deduplicates concurrent JWKS fetches — only one HTTP request in-flight.
-    type FetchDeferred = Deferred.Deferred<JwksCache, JwtError>;
-    const pendingFetch = yield* Ref.make<FetchDeferred | null>(null);
-
-    const getKeys = (forceRefresh: boolean): Effect.Effect<ReadonlyArray<JsonObject>, JwtError> =>
-      Effect.gen(function* () {
-        if (!forceRefresh) {
-          const cached = yield* Ref.get(cacheRef);
-          if (cached !== null && (yield* Clock.currentTimeMillis) - cached.fetchedAt < cacheTtlMs) {
-            return cached.keys;
-          }
-        }
-
-        const deferred = yield* Deferred.make<JwksCache, JwtError>();
-        const existing: FetchDeferred | null = yield* Ref.modify(
-          pendingFetch,
-          (current): readonly [FetchDeferred | null, FetchDeferred | null] =>
-            current === null ? [null, deferred] : [current, current],
-        );
-
-        if (existing !== null) {
-          const result = yield* Deferred.await(existing);
-          return result.keys;
-        }
-
-        // Leader: perform the fetch
-        const result = yield* fetchJwks(client, config.jwksUri).pipe(
-          Effect.onError((cause) =>
-            Effect.gen(function* () {
-              yield* Deferred.failCause(deferred, cause);
-              yield* Ref.set(pendingFetch, null);
-            }),
-          ),
-        );
-
-        yield* Ref.set(cacheRef, result);
-        yield* Deferred.succeed(deferred, result);
-        yield* Ref.set(pendingFetch, null);
-        return result.keys;
-      });
+    const keySet = yield* RemoteJwks.make(fetchJwks(outbound, config.jwksUri), {
+      ttlMs: config.cacheTtlMs ?? RemoteJwks.defaultTiming.ttlMs,
+      minRefreshIntervalMs:
+        config.minRefreshIntervalMs ?? RemoteJwks.defaultTiming.minRefreshIntervalMs,
+    });
 
     return {
       verify: (token) =>
@@ -741,14 +717,8 @@ export const remoteJwksVerifier = (
 
           const kid = jws.header["kid"];
 
-          // Look up by kid; on miss, refresh once in case of key rotation.
-          let keys = yield* getKeys(false);
-          let matchedKey = keys.find((k) => k["kid"] === kid);
-
-          if (!matchedKey) {
-            keys = yield* getKeys(true);
-            matchedKey = keys.find((k) => k["kid"] === kid);
-          }
+          // A miss refetches (key rotation), within the refetch interval.
+          const matchedKey = yield* keySet.key((keys) => keys.find((k) => k["kid"] === kid));
 
           if (!matchedKey) {
             return yield* new JwtError({

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
-import { Cause, DateTime, Effect, Exit, Layer, MutableHashMap, Redacted } from "effect";
+import { Cause, DateTime, Effect, Exit, Layer, Logger, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -72,6 +72,7 @@ import {
 import * as OAuth from "./OAuth.ts";
 import type { HttpClient } from "effect/http";
 import { runPromiseExitHttp, runPromiseHttp } from "../testing/HttpClient.ts";
+import * as RemoteJwks from "../RemoteJwks.ts";
 
 /** In-memory OAuth state store for authorization-URL tests. */
 const StateStoreLive = () => {
@@ -382,6 +383,25 @@ describe("OAuth provider bodies", () => {
       ),
     );
     expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+  });
+
+  it("logs an upstream error body and keeps it out of the error", async () => {
+    const lines: Array<string> = [];
+    const collector = Logger.make((options) => void lines.push(Logger.formatJson.log(options)));
+    const error = await withFetch(
+      () =>
+        new Response('{"error":"invalid_grant","internal":"db-7 stack trace"}', { status: 400 }),
+      () =>
+        runPromiseHttp(
+          Effect.flip(GitLabProvider(CLIENT).exchangeCode("the-code")).pipe(
+            Effect.provide(Logger.layer([collector])),
+          ),
+        ),
+    );
+    expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+    expect(error.message).toContain("400");
+    expect(error.message).not.toContain("db-7");
+    expect(lines.some((line) => line.includes("db-7"))).toBe(true);
   });
 
   it("reads a token response as providers send it", () =>
@@ -697,6 +717,31 @@ describe("verifyIdToken", () => {
       expect(claims["sub"]).toBe("user-1");
       expect(claims["email"]).toBe("u@idp.com");
     });
+  });
+
+  it("fetches the JWKS once per endpoint where a service caches key sets", async () => {
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(now));
+    const params = {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "client-123",
+      now,
+    };
+    const calls = await withFetch(
+      () => json(key.jwks),
+      async (calls) => {
+        await runPromiseHttp(
+          Effect.gen(function* () {
+            yield* verifyIdToken(token, params);
+            yield* verifyIdToken(token, params);
+          }).pipe(Effect.provideServiceEffect(RemoteJwks.KeySets, RemoteJwks.makeKeySets())),
+        );
+        return calls.length;
+      },
+    );
+    expect(calls).toBe(1);
   });
 
   const expectFailure = async (
