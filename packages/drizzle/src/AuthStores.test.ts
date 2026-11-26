@@ -93,7 +93,7 @@ const appUsers = pgTable("app_users", {
   updated: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
 });
 
-const adopted = (passwordHash: "passwordHash" | undefined) =>
+const adopted = (passwordHash: Option.Option<"passwordHash">) =>
   defineSchema({
     sessions: {
       table: tables.sessions,
@@ -114,7 +114,10 @@ const adopted = (passwordHash: "passwordHash" | undefined) =>
         image: "avatarUrl",
         createdAt: "created",
         updatedAt: "updated",
-        ...(passwordHash === undefined ? {} : { passwordHash }),
+        ...Option.match(passwordHash, {
+          onNone: () => ({}),
+          onSome: (key) => ({ passwordHash: key }),
+        }),
       },
       promoted: { role: "role", plan: "plan" },
     },
@@ -138,7 +141,7 @@ const runAdopted = <A, E>(
     E,
     Auth.Email.EmailPasswordStore | Auth.UserStore | Auth.UserServiceStore
   >,
-  passwordHash: "passwordHash" | undefined = "passwordHash",
+  passwordHash: Option.Option<"passwordHash"> = Option.some("passwordHash"),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -190,7 +193,7 @@ describe("EmailPasswordStore on an application's own users table", () => {
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.void,
-        EmailPasswordStore.layer(adopted(undefined)).pipe(
+        EmailPasswordStore.layer(adopted(Option.none())).pipe(
           Layer.provide(databaseLayer(drizzle({ client }))),
         ),
       ),

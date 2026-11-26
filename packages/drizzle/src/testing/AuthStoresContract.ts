@@ -54,9 +54,9 @@ export type AuthStores =
 
 /** Application tables standing in for the dialect's API key, token and rate-limit tables. */
 export interface MappedTables {
-  readonly apiKeys?: ApiKeySchema | undefined;
-  readonly tokens?: TokenSchema | undefined;
-  readonly rateLimits?: RateLimitSchema | undefined;
+  readonly apiKeys?: ApiKeySchema;
+  readonly tokens?: TokenSchema;
+  readonly rateLimits?: RateLimitSchema;
 }
 
 /**

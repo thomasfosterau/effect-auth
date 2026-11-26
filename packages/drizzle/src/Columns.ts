@@ -125,7 +125,7 @@ export interface UserColumnNames<TTable extends Table> {
    * `EmailPasswordStore` reads or writes it (`UserStore` never selects it), and
    * that store's layer requires it.
    */
-  readonly passwordHash?: ColumnKey<TTable, string | null> | undefined;
+  readonly passwordHash?: ColumnKey<TTable, string | null>;
 }
 
 /** Which of `TTable`'s columns hold each field of an identifier. */

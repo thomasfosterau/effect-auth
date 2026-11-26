@@ -218,7 +218,7 @@ export type CredentialError =
 
 interface ApiErrorShape {
   readonly statusCode: number;
-  readonly body?: { readonly code?: unknown; readonly message?: unknown } | undefined;
+  readonly body?: { readonly code?: unknown; readonly message?: unknown };
 }
 
 const isApiError = (error: unknown): error is ApiErrorShape =>

@@ -68,7 +68,7 @@ export class BetterAuthCredentials extends Context.Service<
       input: RequestInput & {
         readonly email: string;
         readonly password: string;
-        readonly rememberMe?: boolean | undefined;
+        readonly rememberMe?: boolean;
       },
     ) => Effect.Effect<CredentialResult, CredentialError>;
     /** Fails with `AuthError` when the instance has no `username()` plugin. */
@@ -76,7 +76,7 @@ export class BetterAuthCredentials extends Context.Service<
       input: RequestInput & {
         readonly username: string;
         readonly password: string;
-        readonly rememberMe?: boolean | undefined;
+        readonly rememberMe?: boolean;
       },
     ) => Effect.Effect<CredentialResult, CredentialError>;
     /** Sign the request's session out; answers the lines that clear the cookies. */

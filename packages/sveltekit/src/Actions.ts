@@ -155,7 +155,7 @@ export interface CredentialRequestOptions<Input, Fields> {
    * handler's credential flows accept; pass `application/json` for an endpoint
    * that takes plain JSON.
    */
-  readonly contentType?: string | undefined;
+  readonly contentType?: string;
   /** The input fields to echo back on failure (never the password). */
   readonly fields: (input: Input) => Fields;
   /**
@@ -165,13 +165,13 @@ export interface CredentialRequestOptions<Input, Fields> {
    * page's, so read the target from the input there (a hidden field, say).
    * Whatever it returns goes through `safeRedirect`.
    */
-  readonly target?: ((input: Input, event: ActionEvent) => string | null) | undefined;
+  readonly target?: (input: Input, event: ActionEvent) => string | null;
   /** The query parameter that carries the post-sign-in target. Default `redirect`. */
-  readonly redirectParam?: string | undefined;
+  readonly redirectParam?: string;
   /** Where to go when the target is missing or unsafe. */
   readonly fallback: string;
   /** Override the message per failure kind. */
-  readonly messages?: Partial<Record<CredentialFailureKind, string>> | undefined;
+  readonly messages?: Partial<Record<CredentialFailureKind, string>>;
   /**
    * The client's address, sent to the auth handler in
    * {@link CredentialRequestOptions.clientAddressHeader}. Default
@@ -180,16 +180,16 @@ export interface CredentialRequestOptions<Input, Fields> {
    * trust that one header, for example
    * `trustedProxy: ClientIP.trustedHeader("x-forwarded-for")`.
    */
-  readonly clientAddress?: ((event: ActionEvent) => string | undefined) | undefined;
+  readonly clientAddress?: (event: ActionEvent) => string | undefined;
   /** The header the client address is sent in. Default `x-forwarded-for`. */
-  readonly clientAddressHeader?: string | undefined;
+  readonly clientAddressHeader?: string;
   /**
    * Forward the browser's own `x-forwarded-for` and `cf-connecting-ip` too.
    * Default `false`: off Cloudflare the browser chose their values. Turn it on
    * only when an edge in front of the app sets them; the client address
    * header still carries `clientAddress`'s answer.
    */
-  readonly forwardClientIpHeaders?: boolean | undefined;
+  readonly forwardClientIpHeaders?: boolean;
 }
 
 /**

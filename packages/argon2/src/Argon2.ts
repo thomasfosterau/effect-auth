@@ -44,7 +44,7 @@ const randomSalt = (): Uint8Array => globalThis.crypto.getRandomValues(new Uint8
 const invalidHash = (detail: string): Effect.Effect<never, HashingError> =>
   Effect.fail(new HashingError({ message: `Invalid Argon2 hash: ${detail}` }));
 
-const parsePositiveInt = (value: string | undefined): number => {
+const parsePositiveInt = (value?: string): number => {
   if (value === undefined || !/^\d+$/.test(value)) return Number.NaN;
   const parsed = Number.parseInt(value, 10);
   return parsed > 0 ? parsed : Number.NaN;

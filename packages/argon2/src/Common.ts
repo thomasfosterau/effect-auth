@@ -43,21 +43,21 @@ export interface Argon2VerifyLimits {
  */
 export interface Argon2Options {
   /** Memory cost in KiB. Default `19456` (19 MiB). */
-  readonly memoryCost?: number | undefined;
+  readonly memoryCost?: number;
   /** Time cost (iterations). Default `2`. */
-  readonly timeCost?: number | undefined;
+  readonly timeCost?: number;
   /** Degree of parallelism (lanes). Default `1`. */
-  readonly parallelism?: number | undefined;
+  readonly parallelism?: number;
   /**
    * Refuse to verify a stored hash whose `m` exceeds this many KiB. Default
    * `131072` (128 MiB); on Cloudflare Workers `65536` (64 MiB, half the
    * isolate), or `memoryCost` when that is higher.
    */
-  readonly maxMemoryKiB?: number | undefined;
+  readonly maxMemoryKiB?: number;
   /** Refuse to verify a stored hash whose `t` exceeds this. Default `10`. */
-  readonly maxIterations?: number | undefined;
+  readonly maxIterations?: number;
   /** Refuse to verify a stored hash whose `p` exceeds this. Default `8`. */
-  readonly maxParallelism?: number | undefined;
+  readonly maxParallelism?: number;
 }
 
 /** A fully-resolved set of Argon2id cost parameters — an {@link Argon2Options} with no holes. */

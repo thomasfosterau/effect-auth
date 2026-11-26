@@ -67,7 +67,7 @@ export interface SingleTableUserColumnNames<TTable extends Table> {
    * mapped, {@link Auth.Identifier.verifiedAt} is stored and reported; when not
    * mapped it is neither stored nor reported.
    */
-  readonly emailVerifiedAt?: ColumnKey<TTable, Date | null> | undefined;
+  readonly emailVerifiedAt?: ColumnKey<TTable, Date | null>;
   /** The user's creation time, which the email identifier reports as its own. */
   readonly createdAt: ColumnKey<TTable, Date>;
 }
