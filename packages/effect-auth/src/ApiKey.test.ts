@@ -733,9 +733,8 @@ describe("ApiKeyService", () => {
     // interleave between the read and the spend.
     const slowReads: typeof ApiKeyStore.Service = {
       ...apiKeyStore,
-      get: (id) => Effect.flatMap(apiKeyStore.get(id), (key) => Effect.as(Effect.yieldNow, key)),
-      getByHash: (hash) =>
-        Effect.flatMap(apiKeyStore.getByHash(hash), (key) => Effect.as(Effect.yieldNow, key)),
+      get: (id) => Effect.tap(apiKeyStore.get(id), () => Effect.yieldNow),
+      getByHash: (hash) => Effect.tap(apiKeyStore.getByHash(hash), () => Effect.yieldNow),
     };
     /** A service over `store`, the rest of its context the suite's own. */
     const serviceOver = (store: typeof ApiKeyStore.Service) =>

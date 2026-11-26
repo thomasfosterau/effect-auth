@@ -15,8 +15,7 @@ const slowReads = (): typeof PhoneOtpStore.Service => {
   const inner = memoryPhoneOtpStore();
   return {
     ...inner,
-    get: (number, kind) =>
-      Effect.flatMap(inner.get(number, kind), (r) => Effect.as(Effect.yieldNow, r)),
+    get: (number, kind) => Effect.tap(inner.get(number, kind), () => Effect.yieldNow),
   };
 };
 

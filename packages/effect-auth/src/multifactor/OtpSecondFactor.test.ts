@@ -298,7 +298,7 @@ describe("OtpSecondFactorService", () => {
     // challenge before any of them is counted.
     const slowStore: typeof OtpSecondFactorStore.Service = {
       ...otpStore,
-      get: (token) => Effect.flatMap(otpStore.get(token), (r) => Effect.as(Effect.yieldNow, r)),
+      get: (token) => Effect.tap(otpStore.get(token), () => Effect.yieldNow),
     };
 
     const outcomes = await Effect.runPromise(

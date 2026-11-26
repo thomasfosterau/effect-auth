@@ -641,8 +641,7 @@ describe("MultiFactorService", () => {
     // burst reads the challenge before any of them is counted.
     const slowPending: typeof PendingMultiFactorStore.Service = {
       ...pendingMultiFactorStore,
-      get: (token) =>
-        Effect.flatMap(pendingMultiFactorStore.get(token), (r) => Effect.as(Effect.yieldNow, r)),
+      get: (token) => Effect.tap(pendingMultiFactorStore.get(token), () => Effect.yieldNow),
     };
 
     const outcomes = await Effect.runPromise(
