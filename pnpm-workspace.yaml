@@ -29,7 +29,7 @@ catalog:
   "@types/pg": ^8.15.0
   "@types/semver": ^7.8.0
   # Must equal the vitest vite-plus bundles.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.2
   "@alchemy.run/cloudflare": 2.0.0-beta.87
   alchemy: 2.0.0-beta.87
   # The release the backend package is tested against; its peer floor is `catalogs.better-auth-peers`.
@@ -50,9 +50,9 @@ catalog:
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` equal what vite-plus depends on (`npm view vite-plus@<v>
   # dependencies`), not vite-plus itself; the devcontainer image tag follows vite-plus.
-  vite-plus: 1.7.0
+  vite-plus: 1.8.0
   vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
-  vitest: 5.1.1
+  vitest: 5.1.2
   workerd: 1.20261125.1
   xml-crypto: ^6.4.0
 
