@@ -81,6 +81,7 @@ const invitationKeys = {
   inviterId: true,
   expiresAt: true,
   createdAt: true,
+  sentAt: false,
 } satisfies Record<keyof Invitation, boolean>;
 
 const domainKeys = {
@@ -183,6 +184,7 @@ const ssoProviderKeys = {
   jwksEndpoint: true,
   scopes: true,
   usePKCE: false,
+  requireEmailVerified: false,
   // SAML.
   entityId: true,
   ssoUrl: true,

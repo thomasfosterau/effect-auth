@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { AuthClientError, createAuthClient } from "../client/Client.ts";
 import { makeCookieJarFetch, makeServerFixture } from "../client/testing/fixture.ts";
+import { provisionedByAttributes } from "../ManagedUser.ts";
 
 const BASE = "http://domains.test";
 const PW = "password-123";
@@ -388,6 +389,20 @@ describe("HTTP domain claims", () => {
     const member = await signUp(server, browser, "member@acme.test");
     const memberSession = await member.client.getSession();
     assert(memberSession !== null, "the member is signed in");
+    // Stamped as provisioned by the organization: a user it manages.
+    Option.map(MutableHashMap.get(server.usersById, memberSession.user.id), (user) =>
+      MutableHashMap.set(server.usersById, user.id, {
+        ...user,
+        attributes: {
+          ...user.attributes,
+          ...provisionedByAttributes({
+            kind: "scim",
+            connectionId: "scim-1",
+            organizationId: org.id,
+          }),
+        },
+      }),
+    );
     await owner.client.organization.addMember(org.id, {
       userId: memberSession.user.id,
       role: "member",

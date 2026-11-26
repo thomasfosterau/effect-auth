@@ -173,6 +173,8 @@ await client.organization.updateRole(role.id, { permissions: ["team:create"] });
 
 // The role members added without one receive (owner-only).
 await client.organization.setDefaultRole(org.id, { role: "member" });
+// Direct adds take only users the organization manages (provisioned by its
+// SSO or SCIM connection, or on its verified domains); invite anyone else.
 await client.organization.addMember(org.id, { userId }); // ...gets that role
 
 // Suspend a membership instead of deleting it. The row and the member's role

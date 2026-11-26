@@ -49,7 +49,13 @@ import {
   type SamlAssertion,
   type SamlAuthnRequestInput,
 } from "./Saml.ts";
-import { type Member, OrganizationStore } from "./Organization.ts";
+import {
+  memoryOrganizationDomainStore,
+  type Member,
+  type OrganizationDomain,
+  OrganizationDomainStore,
+  OrganizationStore,
+} from "./Organization.ts";
 import type * as Types from "./Types.ts";
 import { runPromiseHttp } from "./testing/HttpClient.ts";
 
@@ -497,6 +503,22 @@ const cases: ReadonlyArray<Case> = [
           update: (user) => Effect.die(`unexpected update of ${user.id}`),
         }),
         Layer.succeed(OrganizationStore)(orgs),
+        // org-1 holds acme.test, so SCIM may claim the address.
+        Layer.succeed(OrganizationDomainStore)(
+          memoryOrganizationDomainStore(
+            MutableHashMap.make<[readonly [string, OrganizationDomain]]>([
+              "dom-1",
+              {
+                id: "dom-1",
+                organizationId: "org-1",
+                domain: "acme.test",
+                verificationState: "verified",
+                verificationStrategy: "manual",
+                createdAt: 0,
+              },
+            ]),
+          ),
+        ),
       );
       return Effect.runPromise(
         Effect.gen(function* () {

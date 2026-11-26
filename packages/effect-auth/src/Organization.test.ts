@@ -8,6 +8,7 @@ import {
   Exit,
   Layer,
   MutableHashMap,
+  MutableHashSet,
   Order,
   Result,
 } from "effect";
@@ -40,10 +41,12 @@ import {
 } from "./Organization.ts";
 import * as OrganizationModule from "./Organization.ts";
 import * as Testing from "./testing/index.ts";
-import type { AuthError } from "./Errors.ts";
+import type { AuthError, ResendTooSoonError } from "./Errors.ts";
 import { EmailPasswordStore } from "./email/EmailPassword.ts";
 import { SessionService } from "./SessionService.ts";
 import { type ApiKey, ApiKeyStore } from "./ApiKey.ts";
+import { provisionedByAttributes } from "./ManagedUser.ts";
+import { UserStore } from "./UserStore.ts";
 
 const organizations = MutableHashMap.empty<string, Organization>();
 const members = MutableHashMap.empty<string, Member>();
@@ -354,6 +357,47 @@ const proofLayer = () =>
     Testing.sessionServiceLayer({ users: accountUsers }),
   );
 
+/**
+ * The organization each user is stamped as provisioned by, which makes them
+ * a managed user `addMember` accepts. {@link runServiceIn}'s service stamps
+ * every user it adds, except the {@link unmanagedUsers}; ids in
+ * {@link unknownUsers} have no user row at all.
+ */
+const managedBy = MutableHashMap.empty<string, string>();
+const unmanagedUsers = MutableHashSet.empty<string>();
+const unknownUsers = MutableHashSet.empty<string>();
+
+const userStore: typeof UserStore.Service = {
+  get: (userId) =>
+    Effect.sync(() =>
+      MutableHashSet.has(unknownUsers, userId)
+        ? null
+        : Testing.fixtureUser({
+            id: userId,
+            attributes: Option.match(MutableHashMap.get(managedBy, userId), {
+              onNone: () => ({}),
+              onSome: (organizationId) =>
+                provisionedByAttributes({ kind: "scim", connectionId: "scim-1", organizationId }),
+            }),
+          }),
+    ),
+};
+
+/** `service` with `addMember` stamping the added user as managed first. */
+const stampingAddMember = (
+  service: typeof OrganizationService.Service,
+): typeof OrganizationService.Service => ({
+  ...service,
+  addMember: (actorId, organizationId, userId, role) =>
+    Effect.andThen(
+      Effect.sync(() => {
+        if (!MutableHashSet.has(unmanagedUsers, userId))
+          MutableHashMap.set(managedBy, userId, organizationId);
+      }),
+      service.addMember(actorId, organizationId, userId, role),
+    ),
+});
+
 /** What every service under test is built over, besides the stores in `context`. */
 type ProofServices = EmailPasswordStore | ApiKeyStore | SessionService;
 
@@ -379,8 +423,16 @@ const runServiceIn = <A, E>(
         sendInvitationEmail: (delivery) => Effect.sync(() => void sentInvitations.push(delivery)),
         ...config,
       });
-      return yield* program(service);
-    }).pipe(Effect.provide(Layer.merge(Layer.succeedContext(context), proofLayer()))),
+      return yield* program(stampingAddMember(service));
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeedContext(context),
+          proofLayer(),
+          Layer.succeed(UserStore, userStore),
+        ),
+      ),
+    ),
   );
 
 const runService = <A, E>(
@@ -423,13 +475,16 @@ const resetStores = (): void => {
   MutableHashMap.clear(identifierRecords);
   MutableHashMap.clear(userTable.passwordHashes);
   sentInvitations.length = 0;
+  MutableHashMap.clear(managedBy);
+  MutableHashSet.clear(unmanagedUsers);
+  MutableHashSet.clear(unknownUsers);
 };
 
 /** An organization operation on a record named by id, as `actorId`. */
 type ByIdOperation<A> = (
   actorId: string,
   id: string,
-) => Effect.Effect<A, OrganizationModule.OrganizationError | AuthError>;
+) => Effect.Effect<A, OrganizationModule.OrganizationError | ResendTooSoonError | AuthError>;
 
 /**
  * The refusals of `operation` for an unknown id (as `owner-1`) and for each of
@@ -451,7 +506,7 @@ const refusals = <A>(
   );
 
 /** An error's tag and message: its own equality ignores the message. */
-const errorShape = (error: OrganizationModule.OrganizationError | AuthError) => ({
+const errorShape = (error: { readonly _tag: string; readonly message: string }) => ({
   tag: error._tag,
   message: error.message,
 });
@@ -459,8 +514,10 @@ const errorShape = (error: OrganizationModule.OrganizationError | AuthError) => 
 /** Every refusal is the `OrganizationError` carrying `message`. */
 const expectAlike = (
   refused: {
-    readonly unknown: OrganizationModule.OrganizationError | AuthError;
-    readonly others: ReadonlyArray<OrganizationModule.OrganizationError | AuthError>;
+    readonly unknown: OrganizationModule.OrganizationError | ResendTooSoonError | AuthError;
+    readonly others: ReadonlyArray<
+      OrganizationModule.OrganizationError | ResendTooSoonError | AuthError
+    >;
   },
   message: string,
 ) => {
@@ -688,7 +745,8 @@ describe("OrganizationService", () => {
     expect(sentInvitations[0].organization.slug).toBe("acme");
     // Only the token's digest is stored.
     expect(result.invitation.tokenHash).toBe(sha256Hex(sentInvitations[0].token));
-    expect(R.values(result.invitation)).not.toContain(sentInvitations[0].token);
+    const { sentAt, ...stored } = result.invitation;
+    expect([...R.values(stored), sentAt]).not.toContain(sentInvitations[0].token);
     expect(result.duplicate._tag).toBe("Failure");
     expect(result.userInvitations).toHaveLength(1);
     expect(result.member.userId).toBe("invitee-user");
@@ -895,7 +953,7 @@ describe("OrganizationService", () => {
   });
 
   it("refuses an unknown team or invitation id exactly as a stranger and a member without the permission", async () => {
-    const result = await runService({}, (service) =>
+    const result = await runService({ invitationResendCooldown: 0 }, (service) =>
       Effect.gen(function* () {
         const organization = yield* service.createOrganization("owner-1", {
           name: "Acme",
@@ -1735,7 +1793,11 @@ const withAdmin = <A, E>(
 
 /** The `OrganizationError` message `effect` was refused with. */
 const refusal = <A, R>(
-  effect: Effect.Effect<A, OrganizationModule.OrganizationError | AuthError, R>,
+  effect: Effect.Effect<
+    A,
+    OrganizationModule.OrganizationError | ResendTooSoonError | AuthError,
+    R
+  >,
 ) =>
   Effect.map(Effect.flip(effect), (error) => {
     expect(error._tag).toBe("OrganizationError");
@@ -2299,41 +2361,43 @@ describe("OrganizationService - invitations", () => {
 
   it("resends a pending invitation on the same row, with a fresh token and expiry", async () => {
     seedEmail("invitee-user", "new@acme.test");
-    const result = await runService({ invitationExpiresIn: 60_000 }, (service) =>
-      Effect.gen(function* () {
-        const organization = yield* service.createOrganization("owner-1", {
-          name: "Acme",
-          slug: "acme",
-        });
-        const invitation = yield* service.inviteMember("owner-1", organization.id, {
-          email: "new@acme.test",
-          role: "member",
-        });
+    const result = await runService(
+      { invitationExpiresIn: 60_000, invitationResendCooldown: 0 },
+      (service) =>
+        Effect.gen(function* () {
+          const organization = yield* service.createOrganization("owner-1", {
+            name: "Acme",
+            slug: "acme",
+          });
+          const invitation = yield* service.inviteMember("owner-1", organization.id, {
+            email: "new@acme.test",
+            role: "member",
+          });
 
-        // Age the row: a pending-but-expired invitation is exactly what a
-        // resend is for.
-        MutableHashMap.set(invitations, invitation.id, {
-          ...invitation,
-          expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
-        });
+          // Age the row: a pending-but-expired invitation is exactly what a
+          // resend is for.
+          MutableHashMap.set(invitations, invitation.id, {
+            ...invitation,
+            expiresAt: (yield* Clock.currentTimeMillis) - 1_000,
+          });
 
-        const firstToken = tokenFor(invitation.id);
-        const resent = yield* service.resendInvitation("owner-1", invitation.id);
-        const listed = yield* service.listInvitations("owner-1", organization.id);
-        // Only the digest is stored, so the resend mints a new token: the
-        // link delivered first stops working.
-        const staleLink = yield* Effect.result(
-          service.acceptInvitation("invitee-user", {
-            invitationId: invitation.id,
-            token: firstToken,
-          }),
-        );
-        const { member: accepted } = yield* service.acceptInvitation(
-          "invitee-user",
-          answer(invitation),
-        );
-        return { invitation, resent, listed, firstToken, staleLink, accepted };
-      }),
+          const firstToken = tokenFor(invitation.id);
+          const resent = yield* service.resendInvitation("owner-1", invitation.id);
+          const listed = yield* service.listInvitations("owner-1", organization.id);
+          // Only the digest is stored, so the resend mints a new token: the
+          // link delivered first stops working.
+          const staleLink = yield* Effect.result(
+            service.acceptInvitation("invitee-user", {
+              invitationId: invitation.id,
+              token: firstToken,
+            }),
+          );
+          const { member: accepted } = yield* service.acceptInvitation(
+            "invitee-user",
+            answer(invitation),
+          );
+          return { invitation, resent, listed, firstToken, staleLink, accepted };
+        }),
     );
 
     expect(result.resent.id).toBe(result.invitation.id);
@@ -3382,5 +3446,258 @@ describe("OrganizationService - role names that are prototype members", () => {
 
     expect(failureTag(result.asDefault)).toBe("OrganizationError");
     expect(failureTag(result.asAssigned)).toBe("OrganizationError");
+  });
+});
+
+describe("OrganizationService membership and invitation limits", () => {
+  beforeEach(resetStores);
+
+  /** An organization owned by `owner-1`, with `admin-1` as an admin. */
+  const acme = (service: typeof OrganizationService.Service) =>
+    Effect.gen(function* () {
+      const organization = yield* service.createOrganization("owner-1", {
+        name: "Acme",
+        slug: "acme",
+      });
+      yield* service.addMember("owner-1", organization.id, "admin-1", "admin");
+      return organization;
+    });
+
+  /** Make a sent invitation's latest email look `ms` older than it is. */
+  const ageSend = (invitationId: string, ms: number) =>
+    Effect.sync(() =>
+      Option.map(MutableHashMap.get(invitations, invitationId), (invitation) =>
+        MutableHashMap.set(invitations, invitationId, {
+          ...invitation,
+          sentAt: (invitation.sentAt ?? invitation.createdAt) - ms,
+        }),
+      ),
+    );
+
+  it("adds only a user the organization manages, refusing an unknown user alike", async () => {
+    MutableHashSet.add(unmanagedUsers, "outsider-1");
+    MutableHashSet.add(unmanagedUsers, "domain-user");
+    MutableHashSet.add(unknownUsers, "ghost-1");
+    // Stamped by another organization: managed, but not by this one.
+    MutableHashMap.set(managedBy, "foreign-1", "other-org");
+    MutableHashSet.add(unmanagedUsers, "foreign-1");
+    seedEmail("domain-user", "dana@acme.test", true);
+    const refusal =
+      "Only a user this organization manages can be added directly; invite anyone else";
+
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* acme(service);
+        const refused = yield* Effect.forEach(
+          ["outsider-1", "ghost-1", "foreign-1", "domain-user"],
+          (userId) => Effect.flip(service.addMember("owner-1", organization.id, userId)),
+          { concurrency: 1 },
+        );
+        // A verified domain claim makes the address's holder managed.
+        MutableHashMap.set(domainRecords, "claim-1", {
+          id: "claim-1",
+          organizationId: organization.id,
+          domain: "acme.test",
+          verificationState: "verified",
+          verificationStrategy: "dns",
+          createdAt: 0,
+          verifiedAt: 0,
+        });
+        const byDomain = yield* service.addMember("owner-1", organization.id, "domain-user");
+        const stamped = yield* service.addMember("owner-1", organization.id, "managed-1");
+        return { refused, byDomain, stamped };
+      }),
+    );
+
+    expect(result.refused.map(errorShape)).toEqual(
+      result.refused.map(() => ({ tag: "OrganizationError", message: refusal })),
+    );
+    expect(result.byDomain.userId).toBe("domain-user");
+    expect(result.stamped.userId).toBe("managed-1");
+  });
+
+  it("lets a member leave on their own, teams included, but never the last owner", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* acme(service);
+        yield* service.addMember("owner-1", organization.id, "member-1", "member");
+        const team = yield* service.createTeam("owner-1", organization.id, { name: "Core" });
+        yield* service.addTeamMember("owner-1", team.id, "member-1");
+
+        // `member` holds no `member:delete`, and needs none to leave.
+        yield* service.leaveOrganization("member-1", organization.id);
+        const teamsAfter = yield* service.listTeamsForMember(
+          "owner-1",
+          organization.id,
+          "member-1",
+        );
+        const leftAgain = yield* Effect.flip(
+          service.leaveOrganization("member-1", organization.id),
+        );
+        const stranger = yield* Effect.flip(
+          service.leaveOrganization("stranger-1", organization.id),
+        );
+
+        const lastOwner = yield* Effect.flip(service.leaveOrganization("owner-1", organization.id));
+        yield* service.updateMemberRole("owner-1", organization.id, "admin-1", "owner");
+        yield* service.leaveOrganization("owner-1", organization.id);
+        const full = yield* service.getFullOrganization("admin-1", organization.id);
+        return { teamsAfter, leftAgain, stranger, lastOwner, full };
+      }),
+    );
+
+    expect(result.teamsAfter).toEqual([]);
+    expect(errorShape(result.leftAgain).message).toBe("You are not a member of this organization");
+    expect(errorShape(result.stranger).message).toBe("You are not a member of this organization");
+    expect(errorShape(result.lastOwner).message).toMatch(/last owner .* cannot leave/);
+    expect(result.full.members.map((member) => member.userId)).toEqual(["admin-1"]);
+  });
+
+  it("caps pending invitations per organization, a revived one included", async () => {
+    const result = await runService(
+      { pendingInvitationLimit: 2, invitationResendCooldown: 0 },
+      (service) =>
+        Effect.gen(function* () {
+          const organization = yield* acme(service);
+          const invite = (email: string) =>
+            service.inviteMember("owner-1", organization.id, { email, role: "member" });
+          const first = yield* invite("a@acme.test");
+          yield* invite("b@acme.test");
+          const third = yield* Effect.flip(invite("c@acme.test"));
+
+          // An expired invitation is no longer pending, so it frees a slot...
+          MutableHashMap.set(invitations, first.id, { ...first, expiresAt: 0 });
+          yield* invite("c@acme.test");
+          // ...and reviving it takes one back.
+          const revived = yield* Effect.flip(service.resendInvitation("owner-1", first.id));
+          return { third, revived };
+        }),
+    );
+
+    const capped = "Organization has reached its pending invitation limit";
+    expect(errorShape(result.third).message).toBe(capped);
+    expect(errorShape(result.revived).message).toBe(capped);
+  });
+
+  it("waits out the resend cooldown per address, across a cancel and re-invite", async () => {
+    const result = await runService({ invitationResendCooldown: 60_000 }, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* acme(service);
+        const other = yield* service.createOrganization("owner-2", {
+          name: "Other",
+          slug: "other",
+        });
+        const invitation = yield* service.inviteMember("owner-1", organization.id, {
+          email: "new@acme.test",
+          role: "member",
+        });
+        const resend = yield* Effect.flip(service.resendInvitation("owner-1", invitation.id));
+        yield* service.cancelInvitation("owner-1", invitation.id);
+        const reinvite = yield* Effect.flip(
+          service.inviteMember("owner-1", organization.id, {
+            email: "new@acme.test",
+            role: "member",
+          }),
+        );
+        // Another organization's cooldown is its own.
+        yield* service.inviteMember("owner-2", other.id, {
+          email: "new@acme.test",
+          role: "member",
+        });
+
+        yield* ageSend(invitation.id, 60_000);
+        const later = yield* service.inviteMember("owner-1", organization.id, {
+          email: "new@acme.test",
+          role: "member",
+        });
+        return { resend, reinvite, later };
+      }),
+    );
+
+    expect(result.resend._tag).toBe("ResendTooSoonError");
+    expect(result.reinvite._tag).toBe("ResendTooSoonError");
+    expect(result.later.status).toBe("pending");
+    expect(sentInvitations).toHaveLength(3);
+  });
+
+  it("re-checks the inviter's permission when the invitation is accepted", async () => {
+    seedEmail("invitee-user", "new@acme.test");
+    const result = await runService({ invitationResendCooldown: 0 }, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* acme(service);
+        const fromAdmin = yield* service.inviteMember("admin-1", organization.id, {
+          email: "new@acme.test",
+          role: "admin",
+        });
+        // Demoted to `member`, the inviter no longer holds `invitation:create`.
+        yield* service.updateMemberRole("owner-1", organization.id, "admin-1", "member");
+        const demoted = yield* Effect.flip(
+          service.acceptInvitation("invitee-user", answer(fromAdmin)),
+        );
+        // Removed altogether, likewise.
+        yield* service.removeMember("owner-1", organization.id, "admin-1");
+        const removed = yield* Effect.flip(
+          service.acceptInvitation("invitee-user", answer(fromAdmin)),
+        );
+        // A resend makes the owner the inviter, so it stands again.
+        const resent = yield* service.resendInvitation("owner-1", fromAdmin.id);
+        const { member } = yield* service.acceptInvitation("invitee-user", answer(fromAdmin));
+        return { demoted, removed, resent, member };
+      }),
+    );
+
+    const stale = "This invitation is no longer valid; ask for a new one";
+    expect(errorShape(result.demoted).message).toBe(stale);
+    expect(errorShape(result.removed).message).toBe(stale);
+    expect(result.resent.inviterId).toBe("owner-1");
+    expect(result.member.role).toBe("admin");
+  });
+
+  it("refuses a resend by a member who could not grant the invitation's role", async () => {
+    const result = await runService({ invitationResendCooldown: 0 }, (service) =>
+      Effect.gen(function* () {
+        const organization = yield* acme(service);
+        const invitation = yield* service.inviteMember("owner-1", organization.id, {
+          email: "new@acme.test",
+          role: "owner",
+        });
+        return yield* Effect.flip(service.resendInvitation("admin-1", invitation.id));
+      }),
+    );
+
+    expect(errorShape(result).message).toMatch(/'owner' role/);
+  });
+
+  it("counts only owned and accepted organizations toward the organization limit", async () => {
+    seedEmail("invitee-user", "new@acme.test", true);
+    const result = await runService({ organizationLimit: 2 }, (service) =>
+      Effect.gen(function* () {
+        // Three organizations add the user directly: none of them counts.
+        yield* Effect.forEach(
+          ["a", "b", "c"],
+          (slug) =>
+            Effect.flatMap(
+              service.createOrganization(`owner-${slug}`, { name: slug, slug }),
+              (organization) =>
+                service.addMember(`owner-${slug}`, organization.id, "invitee-user", "member"),
+            ),
+          { concurrency: 1 },
+        );
+        yield* service.createOrganization("invitee-user", { name: "Own", slug: "own" });
+
+        // An accepted invitation does.
+        const inviting = yield* service.createOrganization("owner-d", { name: "d", slug: "d" });
+        const invitation = yield* service.inviteMember("owner-d", inviting.id, {
+          email: "new@acme.test",
+          role: "member",
+        });
+        yield* service.acceptInvitation("invitee-user", { invitationId: invitation.id });
+        return yield* Effect.flip(
+          service.createOrganization("invitee-user", { name: "Two", slug: "two" }),
+        );
+      }),
+    );
+
+    expect(errorShape(result).message).toBe("You have reached the maximum of 2 organizations");
   });
 });

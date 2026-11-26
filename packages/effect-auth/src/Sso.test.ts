@@ -48,6 +48,7 @@ import { oauthStateStoreKV } from "./KeyValueStores.ts";
 import { KeyValueStore } from "effect/persistence";
 import { SsoProviderStore, SsoError, SsoService } from "./Sso.ts";
 import * as Sso from "./Sso.ts";
+import * as ManagedUser from "./ManagedUser.ts";
 import {
   memorySamlReplayStore,
   SamlReplayStore,
@@ -141,7 +142,11 @@ const kvStateStore = (): typeof OAuthStateStore.Service =>
   Effect.runSync(oauthStateStoreKV.pipe(Effect.provide(KeyValueStore.layerMemory)));
 
 const makeStores = (
-  overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
+  overrides: {
+    readonly domainStore?: typeof OrganizationDomainStore.Service;
+    /** Seed org-1's verified acme.test claim. Default `true`. */
+    readonly claimAcme?: boolean;
+  } = {},
 ) => {
   const providers = MutableHashMap.empty<string, SsoProvider>();
   const users = MutableHashMap.empty<string, Types.User>();
@@ -180,7 +185,7 @@ const makeStores = (
           ...(input.image !== undefined && { image: input.image }),
           createdAt: now,
           updatedAt: now,
-          attributes: {},
+          attributes: input.attributes ?? {},
         };
         MutableHashMap.set(users, user.id, user);
         return { user, created: true };
@@ -289,6 +294,7 @@ const makeStores = (
           Layer.succeed(OrganizationDomainStore)(domainStore),
           Layer.succeed(SessionService)(sessionManager),
           Layer.succeed(EmailPasswordStore)(emailPasswords),
+          Layer.succeed(UserStore)(coreUserStore),
         ),
       ),
     ),
@@ -333,6 +339,10 @@ const makeStores = (
     MutableHashMap.set(domainRecords, record.id, record);
     return record;
   };
+
+  // The ACME connections' organization holds acme.test, so they manage its
+  // addresses; the managed-user cases below claim nothing else.
+  if (overrides.claimAcme !== false) seedDomain("org-1", "acme.test");
 
   return {
     layer,
@@ -442,7 +452,8 @@ describe("SsoService", () => {
     overrides: { readonly domainStore?: typeof OrganizationDomainStore.Service } = {},
   ) => {
     const { organizationId: _connectionOrganization, ...withoutOrganization } = ACME;
-    const stores = makeStores(overrides);
+    // An organization-less connection is bound to its own domain, so no claim.
+    const stores = makeStores({ ...overrides, claimAcme: false });
     const idpRoutes = {
       "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
       "https://idp.acme.test/userinfo": {
@@ -1930,5 +1941,195 @@ describe("SSO callback state is single-use", () => {
     expect(setCookie).toContain("_sso_state=;");
     expect(setCookie).not.toMatch(/(^|, )[a-z_]+_session=/);
     expect(challenged).toHaveLength(1);
+  });
+});
+
+const userinfo = (claims: Record<string, Schema.Json>) => ({
+  "https://idp.acme.test/token": { access_token: "at", token_type: "bearer" },
+  "https://idp.acme.test/userinfo": { sub: "idp-user-1", ...claims },
+});
+
+/** Seed a user holding `email`, unverified, with a password. */
+const seedUser = async (
+  stores: ReturnType<typeof makeStores>,
+  id: string,
+  email: string,
+  attributes: Types.Attributes = {},
+) => {
+  const now = DateTime.toDateUtc(DateTime.nowUnsafe());
+  MutableHashMap.set(stores.users, id, { id, createdAt: now, updatedAt: now, attributes });
+  MutableHashMap.set(stores.passwordHashes, id, "their-hash");
+  await Effect.runPromise(
+    stores.identifiers.create(makeIdentifier({ userId: id, type: "email", value: email, now })),
+  );
+};
+
+const failureOf = <A, E>(result: Result.Result<A, E>): E => {
+  assert(Result.isFailure(result));
+  return result.failure;
+};
+
+describe("SSO signs in only managed users", () => {
+  /** Register `provider` and run one OIDC round trip whose profile is `claims`. */
+  const signInAs = async (
+    stores: ReturnType<typeof makeStores>,
+    claims: Record<string, Schema.Json>,
+    provider: Sso.RegisterProviderInput = ACME,
+  ) => {
+    const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(stores.layer)));
+    await Effect.runPromise(
+      sso.registerProvider("admin", provider).pipe(Effect.provide(stores.layer)),
+    );
+    return withFetch(userinfo(claims), () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const start = yield* sso.signIn({ email: "worker@acme.test" });
+          return yield* Effect.result(sso.handleCallback(start.state, "code"));
+        }).pipe(Effect.provide(stores.layer)),
+      ),
+    );
+  };
+
+  it("refuses an asserted address off the organization's verified domains, touching nothing", async () => {
+    const stores = makeStores();
+    await seedUser(stores, "victim", "ceo@b.test");
+
+    const result = await signInAs(stores, { email: "ceo@b.test", email_verified: true });
+
+    expect(failureOf(result).message).toMatch(/does not manage/);
+    // The victim's unverified address was not proved: password and sessions stand.
+    expect(MutableHashMap.get(stores.passwordHashes, "victim")).toEqual(Option.some("their-hash"));
+    expect(stores.sessionsCleared).toEqual([]);
+    // Nor was a user created for an unclaimed address.
+    const fresh = await signInAs(makeStores(), { email: "new@b.test", email_verified: true });
+    expect(failureOf(fresh).message).toMatch(/does not manage/);
+  });
+
+  it("refuses an address whose domain claim is still pending", async () => {
+    const stores = makeStores({ claimAcme: false });
+    stores.seedDomain("org-1", "acme.test", "pending");
+
+    const result = await signInAs(stores, { email: "worker@acme.test", email_verified: true });
+
+    expect(failureOf(result).message).toMatch(/does not manage/);
+    expect(MutableHashMap.size(stores.users)).toBe(0);
+  });
+
+  it("refuses another organization's verified domain", async () => {
+    const stores = makeStores();
+    stores.seedDomain("org-2", "b.test");
+
+    const result = await signInAs(stores, { email: "ceo@b.test", email_verified: true });
+
+    expect(failureOf(result).message).toMatch(/does not manage/);
+  });
+
+  it("stamps a user it creates, and signs that user in off the verified domains", async () => {
+    const stores = makeStores();
+    const first = await signInAs(stores, { email: "worker@acme.test", email_verified: true });
+    assert(Result.isSuccess(first));
+    expect(ManagedUser.provisionedBy(first.success.user)).toEqual({
+      kind: "sso",
+      connectionId: first.success.provider.id,
+      organizationId: "org-1",
+    });
+
+    // A user the organization provisioned keeps signing in under an address
+    // it holds outside the claimed domains.
+    await Effect.runPromise(
+      stores.identifiers.create(
+        makeIdentifier({
+          userId: first.success.user.id,
+          type: "email",
+          value: "worker@personal.test",
+          verified: true,
+          now: DateTime.toDateUtc(DateTime.nowUnsafe()),
+        }),
+      ),
+    );
+    const again = await signInAs(stores, { email: "worker@personal.test", email_verified: true });
+    assert(Result.isSuccess(again));
+    expect(again.success.user.id).toBe(first.success.user.id);
+  });
+
+  it("signs in a user another organization provisioned only on this one's domains", async () => {
+    const stores = makeStores();
+    await seedUser(
+      stores,
+      "elsewhere",
+      "worker@b.test",
+      ManagedUser.provisionedByAttributes({
+        kind: "scim",
+        connectionId: "scim-2",
+        organizationId: "org-2",
+      }),
+    );
+
+    const result = await signInAs(stores, { email: "worker@b.test", email_verified: true });
+
+    expect(failureOf(result).message).toMatch(/does not manage/);
+  });
+
+  it("binds a connection without an organization to its own domain and users", async () => {
+    const { organizationId: _organizationId, ...withoutOrganization } = ACME;
+    const stores = makeStores({ claimAcme: false });
+
+    const offDomain = await signInAs(
+      stores,
+      { email: "ceo@b.test", email_verified: true },
+      withoutOrganization,
+    );
+    expect(failureOf(offDomain).message).toMatch(/does not manage/);
+
+    const onDomain = await signInAs(
+      stores,
+      { email: "worker@acme.test", email_verified: true },
+      withoutOrganization,
+    );
+    assert(Result.isSuccess(onDomain));
+    expect(ManagedUser.provisionedBy(onDomain.success.user)).toEqual({
+      kind: "sso",
+      connectionId: onDomain.success.provider.id,
+    });
+  });
+
+  it("requires email_verified to be true unless the connection opts out", async () => {
+    const missing = await signInAs(makeStores(), { email: "worker@acme.test" });
+    expect(failureOf(missing).message).toMatch(/verified email/);
+
+    const optedOut = await signInAs(
+      makeStores(),
+      { email: "worker@acme.test" },
+      { ...ACME, requireEmailVerified: false },
+    );
+    assert(Result.isSuccess(optedOut));
+
+    // Opting out never accepts an explicit `false`.
+    const refused = await signInAs(
+      makeStores(),
+      { email: "worker@acme.test", email_verified: false },
+      { ...ACME, requireEmailVerified: false },
+    );
+    expect(failureOf(refused).message).toMatch(/verified email/);
+  });
+
+  it("refuses a SAML assertion off the organization's verified domains", async () => {
+    const fx = makeSamlFixture();
+    const result = await runPromiseHttp(
+      Effect.gen(function* () {
+        const sso = yield* Sso.make();
+        const provider = yield* sso.registerSamlProvider("admin", ACME_SAML);
+        const start = yield* sso.signIn({ providerId: provider.id });
+        const requestId = fx.requests[fx.requests.length - 1]?.requestId ?? "";
+        return yield* Effect.result(
+          sso.handleSamlCallback(
+            provider.id,
+            samlResponse({ email: "ceo@b.test", inResponseTo: requestId }),
+            start.state,
+          ),
+        );
+      }).pipe(Effect.provide(fx.layer)),
+    );
+    expect(failureOf(result).message).toMatch(/does not manage/);
   });
 });

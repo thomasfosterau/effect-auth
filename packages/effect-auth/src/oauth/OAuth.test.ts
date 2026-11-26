@@ -1429,7 +1429,11 @@ describe("OAuthService linking controls", () => {
         id === user.id
           ? Effect.succeed(user)
           : Effect.fail(new AuthError({ message: "not found" })),
-      createUser: (input) => Effect.succeed({ user: makeUser(input), created: true }),
+      createUser: ({ attributes, ...input }) =>
+        Effect.succeed({
+          user: makeUser({ ...input, ...(attributes !== undefined && { attributes }) }),
+          created: true,
+        }),
       ...(onUpdate && {
         updateUser: (id: string, u: { name?: string; image?: string }) => {
           onUpdate(id, u);
