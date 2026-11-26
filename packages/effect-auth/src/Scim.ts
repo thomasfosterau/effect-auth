@@ -820,10 +820,39 @@ export const make = (
         updatedAt: team.updatedAt,
       }));
 
+    /** A membership's user as a SCIM `User`; none for a stale row whose user is gone. */
+    const memberResource = (member: Member) =>
+      Effect.flatMap(users.get(member.userId), (user) =>
+        user === null
+          ? Effect.succeed(Option.none<ScimUserResource>())
+          : Effect.map(readUserResource(user), Option.some),
+      );
+
+    /**
+     * The organization's user whose `userName` is `userName` (normalized):
+     * the email identifier holding it, then a membership check, so a user of
+     * another organization is not found.
+     */
+    const findByUserName = (organizationId: string, userName: string) =>
+      Effect.gen(function* () {
+        const identifier = yield* lookupIdentifier(identifiers, "email", userName);
+        if (identifier === null) return Option.none<ScimUserResource>();
+        const member = yield* orgs.getMember(organizationId, identifier.userId);
+        if (member === null) return Option.none<ScimUserResource>();
+        const resource = yield* memberResource(member);
+        // The address may be one of the user's other emails, not its userName.
+        return Option.filter(resource, (found) => found.userName.toLowerCase() === userName);
+      });
+
+    /** A list request's 1-based `startIndex` and its `count`, capped at `maxPageSize`. */
+    const pageWindow = (query?: ScimListQuery) => ({
+      startIndex: Math.max(1, Math.trunc(query?.startIndex ?? 1)),
+      count: Math.max(0, Math.min(Math.trunc(query?.count ?? maxPageSize), maxPageSize)),
+    });
+
     /** Slice a filtered, ordered array into a SCIM `ListResponse` page. */
     const paginate = <A>(all: ReadonlyArray<A>, query?: ScimListQuery): ScimListResult<A> => {
-      const startIndex = Math.max(1, Math.trunc(query?.startIndex ?? 1));
-      const count = Math.max(0, Math.min(Math.trunc(query?.count ?? maxPageSize), maxPageSize));
+      const { startIndex, count } = pageWindow(query);
       const resources = all.slice(startIndex - 1, startIndex - 1 + count);
       return {
         totalResults: all.length,
@@ -1304,28 +1333,51 @@ export const make = (
             ? null
             : yield* parseFilter(query.filter, ["userName", "externalId"]);
 
-        const members = yield* orgs.listMembersByOrganization(connection.organizationId);
-        const ordered = Arr.sort(members, byCreatedAt);
+        const organizationId = connection.organizationId;
 
-        const matched = yield* Effect.forEach(
-          ordered,
-          (member) =>
-            Effect.gen(function* () {
-              const user = yield* users.get(member.userId);
-              // A membership row whose user is gone is stale, not an error.
-              if (user === null) return Option.none<ScimUserResource>();
-              const resource = yield* readUserResource(user);
-              if (parsed === null) return Option.some(resource);
-              const matches =
-                parsed.attribute === "userName"
-                  ? resource.userName.toLowerCase() === parsed.value.trim().toLowerCase()
-                  : resource.externalId === parsed.value;
-              return matches ? Option.some(resource) : Option.none<ScimUserResource>();
-            }),
-          { concurrency: 1 },
+        // IdPs send `userName eq` on every sync: one identifier lookup and one
+        // membership check, never a scan of the directory.
+        if (parsed?.attribute === "userName") {
+          const found = yield* findByUserName(organizationId, normalizeEmail(parsed.value));
+          return paginate(Option.toArray(found), query);
+        }
+
+        if (parsed !== null) {
+          const members = Arr.sort(
+            yield* orgs.listMembersByOrganization(organizationId),
+            byCreatedAt,
+          );
+          const matched = yield* Effect.forEach(
+            members,
+            (member) =>
+              Effect.map(memberResource(member), (resource) =>
+                Option.filter(resource, ({ externalId }) => externalId === parsed.value),
+              ),
+            { concurrency: 1 },
+          );
+          return paginate(Arr.getSomes(matched), query);
+        }
+
+        // Unfiltered: read one page of memberships, and only that page's users.
+        const { startIndex, count } = pageWindow(query);
+        const page = { offset: startIndex - 1, limit: count };
+        const totalResults = yield* orgs.countMembersByOrganization(organizationId);
+        const members =
+          count === 0
+            ? []
+            : orgs.listMembersByOrganizationPage !== undefined
+              ? yield* orgs.listMembersByOrganizationPage(organizationId, page)
+              : Arr.take(
+                  Arr.drop(
+                    Arr.sort(yield* orgs.listMembersByOrganization(organizationId), byCreatedAt),
+                    page.offset,
+                  ),
+                  page.limit,
+                );
+        const resources = Arr.getSomes(
+          yield* Effect.forEach(Arr.take(members, count), memberResource, { concurrency: 1 }),
         );
-
-        return paginate(Arr.getSomes(matched), query);
+        return { totalResults, startIndex, itemsPerPage: resources.length, resources };
       }),
 
       replaceUser: Effect.fn("ScimService.replaceUser")(function* (

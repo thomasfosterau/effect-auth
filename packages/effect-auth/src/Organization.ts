@@ -515,6 +515,18 @@ export class OrganizationStore extends Context.Service<
     readonly countMembersByOrganization: (
       organizationId: string,
     ) => Effect.Effect<number, Errors.AuthError>;
+    /**
+     * Optional: one page of the organization's memberships, oldest first
+     * (`createdAt`, then `id`), skipping `offset` and returning at most
+     * `limit`. SCIM's `GET /Users` pages through it, so a sync reads one page
+     * of users rather than the whole directory; push the `ORDER BY … LIMIT …
+     * OFFSET …` into the database. Absent, SCIM lists every membership and
+     * slices the page out of it.
+     */
+    readonly listMembersByOrganizationPage?: (
+      organizationId: string,
+      page: { readonly offset: number; readonly limit: number },
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
 
     readonly createInvitation: (
       invitation: Invitation,

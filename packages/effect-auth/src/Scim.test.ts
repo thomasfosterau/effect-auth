@@ -54,8 +54,16 @@ const ORG_B = "org-b";
  * members and teams — and dies loudly on the rest, so a test that accidentally
  * exercises an unmapped path fails instead of quietly succeeding.
  */
-const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } = {}) => {
+const makeStores = (
+  options: {
+    readonly oneEmailPerUser?: boolean | undefined;
+    /** Give the organization store `listMembersByOrganizationPage`. */
+    readonly pagedMembers?: boolean | undefined;
+  } = {},
+) => {
   const usersById = MutableHashMap.empty<string, Types.User>();
+  // How often SCIM read a user row and listed a whole organization.
+  const reads = { users: 0, fullMemberLists: 0 };
   const identifierRecords = MutableHashMap.empty<string, Identifier>();
   const memory = memoryIdentifierStore(identifierRecords);
   // `oneEmailPerUser` refuses a user's second address as a single-table store
@@ -103,7 +111,11 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
         MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId) =>
+      Effect.sync(() => {
+        reads.users++;
+        return Option.getOrNull(MutableHashMap.get(usersById, userId));
+      }),
     update: (user) => Effect.sync(() => (MutableHashMap.set(usersById, user.id, user), user)),
   };
 
@@ -164,7 +176,23 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     getMemberById: (memberId: string) =>
       Effect.succeed(members.find((m) => m.id === memberId) ?? null),
     listMembersByOrganization: (organizationId: string) =>
-      Effect.succeed(members.filter((m) => m.organizationId === organizationId)),
+      Effect.sync(() => {
+        reads.fullMemberLists++;
+        return members.filter((m) => m.organizationId === organizationId);
+      }),
+    ...(options.pagedMembers === true && {
+      listMembersByOrganizationPage: (
+        organizationId: string,
+        page: { readonly offset: number; readonly limit: number },
+      ) =>
+        Effect.succeed(
+          members
+            .filter((m) => m.organizationId === organizationId)
+            .slice(page.offset, page.offset + page.limit),
+        ),
+    }),
+    countMembersByOrganization: (organizationId: string) =>
+      Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
     getTeam: (teamId: string) =>
       Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
@@ -207,7 +235,6 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
     updateMember: unused,
     deleteMember: unused,
     listMembersByUser: unused,
-    countMembersByOrganization: unused,
     createInvitation: unused,
     getInvitation: unused,
     updateInvitation: unused,
@@ -292,6 +319,7 @@ const makeStores = (options: { readonly oneEmailPerUser?: boolean | undefined } 
 
   return {
     layer,
+    reads,
     usersById,
     createdWith,
     organizations,
@@ -510,6 +538,62 @@ describe("ScimService — users", () => {
     );
     expect(miss.totalResults).toBe(0);
     expect(miss.resources).toEqual([]);
+  });
+
+  it("resolves userName eq through the identifier and the membership, reading one user", async () => {
+    const fx = await makeFixture();
+    await Arr.reduce(["a", "b", "c"], Promise.resolve(), async (previous, name) => {
+      await previous;
+      await fx.run(fx.service.createUser(fx.a.connection, { userName: `${name}@acme.test` }));
+    });
+    const outsider = await fx.run(
+      fx.service.createUser(fx.b.connection, { userName: "eve@other.test" }),
+    );
+    fx.reads.users = 0;
+    fx.reads.fullMemberLists = 0;
+
+    const found = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq "b@acme.test"' }),
+    );
+    expect(found.resources.map((r) => r.userName)).toEqual(["b@acme.test"]);
+    expect(fx.reads).toEqual({ users: 1, fullMemberLists: 0 });
+
+    // Another organization's user is not found, however the address is spelled.
+    const elsewhere = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq " EVE@other.test "' }),
+    );
+    expect(elsewhere).toEqual({ totalResults: 0, startIndex: 1, itemsPerPage: 0, resources: [] });
+    expect(outsider.userName).toBe("eve@other.test");
+  });
+
+  it("does not match userName eq on a user's other address", async () => {
+    const fx = await makeFixture();
+    await fx.run(
+      fx.service.createUser(fx.a.connection, {
+        userName: "ada@acme.test",
+        emails: [{ value: "ada@home.test" }],
+      }),
+    );
+    const byOther = await fx.run(
+      fx.service.listUsers(fx.a.connection, { filter: 'userName eq "ada@home.test"' }),
+    );
+    expect(byOther.totalResults).toBe(0);
+  });
+
+  it("pages an unfiltered list at the store, reading only the page's users", async () => {
+    const fx = await makeFixture({ maxPageSize: 2 }, { pagedMembers: true });
+    await Arr.reduce(["a", "b", "c", "d", "e"], Promise.resolve(), async (previous, name) => {
+      await previous;
+      await fx.run(fx.service.createUser(fx.a.connection, { userName: `${name}@acme.test` }));
+    });
+    fx.reads.users = 0;
+    fx.reads.fullMemberLists = 0;
+
+    const page = await fx.run(fx.service.listUsers(fx.a.connection, { startIndex: 3, count: 50 }));
+    expect(page.totalResults).toBe(5);
+    expect(page.startIndex).toBe(3);
+    expect(page.resources.map((r) => r.userName)).toEqual(["c@acme.test", "d@acme.test"]);
+    expect(fx.reads).toEqual({ users: 2, fullMemberLists: 0 });
   });
 
   it("refuses a filter it cannot honour rather than returning the directory", async () => {

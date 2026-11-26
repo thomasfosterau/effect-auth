@@ -1868,6 +1868,35 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.hash).toBe("admin-hash");
     });
 
+    it("AdminUserStore.listUsers matches LIKE wildcards literally and pages past an offset", async () => {
+      const result = await run(
+        Effect.gen(function* () {
+          const store = yield* Auth.AdminUserStore;
+          const underscore = yield* makeUser("a_b@example.com");
+          const plain = yield* makeUser("axb@example.com");
+          const percent = yield* makeUser("c%d@example.com");
+          return {
+            underscore,
+            plain,
+            percent,
+            byUnderscore: yield* store.listUsers({ searchEmail: "a_b" }),
+            byPercent: yield* store.listUsers({ searchEmail: "%" }),
+            upper: yield* store.listUsers({ searchEmail: "AXB@" }),
+            skipped: yield* store.listUsers({ offset: 2 }),
+            empty: yield* store.listUsers({ limit: 0 }),
+          };
+        }),
+      );
+      expect(result.byUnderscore.users.map((u) => u.id)).toEqual([result.underscore.id]);
+      expect(result.byUnderscore.total).toBe(1);
+      expect(result.byPercent.users.map((u) => u.id)).toEqual([result.percent.id]);
+      expect(result.upper.users.map((u) => u.id)).toEqual([result.plain.id]);
+      // a_b, axb, c%d in binary order; the offset skips the first two.
+      expect(result.skipped.users.map((u) => u.id)).toEqual([result.percent.id]);
+      expect(result.skipped.total).toBe(3);
+      expect(result.empty).toEqual({ users: [], total: 3 });
+    });
+
     it("integration: SessionService runs over the aggregate layer", async () => {
       const config: Auth.SessionConfig = {
         sessionExpiresIn: { activePeriod: 60_000, idlePeriod: 30_000 },
