@@ -1,7 +1,8 @@
 /**
- * Shared internal utilities.
+ * The comparison forms of the identifiers a user types: a domain, an email
+ * address and a username.
  *
- * @module utils
+ * @module Normalize
  */
 import * as Option from "effect/Option";
 

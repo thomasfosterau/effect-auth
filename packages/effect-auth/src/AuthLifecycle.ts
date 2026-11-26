@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import * as DeliveryScheduler from "./DeliveryScheduler.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import { isRecipientSendCapped } from "./RecipientSendLimit.ts";

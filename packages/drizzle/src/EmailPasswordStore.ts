@@ -54,7 +54,7 @@ export const promotedKeys = (users: UserSchema): Readonly<Record<string, string>
 export const splitAttributes = (
   users: UserSchema,
   keys: Readonly<Record<string, string>>,
-  attributes: Auth.Attributes,
+  attributes: Auth.Types.Attributes,
   label: string,
 ) => {
   const bag = R.filter(attributes, (_value, name) => !R.has(keys, name));
@@ -64,7 +64,7 @@ export const splitAttributes = (
   );
   return users.columns.attributes === undefined && !R.isEmptyRecord(bag)
     ? Effect.fail(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message: `drizzle ${label} failed: the users table has no attribute bag for ${R.keys(bag).join(", ")}`,
         }),
       )
@@ -75,7 +75,7 @@ export const splitAttributes = (
 const passwordColumn = (users: UserSchema): Effect.Effect<NullableColumn<string>> =>
   users.columns.passwordHash === undefined
     ? Effect.die(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message:
             "EmailPasswordStore needs the users table's password hash: map `passwordHash` in defineSchema",
         }),
@@ -148,7 +148,7 @@ export const make = (
         );
         const user = yield* readUser(id);
         if (Option.isNone(user)) {
-          return yield* new Auth.AuthError({
+          return yield* new Auth.Errors.AuthError({
             message: "drizzle emailPassword.createUser failed: the inserted user was not found",
           });
         }

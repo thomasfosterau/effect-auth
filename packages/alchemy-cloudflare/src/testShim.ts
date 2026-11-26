@@ -89,7 +89,7 @@ export const clientOver = (binding: Effect.Effect<RawD1>): QueryDatabaseClient =
     Effect.flatMap(raw, (database) =>
       Effect.tryPromise({
         try: () => promise(database),
-        catch: (cause) => new Auth.AuthError({ message: "D1 call failed", cause }),
+        catch: (cause) => new Auth.Errors.AuthError({ message: "D1 call failed", cause }),
       }).pipe(Effect.orDie),
     );
   return {

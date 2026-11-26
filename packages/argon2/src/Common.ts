@@ -11,7 +11,7 @@
 import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
 import * as Str from "effect/String";
-import { HashingError } from "@thomasfosterau/effect-auth";
+import { HashingError } from "@thomasfosterau/effect-auth/Errors";
 
 /** PHC/`parseAlgorithm` identifier for the hashes this package produces. */
 export const ARGON2ID = "argon2id";
@@ -92,7 +92,8 @@ export const defaultProfile: Argon2Profile = {
  *
  * @example
  * ```ts
- * import { argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
+ * import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
+ * import { serverProfile } from "@thomasfosterau/effect-auth-argon2/Common";
  *
  * const layer = argon2HasherLayer(serverProfile);
  * ```

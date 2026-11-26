@@ -66,13 +66,13 @@ describe("D1-backed effect-auth storage", () => {
     const result = await run(
       Effect.gen(function* () {
         const users = yield* Auth.Email.EmailPasswordStore;
-        const sessions = yield* Auth.SessionStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
         const { user } = yield* users.createUser({
           name: "Test User",
           attributes: { plan: "pro" },
         });
         const now = yield* DateTime.nowAsDate;
-        const session: Auth.Session = {
+        const session: Auth.Types.Session = {
           id: "sess-1",
           userId: user.id,
           expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
@@ -97,7 +97,7 @@ describe("D1-backed effect-auth storage", () => {
   it("runs the atomic single-statement upserts (ON CONFLICT / RETURNING)", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const limits = yield* Auth.RateLimitStore;
+        const limits = yield* Auth.RateLimit.RateLimitStore;
         const first = yield* limits.increment("k", 60);
         const second = yield* limits.increment("k", 60);
         yield* limits.delete("k");
@@ -117,7 +117,7 @@ describe("D1-backed effect-auth storage", () => {
         const now = yield* Clock.currentTimeMillis;
         yield* migrate(database);
         yield* Effect.gen(function* () {
-          const links = yield* Auth.MagicLinkStore;
+          const links = yield* Auth.MagicLink.MagicLinkStore;
           yield* links.create({
             token: "stale",
             email: "a@example.com",
@@ -207,9 +207,9 @@ describe("D1-backed effect-auth storage", () => {
   it("replaces an identifier, and refuses a taken address keeping the old one", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const identifiers = yield* Auth.IdentifierStore;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
         const ada = yield* identifiers.create(
-          Auth.makeIdentifier({
+          Auth.Identifier.makeIdentifier({
             userId: "user-1",
             type: "email",
             value: "ada@example.com",
@@ -217,17 +217,17 @@ describe("D1-backed effect-auth storage", () => {
           }),
         );
         yield* identifiers.create(
-          Auth.makeIdentifier({
+          Auth.Identifier.makeIdentifier({
             userId: "user-2",
             type: "email",
             value: "grace@example.com",
             now: DateTime.toDateUtc(DateTime.nowUnsafe()),
           }),
         );
-        const replaced = yield* Auth.replaceIdentifier(
+        const replaced = yield* Auth.Identifier.replaceIdentifier(
           identifiers,
           ada,
-          Auth.makeIdentifier({
+          Auth.Identifier.makeIdentifier({
             userId: "user-1",
             type: "email",
             value: "ada-new@example.com",
@@ -236,10 +236,10 @@ describe("D1-backed effect-auth storage", () => {
           }),
         );
         const taken = yield* Effect.flip(
-          Auth.replaceIdentifier(
+          Auth.Identifier.replaceIdentifier(
             identifiers,
             replaced,
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: "user-1",
               type: "email",
               value: "grace@example.com",
@@ -252,7 +252,7 @@ describe("D1-backed effect-auth storage", () => {
         const raced = yield* Effect.flip(
           identifiers.replace(
             replaced,
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: "user-1",
               type: "email",
               value: "grace@example.com",
@@ -286,9 +286,9 @@ describe("D1-backed effect-auth storage", () => {
   it("lets one of two concurrent replaces of the same address succeed", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const identifiers = yield* Auth.IdentifierStore;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
         const ada = yield* identifiers.create(
-          Auth.makeIdentifier({
+          Auth.Identifier.makeIdentifier({
             userId: "user-1",
             type: "email",
             value: "ada@example.com",
@@ -300,7 +300,7 @@ describe("D1-backed effect-auth storage", () => {
           (value) =>
             identifiers.replace(
               ada,
-              Auth.makeIdentifier({
+              Auth.Identifier.makeIdentifier({
                 userId: "user-1",
                 type: "email",
                 value,
@@ -326,7 +326,7 @@ describe("D1-backed effect-auth storage", () => {
     const farFuture = 3_000_000_000_000;
     const loaded = await run(
       Effect.gen(function* () {
-        const sessions = yield* Auth.SessionStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
         yield* sessions.create({
           id: "sess-bigint",
           userId: "user-1",
@@ -346,7 +346,7 @@ describe("D1-backed effect-auth storage", () => {
 // over the D1 stores: a fresh database per case.
 describe("D1-backed effect-auth storage: conformance", () => {
   const encodeAttributes = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-  const seedUser = (user: Auth.User) =>
+  const seedUser = (user: Auth.Types.User) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)

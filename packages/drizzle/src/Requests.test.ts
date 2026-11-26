@@ -117,7 +117,7 @@ const seedIdentifiers = (
   rows: ReadonlyArray<{
     id: string;
     userId: string;
-    type: Auth.IdentifierType;
+    type: Auth.Identifier.IdentifierType;
     value: string;
     createdAt?: Date;
   }>,

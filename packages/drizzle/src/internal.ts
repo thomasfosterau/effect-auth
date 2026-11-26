@@ -64,11 +64,11 @@ export function presentKeys(fields: R.ReadonlyRecord<string, unknown>): object {
 export const run = <A>(
   label: string,
   query: () => DrizzleResult<A>,
-): Effect.Effect<A, Auth.AuthError> => {
-  const toAuthError = (cause: unknown): Auth.AuthError =>
-    new Auth.AuthError({ message: `drizzle ${label} failed`, cause });
+): Effect.Effect<A, Auth.Errors.AuthError> => {
+  const toAuthError = (cause: unknown): Auth.Errors.AuthError =>
+    new Auth.Errors.AuthError({ message: `drizzle ${label} failed`, cause });
 
-  const execute = (result: DrizzleResult<A>): Effect.Effect<A, Auth.AuthError> =>
+  const execute = (result: DrizzleResult<A>): Effect.Effect<A, Auth.Errors.AuthError> =>
     Effect.isEffect(result)
       ? Effect.mapError(result, toAuthError)
       : Effect.tryPromise({ try: () => result, catch: toAuthError });
@@ -94,7 +94,7 @@ export const queryRunner =
   <A>(
     label: string,
     build: (db: AuthDatabase) => DrizzleResult<A>,
-  ): Effect.Effect<A, Auth.AuthError> =>
+  ): Effect.Effect<A, Auth.Errors.AuthError> =>
     Effect.flatMap(handle.database, (db) => run(label, () => build(db)));
 
 /** The per-query runner {@link queryRunner} produces. @internal */
@@ -112,7 +112,7 @@ export const selectOne = <TFields extends DrizzleSelectFields>(
   fields: TFields,
   table: Table,
   where: SQL,
-): Effect.Effect<Option.Option<DrizzleSelected<TFields>>, Auth.AuthError> =>
+): Effect.Effect<Option.Option<DrizzleSelected<TFields>>, Auth.Errors.AuthError> =>
   query(label, (db) => db.select(fields).from(table).where(where).limit(1).execute()).pipe(
     Effect.map(Arr.head),
   );
@@ -205,12 +205,12 @@ const AffectedRows = Schema.Union([
 export const affectedRows = <E>(
   label: string,
   write: Effect.Effect<unknown, E>,
-): Effect.Effect<number, E | Auth.AuthError> =>
+): Effect.Effect<number, E | Auth.Errors.AuthError> =>
   Effect.flatMap(write, (result) =>
     Effect.fromOption(Schema.decodeUnknownOption(AffectedRows)(result)).pipe(
       Effect.mapError(
         () =>
-          new Auth.AuthError({
+          new Auth.Errors.AuthError({
             message: `drizzle ${label}: the driver reported no affected-row count`,
           }),
       ),

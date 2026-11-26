@@ -76,7 +76,7 @@ describe("BetterAuthCredentials", () => {
         c.signUpEmail({ headers: headers(), email, password, name: "A" }),
       ),
     );
-    expect(failure(taken)).toBeInstanceOf(Auth.EmailInUseError);
+    expect(failure(taken)).toBeInstanceOf(Auth.Errors.EmailInUseError);
 
     const wrong = await runExit(
       auth,
@@ -84,13 +84,13 @@ describe("BetterAuthCredentials", () => {
         c.signInEmail({ headers: headers(), email, password: "not the password" }),
       ),
     );
-    expect(failure(wrong)).toBeInstanceOf(Auth.InvalidCredentialsError);
+    expect(failure(wrong)).toBeInstanceOf(Auth.Errors.InvalidCredentialsError);
 
     const unverified = await runExit(
       auth,
       Effect.flatMap(credentials, (c) => c.signInEmail({ headers: headers(), email, password })),
     );
-    expect(failure(unverified)).toBeInstanceOf(Auth.EmailNotVerifiedError);
+    expect(failure(unverified)).toBeInstanceOf(Auth.Errors.EmailNotVerifiedError);
   });
 
   it("signs in by username with the username() plugin, and fails without it", async () => {
@@ -111,7 +111,7 @@ describe("BetterAuthCredentials", () => {
         c.signInUsername({ headers: headers(), username: "ada", password: "nope nope nope" }),
       ),
     );
-    expect(failure(wrong)).toBeInstanceOf(Auth.InvalidCredentialsError);
+    expect(failure(wrong)).toBeInstanceOf(Auth.Errors.InvalidCredentialsError);
 
     const { auth: plain } = makeAuth({ plugins: [] });
     const missing = await runExit(
@@ -120,7 +120,7 @@ describe("BetterAuthCredentials", () => {
         c.signInUsername({ headers: headers(), username: "ada", password }),
       ),
     );
-    expect(failure(missing)).toBeInstanceOf(Auth.AuthError);
+    expect(failure(missing)).toBeInstanceOf(Auth.Errors.AuthError);
   });
 
   it("answers second-factor, with no user, for a sign-in the twoFactor() plugin holds", async () => {

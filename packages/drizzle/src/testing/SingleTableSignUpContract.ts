@@ -12,8 +12,8 @@ import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
-import * as Email from "@thomasfosterau/effect-auth/email";
-import * as Password from "@thomasfosterau/effect-auth/password";
+import * as Email from "@thomasfosterau/effect-auth/Email";
+import * as Password from "@thomasfosterau/effect-auth/Password";
 
 /** A user row's email columns as the application writes them. */
 export interface UserRowInsert {
@@ -27,7 +27,9 @@ export interface UserRowInsert {
 /** The database the sign-up suite runs against. */
 export interface SignUpHarness {
   /** Run `build`'s program against the single-table store on the file's database. */
-  readonly run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>) => Promise<A>;
+  readonly run: <A, E>(
+    build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
+  ) => Promise<A>;
   /** Insert a user row, as the application's own user writer does. */
   readonly insertUser: (row: UserRowInsert) => Promise<void>;
   /** The email columns of a user row as stored, or `null` when there is no row. */
@@ -55,7 +57,7 @@ const testHasher: typeof Password.PasswordHasher.Service = {
 };
 
 /** A `SessionService` that issues a session and does nothing else. */
-const sessions: typeof Auth.SessionService.Service = {
+const sessions: typeof Auth.SessionService.SessionService.Service = {
   createSession: (userId) =>
     Effect.sync(() => {
       const now = DateTime.toDateUtc(DateTime.nowUnsafe());
@@ -89,15 +91,15 @@ export const makeAppWriter = (
   insertUser: (row: UserRowInsert) => Promise<void>,
   mode: WriterMode,
 ) => {
-  const users = MutableHashMap.empty<string, Auth.User>();
+  const users = MutableHashMap.empty<string, Auth.Types.User>();
   const hashes = MutableHashMap.empty<string, string>();
   /** The `identifier` each `createUser` call was given. */
-  const createdWith: Array<Auth.NewUserIdentifier | undefined> = [];
+  const createdWith: Array<Auth.UserStore.NewUserIdentifier | undefined> = [];
 
   const toRow = (
     id: string,
     createdAt: Date,
-    identifier: Auth.NewUserIdentifier | undefined,
+    identifier: Auth.UserStore.NewUserIdentifier | undefined,
   ): UserRowInsert =>
     mode !== "omits" && identifier?.type === "email"
       ? { id, email: identifier.value, emailVerified: identifier.verified, createdAt }
@@ -106,8 +108,8 @@ export const makeAppWriter = (
   /** Insert a new user; in `"findsOrCreates"` mode, first look the address up through `lookup`. */
   const createUserWith = (
     input: Email.CreateUserInput,
-    lookup?: typeof Auth.IdentifierStore.Service,
-  ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
+    lookup?: typeof Auth.Identifier.IdentifierStore.Service,
+  ): Effect.Effect<Auth.UserStore.CreateUserResult, Auth.Errors.AuthError> =>
     Effect.gen(function* () {
       createdWith.push(input.identifier);
       if (mode === "findsOrCreates" && lookup !== undefined && input.identifier !== undefined) {
@@ -121,9 +123,9 @@ export const makeAppWriter = (
       const now = yield* DateTime.nowAsDate;
       yield* Effect.tryPromise({
         try: () => insertUser(toRow(id, now, input.identifier)),
-        catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+        catch: (cause) => new Auth.Errors.AuthError({ message: "insert into users failed", cause }),
       });
-      const user: Auth.User = { id, createdAt: now, updatedAt: now, attributes: {} };
+      const user: Auth.Types.User = { id, createdAt: now, updatedAt: now, attributes: {} };
       MutableHashMap.set(users, id, user);
       return { user, created: true };
     });
@@ -139,7 +141,7 @@ export const makeAppWriter = (
       Effect.sync(() => void MutableHashMap.set(hashes, userId, hash)),
   };
 
-  const userStore: typeof Auth.UserStore.Service = {
+  const userStore: typeof Auth.UserStore.UserStore.Service = {
     get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
   };
 
@@ -149,10 +151,12 @@ export const makeAppWriter = (
    */
   const withService = <A, E>(
     f: (service: typeof Email.EmailPasswordService.Service) => Effect.Effect<A, E>,
-    wrap?: (store: typeof Auth.IdentifierStore.Service) => typeof Auth.IdentifierStore.Service,
-  ): Effect.Effect<A, E, Auth.IdentifierStore> =>
+    wrap?: (
+      store: typeof Auth.Identifier.IdentifierStore.Service,
+    ) => typeof Auth.Identifier.IdentifierStore.Service,
+  ): Effect.Effect<A, E, Auth.Identifier.IdentifierStore> =>
     Effect.gen(function* () {
-      const store = yield* Auth.IdentifierStore;
+      const store = yield* Auth.Identifier.IdentifierStore;
       const layer = Email.EmailPasswordService.layer().pipe(
         Layer.provide(
           Layer.mergeAll(
@@ -160,11 +164,13 @@ export const makeAppWriter = (
               ...emailPasswordStore,
               createUser: (input) => createUserWith(input, store),
             }),
-            Layer.succeed(Auth.IdentifierStore)(wrap === undefined ? store : wrap(store)),
-            Layer.succeed(Auth.UserStore)(userStore),
+            Layer.succeed(Auth.Identifier.IdentifierStore)(
+              wrap === undefined ? store : wrap(store),
+            ),
+            Layer.succeed(Auth.UserStore.UserStore)(userStore),
             Layer.succeed(Password.PasswordHasher)(testHasher),
-            Layer.succeed(Auth.SessionService)(sessions),
-            Auth.Hooks.Default,
+            Layer.succeed(Auth.SessionService.SessionService)(sessions),
+            Auth.Hooks.Hooks.Default,
           ),
         ),
       );
@@ -226,7 +232,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
         ),
       );
 
-      expect(error).toBeInstanceOf(Auth.EmailInUseError);
+      expect(error).toBeInstanceOf(Auth.Errors.EmailInUseError);
       expect(await harness.countUserRows()).toBe(1);
     });
 
@@ -254,7 +260,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
       );
 
       expect(missed).toBe(true);
-      expect(error).toBeInstanceOf(Auth.EmailInUseError);
+      expect(error).toBeInstanceOf(Auth.Errors.EmailInUseError);
       expect(await harness.countUserRows()).toBe(1);
     });
 
@@ -282,7 +288,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
       );
 
       expect(missed).toBe(true);
-      expect(error).toBeInstanceOf(Auth.EmailInUseError);
+      expect(error).toBeInstanceOf(Auth.Errors.EmailInUseError);
       expect(writer.createdWith).toHaveLength(2);
       expect(await harness.countUserRows()).toBe(1);
       expect(await harness.readUserRow(ada.user.id)).toEqual({ email: ADA, emailVerified: false });
@@ -299,7 +305,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
         ),
       );
       expect(signIns.own.user.id).toBe(ada.user.id);
-      expect(signIns.attacker).toBeInstanceOf(Auth.InvalidCredentialsError);
+      expect(signIns.attacker).toBeInstanceOf(Auth.Errors.InvalidCredentialsError);
     });
 
     it("a verified address is held verified, whether the writer stores the flag or not", async () => {
@@ -313,15 +319,15 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
 
       const { flagged, dropped } = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const verified = { type: "email", verified: true, verifiedAt } as const;
           return {
-            flagged: yield* Auth.createUserWithIdentifier(
+            flagged: yield* Auth.UserStore.createUserWithIdentifier(
               store,
               { ...verified, value: ADA },
               (identifier) => writer.createUser({ identifier }),
             ),
-            dropped: yield* Auth.createUserWithIdentifier(
+            dropped: yield* Auth.UserStore.createUserWithIdentifier(
               store,
               { ...verified, value: "grace@example.com" },
               (identifier) => unflagged.createUser({ identifier }),
@@ -375,7 +381,7 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
           ),
         );
 
-        expect(error).toBeInstanceOf(Auth.AuthError);
+        expect(error).toBeInstanceOf(Auth.Errors.AuthError);
         expect(await harness.countUserRows()).toBe(0);
       },
     );

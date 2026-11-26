@@ -31,7 +31,10 @@ import {
 import type { TableNames } from "./Schema.ts";
 import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
-type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
+type StoreServices =
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.Identifier.IdentifierStore;
 
 /** The custom names the first test binds every store to. */
 const names: TableNames = {
@@ -96,7 +99,7 @@ const at = (offsetMs: number): Date =>
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
+const makeSession = (overrides: Partial<Auth.Types.Session> = {}): Auth.Types.Session => ({
   id: "session-1",
   userId: "user-1",
   expiresAt: at(60_000),
@@ -106,7 +109,9 @@ const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
   ...overrides,
 });
 
-const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier => ({
+const identifier = (
+  overrides: Partial<Auth.Identifier.Identifier> = {},
+): Auth.Identifier.Identifier => ({
   id: "identifier-1",
   userId: "user-1",
   type: "email",
@@ -141,7 +146,7 @@ const seedUser = (
           .execute();
         return id;
       },
-      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
@@ -151,9 +156,9 @@ describe("Schema", () => {
       Effect.gen(function* () {
         yield* seedUser(database, tables, { id: "user-1" });
 
-        const sessions = yield* Auth.SessionStore;
-        const users = yield* Auth.UserStore;
-        const identifiers = yield* Auth.IdentifierStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
+        const users = yield* Auth.UserStore.UserStore;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
 
         yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
         yield* identifiers.create(identifier());
@@ -165,7 +170,7 @@ describe("Schema", () => {
                 `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
               ),
-            catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
           }),
         );
         const present = (yield* Effect.orDie(

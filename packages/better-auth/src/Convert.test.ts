@@ -12,20 +12,20 @@ const apiError = (statusCode: number, code?: string) => ({
 describe("fromApiError", () => {
   it("maps BetterAuth's codes, and keeps everything else as AuthError with its cause", () => {
     expect(fromApiError(apiError(401, "INVALID_EMAIL_OR_PASSWORD"))).toBeInstanceOf(
-      Auth.InvalidCredentialsError,
+      Auth.Errors.InvalidCredentialsError,
     );
     expect(fromApiError(apiError(422, "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL"))).toBeInstanceOf(
-      Auth.EmailInUseError,
+      Auth.Errors.EmailInUseError,
     );
     expect(fromApiError(apiError(403, "EMAIL_NOT_VERIFIED"), "a@x.test")).toBeInstanceOf(
-      Auth.EmailNotVerifiedError,
+      Auth.Errors.EmailNotVerifiedError,
     );
     const limited = apiError(429);
     const mapped = fromApiError(limited);
-    expect(mapped).toBeInstanceOf(Auth.AuthError);
-    expect(mapped instanceof Auth.AuthError && mapped.cause).toBe(limited);
+    expect(mapped).toBeInstanceOf(Auth.Errors.AuthError);
+    expect(mapped instanceof Auth.Errors.AuthError && mapped.cause).toBe(limited);
     // A 401 with another code is not a credentials verdict.
-    expect(fromApiError(apiError(401, "INVALID_TOKEN"))).toBeInstanceOf(Auth.AuthError);
+    expect(fromApiError(apiError(401, "INVALID_TOKEN"))).toBeInstanceOf(Auth.Errors.AuthError);
     const thrown = new TypeError("boom");
     expect(fromApiError(thrown)).toMatchObject({ _tag: "AuthError", cause: thrown });
   });

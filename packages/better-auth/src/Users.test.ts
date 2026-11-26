@@ -45,7 +45,7 @@ describe("UserStore conformance", () => {
             },
           });
         },
-        catch: (cause) => new Auth.AuthError({ message: "seeding the user failed", cause }),
+        catch: (cause) => new Auth.Errors.AuthError({ message: "seeding the user failed", cause }),
       }),
   });
   const layer = userStoreLayer.pipe(Layer.provide(BetterAuthInstance.layer(auth)));
@@ -57,7 +57,7 @@ describe("UserStore conformance", () => {
 });
 
 describe("UserService over BetterAuth", () => {
-  const users = Effect.service(Auth.UserService);
+  const users = Effect.service(Auth.User.UserService);
 
   it("reads a user with BetterAuth's columns as attributes, email kept off it", async () => {
     const { auth } = makeAuth();
@@ -73,7 +73,7 @@ describe("UserService over BetterAuth", () => {
       auth,
       Effect.flatMap(users, (s) => s.getUser("nobody")),
     );
-    expect(failure(missing)).toBeInstanceOf(Auth.UserNotFoundError);
+    expect(failure(missing)).toBeInstanceOf(Auth.Errors.UserNotFoundError);
   });
 
   it("updates the name and image, and declared columns only", async () => {
@@ -97,7 +97,7 @@ describe("UserService over BetterAuth", () => {
       auth,
       Effect.flatMap(users, (s) => s.updateUserAttributes(user.id, { favourite: "blue" })),
     );
-    expect(failure(undeclared)).toBeInstanceOf(Auth.AuthError);
+    expect(failure(undeclared)).toBeInstanceOf(Auth.Errors.AuthError);
   });
 
   it("refuses server-only and standing attributes, as the core does", async () => {
@@ -111,7 +111,9 @@ describe("UserService over BetterAuth", () => {
         ),
       ),
     );
-    Arr.forEach(refused, (exit) => expect(failure(exit)).toBeInstanceOf(Auth.InvalidInputError));
+    Arr.forEach(refused, (exit) =>
+      expect(failure(exit)).toBeInstanceOf(Auth.Errors.InvalidInputError),
+    );
   });
 
   it("keeps a Date column unwritten when an unrelated attribute changes", async () => {
@@ -142,7 +144,7 @@ describe("UserService over BetterAuth", () => {
 });
 
 describe("IdentifierStore over BetterAuth", () => {
-  const identifiers = Effect.service(Auth.IdentifierStore);
+  const identifiers = Effect.service(Auth.Identifier.IdentifierStore);
 
   it("derives the email and username identifiers with deterministic ids", async () => {
     const { auth } = makeAuth();
@@ -159,17 +161,17 @@ describe("IdentifierStore over BetterAuth", () => {
     ]);
     const byEmail = await run(
       auth,
-      Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "email", email)),
+      Effect.flatMap(identifiers, (s) => Auth.Identifier.lookupIdentifier(s, "email", email)),
     );
     expect(Option.getOrUndefined(byEmail)?.userId).toBe(user.id);
     const byUsername = await run(
       auth,
-      Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "username", "ada")),
+      Effect.flatMap(identifiers, (s) => Auth.Identifier.lookupIdentifier(s, "username", "ada")),
     );
     expect(Option.getOrUndefined(byUsername)?.userId).toBe(user.id);
     const none = await run(
       auth,
-      Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "phone", "+15550100")),
+      Effect.flatMap(identifiers, (s) => Auth.Identifier.lookupIdentifier(s, "phone", "+15550100")),
     );
     expect(Option.isNone(none)).toBe(true);
   });
@@ -181,7 +183,7 @@ describe("IdentifierStore over BetterAuth", () => {
     await context.internalAdapter.updateUser(user.id, { phoneNumber: "+15550100" });
     const found = await run(
       auth,
-      Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "phone", "+15550100")),
+      Effect.flatMap(identifiers, (s) => Auth.Identifier.lookupIdentifier(s, "phone", "+15550100")),
     );
     expect(Option.getOrUndefined(found)).toMatchObject({
       id: identifierId(user.id, "phone"),
@@ -195,7 +197,7 @@ describe("IdentifierStore over BetterAuth", () => {
     // Without the username() plugin there is no column to look a username up by.
     const none = await run(
       auth,
-      Effect.flatMap(identifiers, (s) => Auth.lookupIdentifier(s, "username", "ada")),
+      Effect.flatMap(identifiers, (s) => Auth.Identifier.lookupIdentifier(s, "username", "ada")),
     );
     expect(Option.isNone(none)).toBe(true);
   });
@@ -229,9 +231,11 @@ describe("IdentifierStore over BetterAuth", () => {
       auth,
       Effect.flatMap(identifiers, (s) => s.create(next)),
     );
-    expect(failure(create)).toBeInstanceOf(Auth.IdentifierRefusedError);
+    expect(failure(create)).toBeInstanceOf(Auth.Identifier.IdentifierRefusedError);
     const writes: ReadonlyArray<
-      (s: typeof Auth.IdentifierStore.Service) => Effect.Effect<unknown, Auth.AuthError>
+      (
+        s: typeof Auth.Identifier.IdentifierStore.Service,
+      ) => Effect.Effect<unknown, Auth.Errors.AuthError>
     > = [
       (s) => s.replace(current, next),
       (s) => s.delete(current.id),
@@ -240,12 +244,12 @@ describe("IdentifierStore over BetterAuth", () => {
     const refused = await Promise.all(
       Arr.map(writes, (write) => runExit(auth, Effect.flatMap(identifiers, write))),
     );
-    Arr.forEach(refused, (exit) => expect(failure(exit)).toBeInstanceOf(Auth.AuthError));
+    Arr.forEach(refused, (exit) => expect(failure(exit)).toBeInstanceOf(Auth.Errors.AuthError));
     expect(db["user"]?.[0]?.["email"]).toBe(email);
   });
 });
 
-const user = (role: Auth.Json): Auth.User => ({
+const user = (role: Auth.Types.Json): Auth.Types.User => ({
   id: "u",
   createdAt: at(0),
   updatedAt: at(0),

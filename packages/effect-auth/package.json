@@ -37,13 +37,289 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./ladder": {
+    "./AccountDeletion": {
+      "types": "./dist/AccountDeletion.d.ts",
+      "import": "./dist/AccountDeletion.js"
+    },
+    "./AccountManagement": {
+      "types": "./dist/AccountManagement.d.ts",
+      "import": "./dist/AccountManagement.js"
+    },
+    "./Admin": {
+      "types": "./dist/Admin.d.ts",
+      "import": "./dist/Admin.js"
+    },
+    "./Anonymous": {
+      "types": "./dist/Anonymous.d.ts",
+      "import": "./dist/Anonymous.js"
+    },
+    "./ApiKey": {
+      "types": "./dist/ApiKey.d.ts",
+      "import": "./dist/ApiKey.js"
+    },
+    "./AuthLifecycle": {
+      "types": "./dist/AuthLifecycle.d.ts",
+      "import": "./dist/AuthLifecycle.js"
+    },
+    "./AuthorizationModel": {
+      "types": "./dist/AuthorizationModel.d.ts",
+      "import": "./dist/AuthorizationModel.js"
+    },
+    "./Authorizer": {
+      "types": "./dist/Authorizer.d.ts",
+      "import": "./dist/Authorizer.js"
+    },
+    "./Cacheability": {
+      "types": "./dist/Cacheability.d.ts",
+      "import": "./dist/Cacheability.js"
+    },
+    "./Cipher": {
+      "types": "./dist/Cipher.d.ts",
+      "import": "./dist/Cipher.js"
+    },
+    "./ClientIP": {
+      "types": "./dist/ClientIP.d.ts",
+      "import": "./dist/ClientIP.js"
+    },
+    "./CloudflareAccess": {
+      "types": "./dist/CloudflareAccess.d.ts",
+      "import": "./dist/CloudflareAccess.js"
+    },
+    "./Condition": {
+      "types": "./dist/Condition.d.ts",
+      "import": "./dist/Condition.js"
+    },
+    "./Delivery": {
+      "types": "./dist/Delivery.d.ts",
+      "import": "./dist/Delivery.js"
+    },
+    "./DeliveryScheduler": {
+      "types": "./dist/DeliveryScheduler.d.ts",
+      "import": "./dist/DeliveryScheduler.js"
+    },
+    "./DeviceAuthorization": {
+      "types": "./dist/DeviceAuthorization.d.ts",
+      "import": "./dist/DeviceAuthorization.js"
+    },
+    "./Email": {
+      "types": "./dist/email/index.d.ts",
+      "import": "./dist/email/index.js"
+    },
+    "./Entity": {
+      "types": "./dist/Entity.d.ts",
+      "import": "./dist/Entity.js"
+    },
+    "./Errors": {
+      "types": "./dist/Errors.d.ts",
+      "import": "./dist/Errors.js"
+    },
+    "./GoogleOneTap": {
+      "types": "./dist/GoogleOneTap.d.ts",
+      "import": "./dist/GoogleOneTap.js"
+    },
+    "./Guard": {
+      "types": "./dist/Guard.d.ts",
+      "import": "./dist/Guard.js"
+    },
+    "./Hooks": {
+      "types": "./dist/Hooks.d.ts",
+      "import": "./dist/Hooks.js"
+    },
+    "./Identifier": {
+      "types": "./dist/Identifier.d.ts",
+      "import": "./dist/Identifier.js"
+    },
+    "./Jwt": {
+      "types": "./dist/Jwt.d.ts",
+      "import": "./dist/Jwt.js"
+    },
+    "./KeyValueStores": {
+      "types": "./dist/KeyValueStores.d.ts",
+      "import": "./dist/KeyValueStores.js"
+    },
+    "./Ladder": {
       "types": "./dist/Ladder.d.ts",
       "import": "./dist/Ladder.js"
     },
-    "./email": {
-      "types": "./dist/email/index.d.ts",
-      "import": "./dist/email/index.js"
+    "./LadderSchema": {
+      "types": "./dist/LadderSchema.d.ts",
+      "import": "./dist/LadderSchema.js"
+    },
+    "./MagicLink": {
+      "types": "./dist/MagicLink.d.ts",
+      "import": "./dist/MagicLink.js"
+    },
+    "./ManagedUser": {
+      "types": "./dist/ManagedUser.d.ts",
+      "import": "./dist/ManagedUser.js"
+    },
+    "./Messages": {
+      "types": "./dist/Messages.d.ts",
+      "import": "./dist/Messages.js"
+    },
+    "./MultiFactor": {
+      "types": "./dist/multifactor/index.d.ts",
+      "import": "./dist/multifactor/index.js"
+    },
+    "./Normalize": {
+      "types": "./dist/Normalize.d.ts",
+      "import": "./dist/Normalize.js"
+    },
+    "./OAuth": {
+      "types": "./dist/oauth/index.d.ts",
+      "import": "./dist/oauth/index.js"
+    },
+    "./Observability": {
+      "types": "./dist/Observability.d.ts",
+      "import": "./dist/Observability.js"
+    },
+    "./OidcProvider": {
+      "types": "./dist/OidcProvider.d.ts",
+      "import": "./dist/OidcProvider.js"
+    },
+    "./OneTimeToken": {
+      "types": "./dist/OneTimeToken.d.ts",
+      "import": "./dist/OneTimeToken.js"
+    },
+    "./Organization": {
+      "types": "./dist/Organization.d.ts",
+      "import": "./dist/Organization.js"
+    },
+    "./OrganizationEntities": {
+      "types": "./dist/OrganizationEntities.d.ts",
+      "import": "./dist/OrganizationEntities.js"
+    },
+    "./OutboundHttp": {
+      "types": "./dist/OutboundHttp.d.ts",
+      "import": "./dist/OutboundHttp.js"
+    },
+    "./OwnedAccess": {
+      "types": "./dist/OwnedAccess.d.ts",
+      "import": "./dist/OwnedAccess.js"
+    },
+    "./Password": {
+      "types": "./dist/password/index.d.ts",
+      "import": "./dist/password/index.js"
+    },
+    "./Permission": {
+      "types": "./dist/Permission.d.ts",
+      "import": "./dist/Permission.js"
+    },
+    "./PhoneOtp": {
+      "types": "./dist/PhoneOtp.d.ts",
+      "import": "./dist/PhoneOtp.js"
+    },
+    "./PlatformCrypto": {
+      "types": "./dist/PlatformCrypto.d.ts",
+      "import": "./dist/PlatformCrypto.js"
+    },
+    "./Plugins": {
+      "types": "./dist/plugins/index.d.ts",
+      "import": "./dist/plugins/index.js"
+    },
+    "./Policy": {
+      "types": "./dist/Policy.d.ts",
+      "import": "./dist/Policy.js"
+    },
+    "./PolicyStore": {
+      "types": "./dist/PolicyStore.d.ts",
+      "import": "./dist/PolicyStore.js"
+    },
+    "./Protected": {
+      "types": "./dist/Protected.d.ts",
+      "import": "./dist/Protected.js"
+    },
+    "./RateLimit": {
+      "types": "./dist/RateLimit.d.ts",
+      "import": "./dist/RateLimit.js"
+    },
+    "./RateLimitPersistence": {
+      "types": "./dist/RateLimitPersistence.d.ts",
+      "import": "./dist/RateLimitPersistence.js"
+    },
+    "./Rbac": {
+      "types": "./dist/Rbac.d.ts",
+      "import": "./dist/Rbac.js"
+    },
+    "./ReadScope": {
+      "types": "./dist/ReadScope.d.ts",
+      "import": "./dist/ReadScope.js"
+    },
+    "./Redirect": {
+      "types": "./dist/Redirect.d.ts",
+      "import": "./dist/Redirect.js"
+    },
+    "./ReferenceAccess": {
+      "types": "./dist/ReferenceAccess.d.ts",
+      "import": "./dist/ReferenceAccess.js"
+    },
+    "./RootSecret": {
+      "types": "./dist/RootSecret.d.ts",
+      "import": "./dist/RootSecret.js"
+    },
+    "./Saml": {
+      "types": "./dist/Saml.d.ts",
+      "import": "./dist/Saml.js"
+    },
+    "./Scim": {
+      "types": "./dist/Scim.d.ts",
+      "import": "./dist/Scim.js"
+    },
+    "./SessionContext": {
+      "types": "./dist/SessionContext.d.ts",
+      "import": "./dist/SessionContext.js"
+    },
+    "./SessionCookieCache": {
+      "types": "./dist/SessionCookieCache.d.ts",
+      "import": "./dist/SessionCookieCache.js"
+    },
+    "./SessionCookies": {
+      "types": "./dist/SessionCookies.d.ts",
+      "import": "./dist/SessionCookies.js"
+    },
+    "./SessionResolution": {
+      "types": "./dist/SessionResolution.d.ts",
+      "import": "./dist/SessionResolution.js"
+    },
+    "./SessionService": {
+      "types": "./dist/SessionService.d.ts",
+      "import": "./dist/SessionService.js"
+    },
+    "./SessionStore": {
+      "types": "./dist/SessionStore.d.ts",
+      "import": "./dist/SessionStore.js"
+    },
+    "./Sso": {
+      "types": "./dist/Sso.d.ts",
+      "import": "./dist/Sso.js"
+    },
+    "./System": {
+      "types": "./dist/System.d.ts",
+      "import": "./dist/System.js"
+    },
+    "./TokenHash": {
+      "types": "./dist/TokenHash.d.ts",
+      "import": "./dist/TokenHash.js"
+    },
+    "./TrustedDevice": {
+      "types": "./dist/TrustedDevice.d.ts",
+      "import": "./dist/TrustedDevice.js"
+    },
+    "./Types": {
+      "types": "./dist/Types.d.ts",
+      "import": "./dist/Types.js"
+    },
+    "./User": {
+      "types": "./dist/User.d.ts",
+      "import": "./dist/User.js"
+    },
+    "./Username": {
+      "types": "./dist/Username.d.ts",
+      "import": "./dist/Username.js"
+    },
+    "./UserStore": {
+      "types": "./dist/UserStore.d.ts",
+      "import": "./dist/UserStore.js"
     },
     "./http": {
       "types": "./dist/http/index.d.ts",
@@ -60,22 +336,6 @@
     "./client/testing": {
       "types": "./dist/client/testing/fixture.d.ts",
       "import": "./dist/client/testing/fixture.js"
-    },
-    "./oauth": {
-      "types": "./dist/oauth/index.d.ts",
-      "import": "./dist/oauth/index.js"
-    },
-    "./password": {
-      "types": "./dist/password/index.d.ts",
-      "import": "./dist/password/index.js"
-    },
-    "./plugins": {
-      "types": "./dist/plugins/index.d.ts",
-      "import": "./dist/plugins/index.js"
-    },
-    "./multifactor": {
-      "types": "./dist/multifactor/index.d.ts",
-      "import": "./dist/multifactor/index.js"
     },
     "./sql": {
       "types": "./dist/sql/index.d.ts",

@@ -22,7 +22,7 @@
  * const alice = Auth.OrganizationEntities.userRef("alice")
  * const bob = Auth.OrganizationEntities.userRef("bob")
  * const doc = Auth.Entity.ref("Document", "doc-1")
- * const graph = Auth.memoryEntityResolver([
+ * const graph = Auth.Authorizer.memoryEntityResolver([
  *   Auth.Entity.entity(alice, {
  *     parents: [
  *       Auth.OrganizationEntities.organizationRef(orgId),
@@ -38,15 +38,15 @@
  *   Auth.Entity.entity(doc, { parents: [Auth.OrganizationEntities.organizationRef(orgId)] }),
  * ])
  *
- * const authorizer = Auth.Authorizer.layer({ policies: [orgAdminsUpdate] }).pipe(
- *   Layer.provide(Layer.succeed(Auth.EntityResolver, graph)),
+ * const authorizer = Auth.Authorizer.Authorizer.layer({ policies: [orgAdminsUpdate] }).pipe(
+ *   Layer.provide(Layer.succeed(Auth.Authorizer.EntityResolver, graph)),
  * )
  *
  * const mayUpdate = (principal: Auth.Entity.EntityRef) =>
  *   Effect.gen(function* () {
- *     const decide = yield* Auth.Authorizer
+ *     const decide = yield* Auth.Authorizer.Authorizer
  *     return yield* decide.check({ action: "document:update", resource: doc })
- *   }).pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(authorizer))
+ *   }).pipe(Auth.Authorizer.CurrentPrincipal.provide(principal), Effect.provide(authorizer))
  *
  * await Effect.runPromise(
  *   Effect.gen(function* () {

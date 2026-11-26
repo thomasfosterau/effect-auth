@@ -13,7 +13,7 @@
  *
  * const UserView = Schema.Struct({
  *   id: Schema.String,
- *   email: Auth.protectedField(Schema.String, {
+ *   email: Auth.Protected.protectedField(Schema.String, {
  *     policies: Auth.Policy.role("admin"),
  *     action: "user:read-email",
  *   }),
@@ -23,11 +23,11 @@
  * const alice = Auth.Entity.ref("User", "alice")
  * const bob = Auth.Entity.ref("User", "bob")
  * const graph = Layer.succeed(
- *   Auth.EntityResolver,
- *   Auth.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
+ *   Auth.Authorizer.EntityResolver,
+ *   Auth.Authorizer.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
  * )
  * const as = <A, E, R>(effect: Effect.Effect<A, E, R>, principal: Auth.Entity.EntityRef) =>
- *   effect.pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(graph))
+ *   effect.pipe(Auth.Authorizer.CurrentPrincipal.provide(principal), Effect.provide(graph))
  *
  * const program = Effect.gen(function* () {
  *   const value = { id: "u-1", email: "alice@example.com" }
@@ -235,7 +235,7 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  *
  * const UserUpdate = Schema.Struct({
  *   id: Schema.String,
- *   banned: Auth.protectedField(Schema.Boolean, {
+ *   banned: Auth.Protected.protectedField(Schema.Boolean, {
  *     policies: Auth.Policy.role("admin"),
  *     action: "user:set-banned",
  *     onDecodeDeny: "redact",
@@ -245,11 +245,11 @@ export interface ProtectedField<S extends Schema.Constraint> extends Schema.opti
  * const alice = Auth.Entity.ref("User", "alice") // in Role::"admin"
  * const bob = Auth.Entity.ref("User", "bob") // no roles
  * const graph = Layer.succeed(
- *   Auth.EntityResolver,
- *   Auth.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
+ *   Auth.Authorizer.EntityResolver,
+ *   Auth.Authorizer.memoryEntityResolver([Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] })]),
  * )
  * const as = <A, E, R>(effect: Effect.Effect<A, E, R>, principal: Auth.Entity.EntityRef) =>
- *   effect.pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(graph))
+ *   effect.pipe(Auth.Authorizer.CurrentPrincipal.provide(principal), Effect.provide(graph))
  *
  * const program = Effect.gen(function* () {
  *   const input = { id: "u-1", banned: true }

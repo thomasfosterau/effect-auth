@@ -33,7 +33,7 @@ import {
 import { firstProofServices, userForProvenEmail } from "./FirstProof.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 /**

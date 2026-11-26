@@ -910,15 +910,16 @@ export const make = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
- * import { Hooks, SessionService } from "@thomasfosterau/effect-auth"
- * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/Email"
  * import {
  *   MultiFactorGateLayer,
  *   MultiFactorService,
  *   type MultiFactorStore,
  *   type PendingMultiFactorStore,
- * } from "@thomasfosterau/effect-auth/multifactor"
- * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * } from "@thomasfosterau/effect-auth/MultiFactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/Password"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's MultiFactorStore / PendingMultiFactorStore adapters, passed in.

@@ -124,8 +124,8 @@ export interface FixtureUsersOptions {
  *
  * const users = Testing.fixtureUsers()
  * assert.equal(users.admin.id, Testing.fixtureUserIds.admin)
- * assert.ok(Auth.isAdmin(users.admin))
- * assert.ok(!Auth.isAdmin(users.member))
+ * assert.ok(Auth.Admin.isAdmin(users.admin))
+ * assert.ok(!Auth.Admin.isAdmin(users.member))
  *
  * const whoAmI = Effect.map(Auth.SessionContext.requireCurrentUser, (user) => user.id)
  * assert.equal(

@@ -4223,7 +4223,8 @@ describe("the session token never reaches a response body", () => {
 });
 
 /** A rate-limit store call that fails as a down store does. */
-const limiterDown = () => Effect.fail(new Root.AuthError({ message: "rate-limit store down" }));
+const limiterDown = () =>
+  Effect.fail(new Root.Errors.AuthError({ message: "rate-limit store down" }));
 
 // A sign-in for an unknown account: the limiter runs before the handler, so
 // the response status only shows whether the attempt was refused.
@@ -6300,7 +6301,7 @@ describe("make with strict", () => {
   it("is the same class from the http subpath and from the root", () => {
     expect(HttpServer.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
     expect(HttpSubpath.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
-    expect(Root.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
+    expect(Root.Errors.ServicesBuildPendingError).toBe(ServicesBuildPendingError);
   });
 
   it("is ignored by makeAsync, which waits for the build", async () => {

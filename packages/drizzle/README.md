@@ -51,7 +51,7 @@ import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
 
 const db = drizzle({ client: new Pool({ connectionString: process.env.DATABASE_URL }) });
 
-const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+const stores = Drizzle.Layers.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 ```
 
 ## Entry points

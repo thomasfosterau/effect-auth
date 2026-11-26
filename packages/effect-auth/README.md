@@ -23,15 +23,15 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 
 // In-memory stores to start with; use `/sql`, an adapter or your own stores in production.
-const AuthLive = Auth.SessionService.layer({
+const AuthLive = Auth.SessionService.SessionService.layer({
   sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
-}).pipe(Layer.provideMerge(Layer.merge(Testing.memoryStores, Auth.Hooks.Default)));
+}).pipe(Layer.provideMerge(Layer.merge(Testing.memoryStores, Auth.Hooks.Hooks.Default)));
 
 const program = Effect.gen(function* () {
   const ada = Testing.fixtureUser({ name: "Ada" });
-  yield* (yield* Auth.UserServiceStore).update(ada);
+  yield* (yield* Auth.User.UserServiceStore).update(ada);
 
-  const sessions = yield* Auth.SessionService;
+  const sessions = yield* Auth.SessionService.SessionService;
   // `token` goes in the cookie; the store only ever sees its digest, `session.id`.
   const { token } = yield* sessions.createSession(ada.id);
   const { user } = yield* sessions.validateSession(token);
@@ -48,11 +48,11 @@ The [getting-started guide](https://github.com/thomasfosterau/effect-auth/blob/t
 | Entry                                        | Root namespace     | Contents                                                                                                                                                                                |
 | -------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@thomasfosterau/effect-auth`                | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                      |
-| `@thomasfosterau/effect-auth/email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                               |
-| `@thomasfosterau/effect-auth/password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2), password reset, `HaveIBeenPwnedPlugin`                                                                                                                       |
-| `@thomasfosterau/effect-auth/multifactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                          |
-| `@thomasfosterau/effect-auth/oauth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                           |
-| `@thomasfosterau/effect-auth/plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                       |
+| `@thomasfosterau/effect-auth/Email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                               |
+| `@thomasfosterau/effect-auth/Password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2), password reset, `HaveIBeenPwnedPlugin`                                                                                                                       |
+| `@thomasfosterau/effect-auth/MultiFactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                          |
+| `@thomasfosterau/effect-auth/OAuth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                           |
+| `@thomasfosterau/effect-auth/Plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                       |
 | `@thomasfosterau/effect-auth/http`           | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service)   |
 | `@thomasfosterau/effect-auth/client`         | — (subpath only)   | The browser client over the HTTP contract ([guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client-reference.md))                                           |
 | `@thomasfosterau/effect-auth/client/atoms`   | — (subpath only)   | The client session as `effect/reactivity` Atoms ([guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/client-reference.md#the-session-atoms-clientatoms))       |
@@ -60,7 +60,7 @@ The [getting-started guide](https://github.com/thomasfosterau/effect-auth/blob/t
 | `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/storage.md#sql-storage-sql)) |
 | `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([guide](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/saml.md))                                       |
 | `@thomasfosterau/effect-auth/scrypt`         | — (subpath only)   | `scryptHasher` and its layer, to verify and rehash scrypt hashes; Node-only                                                                                                             |
-| `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports only `effect/Option`                                                                                                               |
+| `@thomasfosterau/effect-auth/Ladder`         | —                  | An ordered role ladder for browser UX gates; imports only `effect/Option`                                                                                                               |
 | `@thomasfosterau/effect-auth/testing`        | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                     |
 
 ## Guides

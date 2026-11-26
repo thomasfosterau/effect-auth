@@ -53,7 +53,7 @@ import { type CurrentUser, userLayer } from "./SessionContext.ts";
 import type * as Types from "./Types.ts";
 import { UserStore } from "./UserStore.ts";
 import { isInGoodStanding } from "./UserStanding.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------

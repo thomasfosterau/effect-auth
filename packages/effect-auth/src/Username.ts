@@ -23,7 +23,7 @@ import * as Identifier from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import { lazyDecoyHash, verifyPasswordOrDecoy } from "./password/DecoyVerify.ts";
-import { normalizeUsername } from "./utils.ts";
+import { normalizeUsername } from "./Normalize.ts";
 import { SessionService } from "./SessionService.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import type * as Types from "./Types.ts";

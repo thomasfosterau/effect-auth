@@ -25,7 +25,7 @@ import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import * as Identifier from "./Identifier.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
@@ -627,21 +627,21 @@ const make = (
  * const ada = Testing.fixtureUser({ name: "Ada" })
  *
  * const program = Effect.gen(function* () {
- *   yield* (yield* Auth.UserServiceStore).update(ada)
- *   const { key } = yield* (yield* Auth.ApiKeyService).create(ada.id)
- *   yield* (yield* Auth.UserService).deleteUser(ada.id)
- *   assert.ok(Option.isNone(yield* (yield* Auth.UserServiceStore).get(ada.id)))
- *   assert.deepEqual(yield* (yield* Auth.ApiKeyStore).listByUserId(ada.id), [])
- *   assert.equal((yield* (yield* Auth.ApiKeyService).verify(key)).valid, false)
+ *   yield* (yield* Auth.User.UserServiceStore).update(ada)
+ *   const { key } = yield* (yield* Auth.ApiKey.ApiKeyService).create(ada.id)
+ *   yield* (yield* Auth.User.UserService).deleteUser(ada.id)
+ *   assert.ok(Option.isNone(yield* (yield* Auth.User.UserServiceStore).get(ada.id)))
+ *   assert.deepEqual(yield* (yield* Auth.ApiKey.ApiKeyStore).listByUserId(ada.id), [])
+ *   assert.equal((yield* (yield* Auth.ApiKey.ApiKeyService).verify(key)).valid, false)
  * })
  *
- * const sessions = Auth.SessionService.layer(Testing.defaultSessionConfig).pipe(
- *   Layer.provideMerge(Layer.merge(Testing.memoryStores, Auth.Hooks.Default)),
+ * const sessions = Auth.SessionService.SessionService.layer(Testing.defaultSessionConfig).pipe(
+ *   Layer.provideMerge(Layer.merge(Testing.memoryStores, Auth.Hooks.Hooks.Default)),
  * )
  * const services = Layer.mergeAll(
- *   Auth.UserService.layer(),
- *   Auth.ApiKeyService.layer().pipe(Layer.provideMerge(Auth.RateLimiter.layer())),
- * ).pipe(Layer.provideMerge(Auth.accountDeletionLayer), Layer.provideMerge(sessions))
+ *   Auth.User.UserService.layer(),
+ *   Auth.ApiKey.ApiKeyService.layer().pipe(Layer.provideMerge(Auth.RateLimit.RateLimiter.layer())),
+ * ).pipe(Layer.provideMerge(Auth.AccountManagement.accountDeletionLayer), Layer.provideMerge(sessions))
  *
  * await Effect.runPromise(program.pipe(Effect.provide(services)))
  * ```

@@ -39,7 +39,7 @@ describe("MySQL / RateLimitStore", () => {
     const proxy = recording([["ip:1", 3, "2030-01-01 00:00:00.000", null]]);
     const count = await Effect.runPromise(
       Effect.gen(function* () {
-        const store = yield* Auth.RateLimitStore;
+        const store = yield* Auth.RateLimit.RateLimitStore;
         return yield* store.increment("ip:1", 60);
       }).pipe(
         Effect.provide(RateLimitStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
@@ -152,7 +152,7 @@ describe("MySQL / TokenStore consume", () => {
 describe("MySQL / UserServiceStore", () => {
   it("reads, updates and deletes the user row by id, with no RETURNING", async () => {
     const proxy = recording([]);
-    const user: Auth.User = {
+    const user: Auth.Types.User = {
       id: "user-1",
       name: "Ada",
       createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
@@ -161,7 +161,7 @@ describe("MySQL / UserServiceStore", () => {
     };
     const read = await Effect.runPromise(
       Effect.gen(function* () {
-        const store = yield* Auth.UserServiceStore;
+        const store = yield* Auth.User.UserServiceStore;
         const missing = yield* store.get("user-1");
         yield* store.update(user);
         yield* store.delete("user-1");
@@ -188,10 +188,10 @@ describe("MySQL / UserServiceStore", () => {
   });
 });
 
-const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKeyUse) =>
+const recordUse = (proxy: ReturnType<typeof recording>, use: Auth.ApiKey.ApiKeyUse) =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const store = yield* Auth.ApiKeyStore;
+      const store = yield* Auth.ApiKey.ApiKeyStore;
       return yield* store.recordUse("key-1", use);
     }).pipe(Effect.provide(ApiKeyStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
   );

@@ -225,18 +225,17 @@ export const make = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Option, Result } from "effect"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
  * import {
- *   Hooks,
  *   OneTimeTokenService,
  *   OneTimeTokenStore,
  *   redeemOneTimeTokenForSession,
- *   SessionService,
- *   SessionStore,
- *   UserStore,
  *   type OneTimeTokenRecord,
- *   type Session,
- *   type User,
- * } from "@thomasfosterau/effect-auth"
+ * } from "@thomasfosterau/effect-auth/OneTimeToken"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { SessionStore } from "@thomasfosterau/effect-auth/SessionStore"
+ * import { UserStore } from "@thomasfosterau/effect-auth/UserStore"
+ * import { type Session, type User } from "@thomasfosterau/effect-auth/Types"
  *
  * // In-memory stores. A real app backs these with its database.
  * const tokens = new Map<string, OneTimeTokenRecord>()

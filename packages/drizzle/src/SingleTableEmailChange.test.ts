@@ -118,7 +118,7 @@ const deleteStrictRow = async (userId: string) => {
   await drizzle({ client }).delete(strictUsers).where(eq(strictUsers.userId, userId));
 };
 
-const makeUser = (id: string): Auth.User => {
+const makeUser = (id: string): Auth.Types.User => {
   const now = DateTime.toDateUtc(DateTime.makeUnsafe(USER_CREATED_AT));
   return { id, createdAt: now, updatedAt: now, attributes: {} };
 };
@@ -132,15 +132,17 @@ const makeUser = (id: string): Auth.User => {
 const makeHarness = (
   users: SingleTableUsers,
   deleteRow: (userId: string) => Promise<void>,
-  wrap?: (store: typeof Auth.IdentifierStore.Service) => typeof Auth.IdentifierStore.Service,
+  wrap?: (
+    store: typeof Auth.Identifier.IdentifierStore.Service,
+  ) => typeof Auth.Identifier.IdentifierStore.Service,
 ) => {
-  const userMap = MutableHashMap.fromIterable<string, Auth.User>([
+  const userMap = MutableHashMap.fromIterable<string, Auth.Types.User>([
     [USER.ada, makeUser(USER.ada)],
     [USER.grace, makeUser(USER.grace)],
   ]);
-  const tokens = MutableHashMap.empty<string, Auth.AccountToken>();
+  const tokens = MutableHashMap.empty<string, Auth.AccountManagement.AccountToken>();
 
-  const userStore: typeof Auth.UserServiceStore.Service = {
+  const userStore: typeof Auth.User.UserServiceStore.Service = {
     get: (userId) => Effect.sync(() => MutableHashMap.get(userMap, userId)),
     update: (user) =>
       Effect.sync(() => {
@@ -154,12 +156,12 @@ const makeHarness = (
             MutableHashMap.remove(userMap, userId);
             await deleteRow(userId);
           },
-          catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+          catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
         }),
       ),
   };
 
-  const tokenStore: typeof Auth.AccountManagementStore.Service = {
+  const tokenStore: typeof Auth.AccountManagement.AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => {
         MutableHashMap.set(tokens, token.token, token);
@@ -176,7 +178,7 @@ const makeHarness = (
   };
 
   // Minimal SessionService: only `invalidateUserSessions` is reached.
-  const sessions: typeof Auth.SessionService.Service = {
+  const sessions: typeof Auth.SessionService.SessionService.Service = {
     createSession: () => Effect.die("unused"),
     validateSession: () => Effect.die("unused"),
     invalidateSession: () => Effect.die("unused"),
@@ -187,20 +189,20 @@ const makeHarness = (
     setSessionAttributes: () => Effect.die("unused"),
   };
 
-  const layer = Auth.AccountManagementService.layer({
+  const layer = Auth.AccountManagement.AccountManagementService.layer({
     sendChangeEmailVerification: () => Effect.void,
     sendEmailChangeNotice: () => Effect.void,
     sendDeleteAccountVerification: () => Effect.void,
   }).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        Layer.succeed(Auth.UserServiceStore)(userStore),
-        Layer.succeed(Auth.AccountManagementStore)(tokenStore),
-        Layer.succeed(Auth.SessionService)(sessions),
+        Layer.succeed(Auth.User.UserServiceStore)(userStore),
+        Layer.succeed(Auth.AccountManagement.AccountManagementStore)(tokenStore),
+        Layer.succeed(Auth.SessionService.SessionService)(sessions),
         Layer.effect(
-          Auth.IdentifierStore,
+          Auth.Identifier.IdentifierStore,
           Effect.gen(function* () {
-            const store = yield* Auth.IdentifierStore;
+            const store = yield* Auth.Identifier.IdentifierStore;
             return wrap === undefined ? store : wrap(store);
           }),
         ).pipe(
@@ -214,11 +216,13 @@ const makeHarness = (
 
   return {
     run: <A, E>(
-      f: (svc: typeof Auth.AccountManagementService.Service) => Effect.Effect<A, E>,
+      f: (
+        svc: typeof Auth.AccountManagement.AccountManagementService.Service,
+      ) => Effect.Effect<A, E>,
     ): Promise<A> =>
       Effect.runPromise(
         Effect.gen(function* () {
-          const svc = yield* Auth.AccountManagementService;
+          const svc = yield* Auth.AccountManagement.AccountManagementService;
           return yield* f(svc);
         }).pipe(Effect.provide(layer)),
       ),
@@ -282,7 +286,8 @@ describe("single-table IdentifierStore: email change", () => {
                     .update(appUsers)
                     .set({ email: NEW, emailVerified: true })
                     .where(eq(appUsers.userId, USER.grace)),
-                catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+                catch: (cause) =>
+                  new Auth.Errors.AuthError({ message: "test setup failed", cause }),
               }),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
@@ -293,7 +298,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-      expect(err).toBeInstanceOf(Auth.AccountTokenError);
+      expect(err).toBeInstanceOf(Auth.AccountManagement.AccountTokenError);
       expect(err.message).toBe("Email already in use");
       expect(await readRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
       expect(await readRow(USER.grace)).toEqual({ email: NEW, emailVerified: true });
@@ -317,7 +322,8 @@ describe("single-table IdentifierStore: email change", () => {
                     .update(appUsers)
                     .set({ email: NEW, emailVerified: false })
                     .where(eq(appUsers.userId, USER.ada)),
-                catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+                catch: (cause) =>
+                  new Auth.Errors.AuthError({ message: "test setup failed", cause }),
               }),
             ).pipe(Effect.andThen(store.replace(from, to))),
         }),
@@ -345,7 +351,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-      expect(err).toBeInstanceOf(Auth.AccountTokenError);
+      expect(err).toBeInstanceOf(Auth.AccountManagement.AccountTokenError);
       expect(err.message).toBe("Email already in use");
       expect(await readRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
     });
@@ -386,7 +392,7 @@ describe("single-table IdentifierStore: email change", () => {
                   .update(strictUsers)
                   .set({ email: NEW })
                   .where(eq(strictUsers.userId, USER.grace)),
-              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
             }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));
@@ -396,7 +402,7 @@ describe("single-table IdentifierStore: email change", () => {
 
       const err = await h.run((svc) => Effect.flip(svc.confirmEmailChange(token)));
 
-      expect(err).toBeInstanceOf(Auth.AccountTokenError);
+      expect(err).toBeInstanceOf(Auth.AccountManagement.AccountTokenError);
       expect(err.message).toBe("Email already in use");
       expect(await readStrictRow(USER.ada)).toEqual({ email: OLD, emailVerified: true });
       expect(MutableHashMap.has(h.tokens, digest(token))).toBe(true);
@@ -416,7 +422,7 @@ describe("single-table IdentifierStore: email change", () => {
                   .update(strictUsers)
                   .set({ email: NEW, emailVerified: false })
                   .where(eq(strictUsers.userId, USER.ada)),
-              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
             }),
           ).pipe(Effect.andThen(store.replace(from, to))),
       }));

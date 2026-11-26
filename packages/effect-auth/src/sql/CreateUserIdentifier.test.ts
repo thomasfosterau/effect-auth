@@ -35,7 +35,7 @@ const run = <A, E>(program: Effect.Effect<A, E, Stores>): Promise<A> =>
     ),
   );
 
-const identifierFor = (value: string): Auth.NewUserIdentifier => ({
+const identifierFor = (value: string): Auth.UserStore.NewUserIdentifier => ({
   type: "email",
   value,
   verified: true,
@@ -46,7 +46,7 @@ describe("effect-auth/sql: createUser ignores the identifier", () => {
   it("every createUser seam inserts a new user without an identifier", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const identifiers = yield* Auth.IdentifierStore;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
         const created = [
           yield* (yield* Auth.Email.EmailPasswordStore).createUser({
             identifier: identifierFor("password@example.com"),
@@ -54,13 +54,13 @@ describe("effect-auth/sql: createUser ignores the identifier", () => {
           yield* (yield* Auth.OAuth.OAuthUserStore).createUser({
             identifier: identifierFor("oauth@example.com"),
           }),
-          yield* (yield* Auth.MagicLinkUserStore).createUser({
+          yield* (yield* Auth.MagicLink.MagicLinkUserStore).createUser({
             identifier: identifierFor("link@example.com"),
           }),
           yield* (yield* Auth.Email.EmailOtpUserStore).createUser({
             identifier: identifierFor("otp@example.com"),
           }),
-          yield* (yield* Auth.AdminUserStore).createUser({
+          yield* (yield* Auth.Admin.AdminUserStore).createUser({
             identifier: identifierFor("admin@example.com"),
           }),
         ];
@@ -82,9 +82,9 @@ describe("effect-auth/sql: createUser ignores the identifier", () => {
   it("the claim that follows records the address in auth_identifiers", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const identifiers = yield* Auth.IdentifierStore;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
         const store = yield* Auth.Email.EmailPasswordStore;
-        const created = yield* Auth.createUserWithIdentifier(
+        const created = yield* Auth.UserStore.createUserWithIdentifier(
           identifiers,
           identifierFor("ada@example.com"),
           (identifier) => store.createUser({ identifier }),

@@ -10,7 +10,7 @@ Model Context Protocol clients authenticate against a remote MCP server with pla
 
 ```ts
 import { Layer, Redacted } from "effect";
-import { OidcProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth";
+import { OidcProviderService, mcpProviderPreset } from "@thomasfosterau/effect-auth/OidcProvider";
 
 const oidc = OidcProviderService.layer(
   mcpProviderPreset({

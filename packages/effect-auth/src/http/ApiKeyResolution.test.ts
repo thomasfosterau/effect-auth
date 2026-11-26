@@ -359,15 +359,15 @@ describe("GET /api-keys/current", () => {
 
   describe("a key whose owner is banned, SCIM-deactivated or gone", () => {
     const owners = {
-      banned: (user: Auth.User): Auth.User | null => ({
+      banned: (user: Auth.Types.User): Auth.Types.User | null => ({
         ...user,
         attributes: { ...user.attributes, banned: true },
       }),
-      deactivated: (user: Auth.User): Auth.User | null => ({
+      deactivated: (user: Auth.Types.User): Auth.Types.User | null => ({
         ...user,
         attributes: { ...user.attributes, scimDeactivated: true },
       }),
-      gone: (): Auth.User | null => null,
+      gone: (): Auth.Types.User | null => null,
     };
 
     it.each(Struct.keys(owners))(
@@ -409,7 +409,7 @@ describe("GET /api-keys/current", () => {
   it("answers 500 when the per-key limiter's store fails, never resolving the key", async () => {
     const failing = { on: false };
     const inner = memoryRateLimitStore();
-    const rateLimitStore: typeof Auth.RateLimitStore.Service = {
+    const rateLimitStore: typeof Auth.RateLimit.RateLimitStore.Service = {
       get: (key) => (failing.on ? broken() : inner.get(key)),
       set: (key, entry, ttl) => (failing.on ? broken() : inner.set(key, entry, ttl)),
       increment: (key, ttl) => (failing.on ? broken() : inner.increment(key, ttl)),

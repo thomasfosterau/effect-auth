@@ -6,16 +6,17 @@ The headless core: sessions, users and identifiers, every sign-in method, multi-
 
 Archetype **Core** (`.fallowrc.json` zone `core`, which may import only `ladder`). Peer: `effect` (`catalog:peers`); optional peers `@thomasfosterau/effect-jsonapi` (only `./http`, and `./client/testing` through it) and `@node-saml/node-saml` (only `./saml`, at `^5.1.0`); one dependency, `@thomasfosterau/effect-connect` (the email and SMS contracts `Delivery.ts` bridges to, [ADR-0025](../../docs/adr/0025-delivery-through-effect-connect.md)). Never a dependency on legation in any field ([docs/BOUNDARY.md](../../docs/BOUNDARY.md)); effect-jsonapi is allowed. Every other package in the workspace builds on this one, so a breaking export change here reaches all six. A module that needs only `effect` (or a dependency the core already has) belongs here as a subpath, not in a new package ([ADR-0022](../../docs/adr/0022-package-boundaries.md)).
 
-Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `UserStore`, `Identifier`, `TrustedDevice`, `SessionContext`, `SessionResolution`, `SessionCookies`), the authorization kernel (`Entity`, `Condition`, `Policy`, `AuthorizationModel`, `PolicyStore`, `Authorizer`, `Rbac`, `Permission`, `System`, `Guard`, `OwnedAccess`, `ReferenceAccess`, `Cacheability`, `Protected`, `OrganizationEntities`, `Ladder`, `LadderSchema`) and the unclustered features (`Organization`, `Admin`, `ApiKey`, `Jwt`, `OidcProvider`, `Sso`, `CloudflareAccess`, `Saml`, `Scim`, `Delivery`, `KeyValueStores`, `RateLimit`, …). Lowercase cluster directories each have an `index.ts` barrel, a subpath export and a root namespace:
+Layout: every public module is a PascalCase namespace of the root barrel and a PascalCase subpath of its own (`Auth.SessionService` and `./SessionService`; `Auth.Policy` and `./Policy`), and the root re-exports nothing flat. The modules are the spine (`SessionService`, `SessionStore`, `UserStore`, `Identifier`, `TrustedDevice`, `SessionContext`, `SessionResolution`, `SessionCookies`), the authorization kernel (`Entity`, `Condition`, `Policy`, `AuthorizationModel`, `PolicyStore`, `Authorizer`, `Rbac`, `Permission`, `System`, `Guard`, `OwnedAccess`, `ReferenceAccess`, `Cacheability`, `Protected`, `OrganizationEntities`, `Ladder`, `LadderSchema`) and the unclustered features (`Organization`, `Admin`, `ApiKey`, `Jwt`, `OidcProvider`, `Sso`, `CloudflareAccess`, `Saml`, `Scim`, `Delivery`, `KeyValueStores`, `RateLimit`, …). Lowercase cluster directories each have an `index.ts` barrel; the ones that gate an optional peer or a runtime keep a lowercase subpath and no root namespace:
 
 | Subpath            | Directory                   | Root namespace                    |
 | ------------------ | --------------------------- | --------------------------------- |
 | `.`                | `src/index.ts`              | `Auth`                            |
-| `./email`          | `email/`                    | `Auth.Email`                      |
-| `./password`       | `password/`                 | `Auth.Password`                   |
-| `./multifactor`    | `multifactor/`              | `Auth.MultiFactor`                |
-| `./oauth`          | `oauth/`                    | `Auth.OAuth`                      |
-| `./plugins`        | `plugins/`                  | `Auth.Plugins`                    |
+| `./<Module>`       | `src/<Module>.ts`           | `Auth.<Module>`                   |
+| `./Email`          | `email/`                    | `Auth.Email`                      |
+| `./Password`       | `password/`                 | `Auth.Password`                   |
+| `./MultiFactor`    | `multifactor/`              | `Auth.MultiFactor`                |
+| `./OAuth`          | `oauth/`                    | `Auth.OAuth`                      |
+| `./Plugins`        | `plugins/`                  | `Auth.Plugins`                    |
 | `./http`           | `http/`                     | — (subpath only)                  |
 | `./client`         | `client/index.ts`           | — (subpath only)                  |
 | `./client/atoms`   | `client/SessionAtoms.ts`    | — (subpath only)                  |
@@ -23,14 +24,13 @@ Layout: flat root modules for the spine (`SessionService`, `SessionStore`, `User
 | `./sql`            | `sql/index.ts`              | — (subpath only)                  |
 | `./saml`           | `saml/index.ts`             | — (subpath only; Node-only)       |
 | `./scrypt`         | `password/Scrypt.ts`        | — (subpath only; Node-only)       |
-| `./ladder`         | `Ladder.ts`                 | `Auth.Ladder`                     |
 | `./testing`        | `testing/index.ts`          | — (not re-exported from the root) |
 
-`src/sql/testing/` is internal test support (the PGlite template the `./sql` suites open their databases from; excluded from the build). `src/testing/` holds the `./testing` subpath (`runAs`, `runAsViewer`), which the root barrel never re-exports and which must not load the HTTP tier (`ModuleGraph.test.ts`); its other modules are internal test support. A new cluster module is exported from its `index.ts`; a new subpath needs a `package.json` `exports` entry and a `.fallowrc.json` `entry`.
+`src/sql/testing/` is internal test support (the PGlite template the `./sql` suites open their databases from; excluded from the build). `src/testing/` holds the `./testing` subpath (`runAs`, `runAsViewer`), which the root barrel never re-exports and which must not load the HTTP tier (`ModuleGraph.test.ts`); its other modules are internal test support. A new cluster module is exported from its `index.ts`. A new public root module gets an `export * as` line in `index.ts` and a `package.json` `exports` entry; a new lowercase subpath also needs a `.fallowrc.json` `entry`.
 
 ## Invariants
 
-- **`./ladder` imports only `effect/Option`** (its spelling of an anonymous holder): browser bundles load it. `ModuleGraph.test.ts` pins it; `.fallowrc.json` gives `Ladder.ts` its own zone with no outbound rule.
+- **`./Ladder` imports only `effect/Option`** (its spelling of an anonymous holder): browser bundles load it. `ModuleGraph.test.ts` pins it; `.fallowrc.json` gives `Ladder.ts` its own zone with no outbound rule.
 - **The root barrel must not pull the HTTP tier** (`http/`, `effect/http-api`, effect-jsonapi) into a consumer's graph: the tier is published only on the `./http` subpath, and `ModuleGraph.test.ts` fails on any root-reachable import of either. It reaches none of `client/`, `sql/` and `saml/` either; those may reach the HTTP tier (`./client` does, for its wire types) and the rest of the core, through relative imports.
 - **The HTTP tier is JSON:API, except the RFC tier** ([ADR-0024](../../docs/adr/0024-json-api-http-tier.md)): every endpoint this library designs is a resource operation in `Http.Resources` / `HttpApi.ts` answering `application/vnd.api+json`, and the `auth` and `scim` groups keep the wire formats their specifications fix (RFC 8628, OAuth 2.0 / OIDC, RFC 7591 / 7592, RFC 8414, RFC 7517, the SSO bindings, SCIM 2.0). Never move an endpoint across that line. `http/OpenApi.test.ts` pins both sides, each RFC-tier suite pins its media types (`src/testing/WireFormat.ts`, test-only), and `client/ClientRoutes.test.ts` fails on a client call to a route the contract does not serve. A new endpoint is a resource unless a specification fixes its format.
 - **`@node-saml/node-saml` is reached only from `./saml`**: `ModuleGraph.test.ts` asserts the root never reaches it (nor `xml-crypto`). `./saml` is Node-only, so the README, the SAML guide and its module docs say so; the rest of the core stays Workers- and browser-safe.

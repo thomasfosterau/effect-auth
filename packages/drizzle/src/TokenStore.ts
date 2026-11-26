@@ -42,12 +42,14 @@ interface TokenRecord {
  * cooldown.
  */
 interface TokenStoreMethods<A extends TokenRecord> {
-  readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
-  readonly get: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
-  readonly consume: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
-  readonly delete: (token: string) => Effect.Effect<void, Auth.AuthError>;
-  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
-  readonly getLatestByUserId: (userId: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
+  readonly create: (record: A) => Effect.Effect<A, Auth.Errors.AuthError>;
+  readonly get: (token: string) => Effect.Effect<Option.Option<A>, Auth.Errors.AuthError>;
+  readonly consume: (token: string) => Effect.Effect<Option.Option<A>, Auth.Errors.AuthError>;
+  readonly delete: (token: string) => Effect.Effect<void, Auth.Errors.AuthError>;
+  readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.Errors.AuthError>;
+  readonly getLatestByUserId: (
+    userId: string,
+  ) => Effect.Effect<Option.Option<A>, Auth.Errors.AuthError>;
 }
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));

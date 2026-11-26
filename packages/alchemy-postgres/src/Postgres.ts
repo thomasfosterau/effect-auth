@@ -8,12 +8,12 @@
  * ```ts skip-type-checking
  * import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
  *
- * const AppLayer = Auth.layer.pipe(Layer.provide(Postgres.layer(env.HYPERDRIVE)));
+ * const AppLayer = Auth.layer.pipe(Layer.provide(Postgres.Postgres.layer(env.HYPERDRIVE)));
  * ```
  *
  * @example On deploy, by URL
  * ```ts skip-type-checking
- * AuthSchemaProvider({ database: Postgres.database(Redacted.make(process.env.DATABASE_URL)) });
+ * AuthSchemaProvider({ database: Postgres.Postgres.database(Redacted.make(process.env.DATABASE_URL)) });
  * ```
  *
  * @module effect-auth-alchemy-postgres
@@ -77,7 +77,7 @@ export const layer = (
 export const migrate = (
   source: Source,
   options?: ClientOptions,
-): Effect.Effect<void, Auth.AuthError | SqlError.SqlError> =>
+): Effect.Effect<void, Auth.Errors.AuthError | SqlError.SqlError> =>
   Sql.migrate.pipe(Effect.provide(clientLayer(source, options)));
 
 /**
@@ -87,7 +87,7 @@ export const migrate = (
 export const purgeExpired = (
   source: Source,
   options?: ClientOptions,
-): Effect.Effect<Sql.PurgeExpiredResult, Auth.AuthError | SqlError.SqlError> =>
+): Effect.Effect<Sql.PurgeExpiredResult, Auth.Errors.AuthError | SqlError.SqlError> =>
   Sql.purgeExpired.pipe(Effect.provide(clientLayer(source, options)));
 
 /**

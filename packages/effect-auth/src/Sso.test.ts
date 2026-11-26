@@ -47,8 +47,8 @@ import {
   type Member,
   type Organization,
   type OrganizationDomain,
-  type SsoProvider,
-} from "./index.ts";
+} from "./Organization.ts";
+import { type SsoProvider } from "./Sso.ts";
 import { type OAuthCreateUserInput, OAuthStateStore, OAuthUserStore } from "./oauth/OAuth.ts";
 import { oauthStateStoreKV } from "./KeyValueStores.ts";
 import { KeyValueStore } from "effect/persistence";

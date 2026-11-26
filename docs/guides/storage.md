@@ -21,14 +21,14 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // `redis` is your client, the same one behind the `KeyValueStore`.
 declare const redis: { getDel(key: string): Promise<string | null> };
 
-export const RedisTake = Layer.succeed(Auth.KeyValueStoreTake, {
+export const RedisTake = Layer.succeed(Auth.KeyValueStores.KeyValueStoreTake, {
   take: (key) =>
     Effect.tryPromise({
       try: async () => (await redis.getDel(key)) ?? undefined,
-      catch: (cause) => new Auth.AuthError({ message: "GETDEL failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "GETDEL failed", cause }),
     }),
 });
-// Auth.layerKV.pipe(Layer.provide(Layer.merge(RedisKeyValueStore, RedisTake)))
+// Auth.KeyValueStores.layerKV.pipe(Layer.provide(Layer.merge(RedisKeyValueStore, RedisTake)))
 ```
 
 `take` must name keys as the `KeyValueStore` does: behind a `KeyValueStore.prefix` view, add the prefix before calling the backend.
@@ -51,7 +51,7 @@ export const workersKvKeys = (KV: {
     cursor?: string;
   }>;
 }) =>
-  Layer.succeed(Auth.KeyValueStoreKeys, {
+  Layer.succeed(Auth.KeyValueStores.KeyValueStoreKeys, {
     list: (prefix) =>
       Effect.tryPromise({
         try: async () => {
@@ -64,12 +64,12 @@ export const workersKvKeys = (KV: {
           } while (cursor !== undefined);
           return names;
         },
-        catch: () => new Auth.AuthError({ message: "KV list failed" }),
+        catch: () => new Auth.Errors.AuthError({ message: "KV list failed" }),
       }),
   });
 
 // In the scheduled handler, with the same KeyValueStore the stores use:
-// yield* Auth.purgeExpiredKV  // { oauthStates, magicLinks, emailOtps, rateLimits, … }
+// yield* Auth.KeyValueStores.purgeExpiredKV  // { oauthStates, magicLinks, emailOtps, rateLimits, … }
 ```
 
 The listing must name keys as the `KeyValueStore` sees them: behind a `KeyValueStore.prefix` view, strip that prefix. The KV purge is read-then-delete like the stores' other multi-step writes, so an OTP re-sent for the same address and purpose mid-purge can be deleted with the expired one; that code is then refused and the user asks for another.
@@ -113,11 +113,11 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
   // Creates the `auth_*` tables; idempotent, so it is safe on every deploy.
   const migrate = AuthSql.migrate.pipe(Effect.provide(SqlLive));
 
-  const sessionConfig: Auth.SessionConfig = {
+  const sessionConfig: Auth.Types.SessionConfig = {
     sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
   };
-  const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
-    Layer.provideMerge(Layer.mergeAll(AuthSql.layer, Auth.Hooks.Default)),
+  const AuthLive = Auth.SessionService.SessionService.layer(sessionConfig).pipe(
+    Layer.provideMerge(Layer.mergeAll(AuthSql.layer, Auth.Hooks.Hooks.Default)),
     Layer.provide(SqlLive),
   );
   return { migrate, AuthLive };
@@ -132,19 +132,19 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 
 | Store (core tag)                           | Constructor / layer                                            | Table                                                             |
 | ------------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `Auth.SessionStore`                        | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`                                                   |
-| `Auth.UserStore`                           | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                                                      |
-| `Auth.UserServiceStore`                    | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                                                      |
-| `Auth.IdentifierStore`                     | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`                                                |
+| `Auth.SessionStore.SessionStore`           | `makeSessionStore` / `SessionStoreLayer`                       | `auth_sessions`                                                   |
+| `Auth.UserStore.UserStore`                 | `makeUserStore` / `UserStoreLayer`                             | `auth_users`                                                      |
+| `Auth.User.UserServiceStore`               | `makeUserServiceStore` / `UserServiceStoreLayer`               | `auth_users`                                                      |
+| `Auth.Identifier.IdentifierStore`          | `makeIdentifierStore` / `IdentifierStoreLayer`                 | `auth_identifiers`                                                |
 | `Auth.Email.EmailPasswordStore`            | `makeEmailPasswordStore` / `EmailPasswordStoreLayer`           | `auth_users`                                                      |
 | `Auth.Email.EmailVerificationStore`        | `makeEmailVerificationStore` / `EmailVerificationStoreLayer`   | `auth_email_verifications`                                        |
 | `Auth.Email.EmailOtpStore`                 | `makeEmailOtpStore` / `EmailOtpStoreLayer`                     | `auth_email_otps`, `auth_email_otp_failures`                      |
 | `Auth.Email.EmailOtpUserStore`             | `makeEmailOtpUserStore` / `EmailOtpUserStoreLayer`             | `auth_users`                                                      |
 | `Auth.Password.PasswordResetStore`         | `makePasswordResetStore` / `PasswordResetStoreLayer`           | `auth_password_resets`                                            |
 | `Auth.Password.PasswordResetUserStore`     | `makePasswordResetUserStore` / `PasswordResetUserStoreLayer`   | `auth_users`                                                      |
-| `Auth.MagicLinkStore`                      | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`                                                |
-| `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
-| `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
+| `Auth.MagicLink.MagicLinkStore`            | `makeMagicLinkStore` / `MagicLinkStoreLayer`                   | `auth_magic_links`                                                |
+| `Auth.MagicLink.MagicLinkUserStore`        | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
+| `Auth.RateLimit.RateLimitStore`            | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
 | `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`                                        |
 | `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`, `auth_webauthn_credential_flags`     |
 | `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`                                               |
@@ -153,8 +153,8 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 | `Auth.OAuth.OAuthAccountStore`             | `makeOAuthAccountStore` / `OAuthAccountStoreLayer`             | `auth_oauth_accounts`                                             |
 | `Auth.OAuth.OAuthUserStore`                | `makeOAuthUserStore` / `OAuthUserStoreLayer`                   | `auth_users`                                                      |
 | `Auth.Plugins.AccountLockoutStore`         | `makeAccountLockoutStore` / `AccountLockoutStoreLayer`         | `auth_account_lockouts`                                           |
-| `Auth.ApiKeyStore`                         | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`                                                   |
-| `Auth.AdminUserStore`                      | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                                                      |
+| `Auth.ApiKey.ApiKeyStore`                  | `makeApiKeyStore` / `ApiKeyStoreLayer`                         | `auth_api_keys`                                                   |
+| `Auth.Admin.AdminUserStore`                | `makeAdminUserStore` / `AdminUserStoreLayer`                   | `auth_users`                                                      |
 
 ```typescript
 import { Layer } from "effect";
@@ -175,11 +175,11 @@ Not covered yet: the stores added to the core later (one-time tokens, trusted de
 ### Schema and migration
 
 - `schemaStatements: readonly string[]` — the ordered DDL, one statement per entry, every one `CREATE TABLE IF NOT EXISTS` or `CREATE [UNIQUE] INDEX IF NOT EXISTS` over `auth_`-prefixed tables, so they live beside your own.
-- `migrate: Effect<void, Auth.AuthError, SqlClient>` — runs `schemaStatements` through the ambient `SqlClient`. Safe on every deploy and every cold start.
+- `migrate: Effect<void, Auth.Errors.AuthError, SqlClient>` — runs `schemaStatements` through the ambient `SqlClient`. Safe on every deploy and every cold start.
 
 Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 on every engine), booleans `0`/`1`, attribute bags JSON `TEXT`, binary values (WebAuthn challenges and public keys) base64 `TEXT`. Token columns (`auth_sessions.id`, the magic-link, verification and reset tokens, `auth_api_keys.key_hash`) hold the SHA-256 digest the service layer computed: the database never sees a raw bearer token.
 
-- `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes every expired row (read from the `Clock`) and reports how many went from each table: `auth_sessions`, `auth_oauth_states`, `auth_webauthn_challenges`, `auth_pending_multi_factor`, `auth_email_verifications`, `auth_password_resets`, `auth_magic_links` and `auth_email_otps` past `expires_at`; `auth_rate_limits` rows whose `reset_at` and `blocked_until` have both passed; `auth_account_lockouts` rows whose lock has ended or which have had no attempt for a day; `auth_email_otp_failures` rows 25 hours after their latest wrong code. The companion tables lose their orphans in the same run. A row inside its window, still blocked or still live stays, so a purge changes no outcome. No store deletes them on its own, so schedule it from the host (see [Expired rows](#sql-storage-sql)).
+- `purgeExpired: Effect<PurgeExpiredResult, Auth.Errors.AuthError, SqlClient>` — deletes every expired row (read from the `Clock`) and reports how many went from each table: `auth_sessions`, `auth_oauth_states`, `auth_webauthn_challenges`, `auth_pending_multi_factor`, `auth_email_verifications`, `auth_password_resets`, `auth_magic_links` and `auth_email_otps` past `expires_at`; `auth_rate_limits` rows whose `reset_at` and `blocked_until` have both passed; `auth_account_lockouts` rows whose lock has ended or which have had no attempt for a day; `auth_email_otp_failures` rows 25 hours after their latest wrong code. The companion tables lose their orphans in the same run. A row inside its window, still blocked or still live stays, so a purge changes no outcome. No store deletes them on its own, so schedule it from the host (see [Expired rows](#sql-storage-sql)).
 - `purgeExpiredWith(options?)` — `purgeExpired` with `PurgeExpiredOptions`: `limit` (a positive integer) caps the rows deleted from each table in one run, as `DELETE … WHERE <expired> AND key IN (SELECT key … WHERE <expired> LIMIT n)` (the outer `<expired>` keeps a row refreshed concurrently after the subquery picked it), so a Workers cron tick does bounded work; call it until every count is `0`, or once per tick. `accountLockoutRetention` and `otpFailureRetention` (`Duration.Input`) set how long an idle lockout counter and a failure budget outlive their latest attempt. Omitted, it is `purgeExpired`. A `limit` that is not a positive integer, or a negative or infinite retention, fails with `AuthError` before a statement runs.
 
 Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction, and `OAuthStateStore.consume` and the single-use token stores' `consume` (email verification, password reset, magic link, pending multi-factor challenge) are each one `DELETE … RETURNING`, so a state or token is handed out once; `MultiFactorStore.useTotpCounter` / `useBackupCode` are compare-and-set `UPDATE … RETURNING`s. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `CredentialStore`'s writes, which keep the backup flags and AAGUID in `auth_webauthn_credential_flags`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
@@ -188,7 +188,7 @@ Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURN
 
 Role data lives in two tables, `auth_user_roles` (user → role) and `auth_role_permissions` (role → `resource` / `action`), but `layer` does not wire authorization: an `EntityResolver` is one slot the application composes, not a store. `UserServiceStore.delete` removes the user's `auth_user_roles` rows with the user row, in one transaction, since no store owns them.
 
-- `makeRbacEntityResolver` / `RbacEntityResolverLayer` — an `Auth.EntityResolver` that answers `User::"<id>"` references with a `Role::"<role>"` parent per assigned role. It answers only `User` references and adds no role-to-role edges, so compose it with your own resolver when policies name other entities.
+- `makeRbacEntityResolver` / `RbacEntityResolverLayer` — an `Auth.Authorizer.EntityResolver` that answers `User::"<id>"` references with a `Role::"<role>"` parent per assigned role. It answers only `User` references and adds no role-to-role edges, so compose it with your own resolver when policies name other entities.
 - `readRbacPolicies: Effect<ReadonlyArray<Auth.Policy.DeclarativePolicy>, never, SqlClient>` — reads `auth_role_permissions` and compiles it with `Auth.Rbac.policies`, the same policies a hand-written `Auth.Rbac` configuration produces.
 
 ```typescript
@@ -199,7 +199,9 @@ import * as AuthSql from "@thomasfosterau/effect-auth/sql";
 
 export const authorization = (SqlLive: Layer.Layer<SqlClient.SqlClient>) =>
   Layer.unwrap(
-    Effect.map(AuthSql.readRbacPolicies, (policies) => Auth.Authorizer.layer({ policies })),
+    Effect.map(AuthSql.readRbacPolicies, (policies) =>
+      Auth.Authorizer.Authorizer.layer({ policies }),
+    ),
   ).pipe(Layer.provide(AuthSql.RbacEntityResolverLayer), Layer.provide(SqlLive));
 ```
 
@@ -240,4 +242,4 @@ export const listPosts = (scope: Auth.ReadScope.ReadScope, viewerId: string) =>
 
 ### Errors
 
-Every store method fails only with `Auth.AuthError` (an infrastructure failure, the driver's error kept as `cause`); a lookup that finds nothing returns `Option.none()`, and the core services turn that into their typed errors. A unique-index violation (an identifier, an OAuth account, an API key hash) is an `AuthError` too, which the core resolves into the domain error (`IdentifierTakenError`, …).
+Every store method fails only with `Auth.Errors.AuthError` (an infrastructure failure, the driver's error kept as `cause`); a lookup that finds nothing returns `Option.none()`, and the core services turn that into their typed errors. A unique-index violation (an identifier, an OAuth account, an API key hash) is an `AuthError` too, which the core resolves into the domain error (`IdentifierTakenError`, …).

@@ -21,7 +21,7 @@ import { userFromRow, selection } from "./UserStore.ts";
 /** Build a `UserServiceStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   schema: SchemaInput = defaultTables,
-): Effect.Effect<typeof Auth.UserServiceStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.User.UserServiceStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const users: UserSchema = resolveSchema(schema).users;
@@ -32,7 +32,7 @@ export const make = (
     // Every promoted column, cleared: what a user without that attribute writes.
     const cleared = R.fromEntries(R.values(keys).map((key) => [key, null] as const));
 
-    const update: (typeof Auth.UserServiceStore.Service)["update"] = (user) =>
+    const update: (typeof Auth.User.UserServiceStore.Service)["update"] = (user) =>
       Effect.gen(function* () {
         const { columns, bag } = yield* splitAttributes(
           users,
@@ -69,11 +69,11 @@ export const make = (
         query("userService.delete", (db) =>
           db.delete(users.table).where(eq(column.id, userId)).execute(),
         ).pipe(Effect.asVoid),
-    } satisfies typeof Auth.UserServiceStore.Service;
+    } satisfies typeof Auth.User.UserServiceStore.Service;
   });
 
 /** `UserServiceStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   schema: SchemaInput = defaultTables,
-): Layer.Layer<Auth.UserServiceStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.UserServiceStore, make(schema));
+): Layer.Layer<Auth.User.UserServiceStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.User.UserServiceStore, make(schema));

@@ -47,7 +47,7 @@ export const make = (resource: string, action: string): PermissionRef => ({
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { parsePermission } from "@thomasfosterau/effect-auth"
+ * import { parsePermission } from "@thomasfosterau/effect-auth/Permission"
  *
  * assert.deepEqual(parsePermission("posts:read"), { resource: "posts", action: "read" })
  * assert.deepEqual(parsePermission("posts:*"), { resource: "posts", action: "*" })
@@ -98,7 +98,7 @@ export const formatPermission = (permission: PermissionRef): string =>
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { permissionMatches } from "@thomasfosterau/effect-auth"
+ * import { permissionMatches } from "@thomasfosterau/effect-auth/Permission"
  *
  * assert.equal(permissionMatches({ resource: "posts", action: "*" }, { resource: "posts", action: "read" }), true)
  * assert.equal(permissionMatches({ resource: "*", action: "*" }, { resource: "users", action: "delete" }), true)

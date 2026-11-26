@@ -38,7 +38,7 @@ const usersWithBag = pgTable("users_with_bag", {
   id: uuid("id").primaryKey(),
   name: text("name"),
   image: text("image"),
-  meta: jsonb("meta").$type<Auth.Attributes>().notNull().default({}),
+  meta: jsonb("meta").$type<Auth.Types.Attributes>().notNull().default({}),
   role: text("role"),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
@@ -49,7 +49,7 @@ const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   lastActivityAt: timestamp("last_activity_at", { mode: "date", withTimezone: true }).notNull(),
-  attributes: jsonb("attributes").$type<Auth.Attributes>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.Types.Attributes>().notNull().default({}),
 });
 const identifiers = pgTable("identifiers", {
   id: uuid("id").primaryKey(),
@@ -215,7 +215,7 @@ describe("promoted attributes", () => {
       );
       return Effect.runPromise(
         Effect.gen(function* () {
-          const store = yield* Auth.UserStore;
+          const store = yield* Auth.UserStore.UserStore;
           return [
             yield* store.get(ids.moderator),
             yield* store.get(ids.plain),
@@ -254,7 +254,7 @@ describe("promoted attributes", () => {
       ]);
       return Effect.runPromise(
         Effect.gen(function* () {
-          const store = yield* Auth.UserStore;
+          const store = yield* Auth.UserStore.UserStore;
           return [yield* store.get(ids.moderator), yield* store.get(ids.plain)] as const;
         }).pipe(Effect.provide(storesLayer(withBag).pipe(Layer.provide(databaseLayer(db))))),
       );

@@ -367,7 +367,7 @@ export default defineConfig({
         // Code that imports nothing from `effect` at runtime: the Svelte
         // binding (`effect` types only), the browser client's runtime is
         // plain `fetch` with no Effect in the bundle (`client/Client.ts`), and
-        // `./ladder` imports nothing at all because browser bundles load it
+        // `./Ladder` imports nothing at all because browser bundles load it
         // (`ModuleGraph.test.ts`). The
         // rules that steer to an `effect` module (`Array`, `Predicate`,
         // `Match`, `HashSet`, `Schema`, `Clock`) have no satisfiable fix

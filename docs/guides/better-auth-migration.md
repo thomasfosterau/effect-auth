@@ -10,7 +10,7 @@ Better Auth is a **framework instance**: `betterAuth({ ... })` returns an object
 
 The practical consequences are worth internalising before you start:
 
-- There is no `auth` object and no `auth.api.*`. You get services from context (`yield* Auth.SessionService`) and compose them with `Layer.mergeAll` / `Layer.provide`.
+- There is no `auth` object and no `auth.api.*`. You get services from context (`yield* Auth.SessionService.SessionService`) and compose them with `Layer.mergeAll` / `Layer.provide`.
 - There is no adapter for your ORM. Features depend on small store contracts (`SessionStore`, `UserStore`, `IdentifierStore`, …) that you either implement yourself or take from `@thomasfosterau/effect-auth/sql` / `-drizzle` / `-alchemy`.
 - A feature is "enabled" exactly when its layer is in the context. Optional HTTP routes answer `404` until the service behind them is provided — that is the whole configuration mechanism.
 - Errors are values in the typed error channel, not thrown exceptions; every service method has `R = never` once its layer is built.
@@ -24,21 +24,21 @@ It covers sessions, users, identifier reads and email or username sign-in. Every
 
 ## 2. Concept map
 
-| Better Auth                                      | effect-auth                                                                                                                      |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                                      |
-| `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                                         |
-| `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth/sql`, `-drizzle`, `-alchemy-cloudflare` / `-alchemy-postgres`, or your own |
-| `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`                   |
-| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(token)` on `Auth.SessionService`, or `GET /sessions/current?include=user` over HTTP             |
-| `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycleService` for the sign-up/sign-in orchestration)            |
-| `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                                    |
-| `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.emailCallbacks(sender, identifiers)`              |
-| `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret                  |
-| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                                         |
-| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                                    |
-| `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth/client`                                                                     |
-| `better-auth/svelte`                             | `@thomasfosterau/effect-auth-svelte` (no React, Vue or Solid binding)                                                            |
+| Better Auth                                      | effect-auth                                                                                                                         |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `betterAuth({ ... })` instance                   | a `Layer` composed from per-service `X.layer(config)` calls                                                                         |
+| `plugins: [twoFactor(), organization(), …]`      | merging `MultiFactorService.layer(…)`, `OrganizationService.layer(…)`, … into that layer                                            |
+| `database: drizzleAdapter(db, …)`                | store contracts + one of `@thomasfosterau/effect-auth/sql`, `-drizzle`, `-alchemy-cloudflare` / `-alchemy-postgres`, or your own    |
+| `auth.handler` (mounted at `/api/auth/*`)        | `(await Http.makeAsync({ services, prefix: "/api/auth" })).handler` — a plain `(Request) => Promise<Response>`                      |
+| `auth.api.getSession({ headers })`               | `yield* sessions.validateSession(token)` on `Auth.SessionService.SessionService`, or `GET /sessions/current?include=user` over HTTP |
+| `emailAndPassword: { enabled: true }`            | `Auth.Email.EmailPasswordService.layer(config)` (+ `Auth.AuthLifecycle.AuthLifecycleService` for the sign-up/sign-in orchestration) |
+| `socialProviders: { github: { … } }`             | `Auth.OAuth.OAuthService.layer({ github: Auth.OAuth.GitHubProvider({ … }) })`                                                       |
+| `sendVerificationEmail` / `sendResetPassword` …  | per-feature callbacks, or derive all of them from one `EmailSender` with `Auth.Delivery.emailCallbacks(sender, identifiers)`        |
+| `secret` (signing key)                           | per-feature secrets: `Cipher` keys, `SessionCacheConfig` HMAC key, `JwtKeyStore` keys — no single global secret                     |
+| `session.cookieCache`                            | `cookie: { cache: { … } }` on `Http.makeAsync` (`SessionCookieCache.ts`)                                                            |
+| `advanced.crossSubDomainCookies` / trusted hosts | `trustedOrigins` + `trustedProxy` options on `Http.makeAsync`                                                                       |
+| `createAuthClient` from `better-auth/client`     | `createAuthClient` from `@thomasfosterau/effect-auth/client`                                                                        |
+| `better-auth/svelte`                             | `@thomasfosterau/effect-auth-svelte` (no React, Vue or Solid binding)                                                               |
 
 ### Config → layers, concretely
 
@@ -53,17 +53,17 @@ import * as Sql from "@thomasfosterau/effect-auth/sql";
 const stores = Sql.layer.pipe(Layer.provide(SqlClientLayer));
 
 const services = Layer.mergeAll(
-  Auth.SessionService.layer({
+  Auth.SessionService.SessionService.layer({
     sessionExpiresIn: { activePeriod: 30 * 864e5, idlePeriod: 14 * 864e5 },
   }),
-  Auth.AuthLifecycleService.layer(),
+  Auth.AuthLifecycle.AuthLifecycleService.layer(),
   Auth.Email.EmailPasswordService.layer(),
   Auth.Password.PasswordHasher.layer(),
-  Auth.UserService.layer(),
-  Auth.Hooks.Default,
+  Auth.User.UserService.layer(),
+  Auth.Hooks.Hooks.Default,
   // The per-address limits Http.makeAsync applies by default count here; the
   // counters live in the same database (`auth_rate_limits`).
-  Auth.RateLimiter.layer(),
+  Auth.RateLimit.RateLimiter.layer(),
 ).pipe(Layer.provideMerge(stores));
 
 const { handler } = await Http.makeAsync({
@@ -71,7 +71,7 @@ const { handler } = await Http.makeAsync({
   prefix: "/api/auth",
   trustedOrigins: ["https://app.example.com"],
   // The visitor's address, which the rate limits key on (here, behind Cloudflare).
-  trustedProxy: Auth.ClientIP.cloudflare,
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
 });
 ```
 
@@ -83,7 +83,7 @@ The set of services `Http.makeAsync` requires is `AuthServices` in `http/HttpSer
 
 ### Plugins vs hooks
 
-Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`. Register them where you would have provided `Auth.Hooks.Default`.
+Better Auth's `plugins` array does two different jobs: it adds features, and it adds cross-cutting behaviour (`hooks.before` / `hooks.after`). In effect-auth those are separate mechanisms. Features are layers. Cross-cutting behaviour is the `Hooks` service (`src/Hooks.ts`) with first-party plugins under `src/plugins/` — `AccountLockoutPlugin`, `AuditPlugin`, `CaptchaPlugin`, `IPRateLimitPlugin`, `LastLoginMethodPlugin`, `NormalizeEmailPlugin` and `RateLimitPlugin`. Register them where you would have provided `Auth.Hooks.Hooks.Default`.
 
 ## 3. Storage: adapters → store contracts
 
@@ -104,7 +104,7 @@ Names below are the exact exports; `Auth` is `import * as Auth from "@thomasfost
 
 ### Email + password
 
-`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /users` (sign-up), `POST /sessions` (sign-in), `POST /email-verifications` and `POST /email-verifications/redemptions`, `POST /password-resets` and `POST /password-resets/redemptions`, and `PATCH /users/me/password`, as JSON:API resources.
+`Auth.Email.EmailPasswordService` (`signUp`, `signIn`, `changePassword`, `setPassword`) over `EmailPasswordStore`, with `Auth.Password.PasswordHasher` doing the hashing and `Auth.AuthLifecycle.AuthLifecycleService` (`signUp`, `signIn`, `verifyEmail`) orchestrating the sign-up → verification → session path that Better Auth hides inside its instance. Verification and reset are their own services — `Auth.Email.EmailVerificationService` and `Auth.Password.PasswordResetService` — reached over `POST /users` (sign-up), `POST /sessions` (sign-in), `POST /email-verifications` and `POST /email-verifications/redemptions`, `POST /password-resets` and `POST /password-resets/redemptions`, and `PATCH /users/me/password`, as JSON:API resources.
 
 The default hasher is PBKDF2-SHA256; Argon2id is `Password.argon2idHasherLayer` (over `NodeCrypto.layerKdf`, Node.js 24.7+ or Bun 1.4+), or `@thomasfosterau/effect-auth-argon2` on Workers, each a drop-in `PasswordHasher`. Better Auth hashes with scrypt by default, so **existing password hashes do not verify** — see §6.
 
@@ -116,11 +116,11 @@ The default hasher is PBKDF2-SHA256; Argon2id is `Password.argon2idHasherLayer` 
 
 ### Magic link
 
-`Auth.MagicLinkService` (`send`, `verify`) over `MagicLinkStore` + `MagicLinkUserStore`, on `POST /otp-challenges` (channel `magic-link`) and `POST /sessions` (a `magic-link` credential). Delivery is the `sendMagicLink` callback in `MagicLinkConfig`.
+`Auth.MagicLink.MagicLinkService` (`send`, `verify`) over `MagicLinkStore` + `MagicLinkUserStore`, on `POST /otp-challenges` (channel `magic-link`) and `POST /sessions` (a `magic-link` credential). Delivery is the `sendMagicLink` callback in `MagicLinkConfig`.
 
 ### Email OTP and phone OTP
 
-`Auth.Email.EmailOtpService` (`send`, `signIn`, `check`) on `POST /otp-challenges` (channel `email`) and `POST /sessions` (an `email-otp` credential), and `Auth.PhoneOtpService` on `POST /otp-challenges` (channel `phone`) and `POST /sessions` (a `phone-otp` credential). Both hash the code at rest, scope it by purpose, and limit attempts. Better Auth's `emailOtp` and `phoneNumber` plugins map here one for one.
+`Auth.Email.EmailOtpService` (`send`, `signIn`, `check`) on `POST /otp-challenges` (channel `email`) and `POST /sessions` (an `email-otp` credential), and `Auth.PhoneOtp.PhoneOtpService` on `POST /otp-challenges` (channel `phone`) and `POST /sessions` (a `phone-otp` credential). Both hash the code at rest, scope it by purpose, and limit attempts. Better Auth's `emailOtp` and `phoneNumber` plugins map here one for one.
 
 ### Passkeys / WebAuthn
 
@@ -136,30 +136,30 @@ Every sign-in method integrates through the `SecondFactorGate` seam (password, m
 
 ### Organizations and teams
 
-`Auth.OrganizationService` covers organizations, members, invitations, teams and per-organization roles: `createOrganization`, `updateOrganization`, `deleteOrganization`, `getFullOrganization`, `listOrganizations`, `inviteMember`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `listInvitations`, `listUserInvitations`, `listInvitationsForUser`, `addMember`, `removeMember`, `updateMemberRole`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember`, `listTeams`, `listTeamMembers`, `listTeamsForMember`, `upsertOrgRole`, `deleteOrgRole`, `listOrgRoles`, `checkPermission`, `requirePermission`. Teams are hierarchical ([ADR 0016](../adr/0016-hierarchical-teams.md)) and roles are data, not a compile-time union ([ADR 0009](../adr/0009-organization-data-model-and-permissions.md)). The HTTP surface is `/organizations` (with `/organizations/:id/members`, `/invitations`, `/domains`, `/roles` and `/teams`), `/organization-members/:id` (and `/organization-members/:id/teams`), `/invitations/:id`, `/organization-domains/:id`, `/organization-roles/:id`, `/teams/:id` (and `/teams/:id/members`) and `/team-members/:id`.
+`Auth.Organization.OrganizationService` covers organizations, members, invitations, teams and per-organization roles: `createOrganization`, `updateOrganization`, `deleteOrganization`, `getFullOrganization`, `listOrganizations`, `inviteMember`, `acceptInvitation`, `rejectInvitation`, `cancelInvitation`, `listInvitations`, `listUserInvitations`, `listInvitationsForUser`, `addMember`, `removeMember`, `updateMemberRole`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember`, `listTeams`, `listTeamMembers`, `listTeamsForMember`, `upsertOrgRole`, `deleteOrgRole`, `listOrgRoles`, `checkPermission`, `requirePermission`. Teams are hierarchical ([ADR 0016](../adr/0016-hierarchical-teams.md)) and roles are data, not a compile-time union ([ADR 0009](../adr/0009-organization-data-model-and-permissions.md)). The HTTP surface is `/organizations` (with `/organizations/:id/members`, `/invitations`, `/domains`, `/roles` and `/teams`), `/organization-members/:id` (and `/organization-members/:id/teams`), `/invitations/:id`, `/organization-domains/:id`, `/organization-roles/:id`, `/teams/:id` (and `/teams/:id/members`) and `/team-members/:id`.
 
 ### Admin
 
-`Auth.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). A ban takes effect on the next request with no plugin: `SessionService` refuses a banned user's sessions, and the ban revokes their sessions, API keys and OIDC grants.
+`Auth.Admin.AdminService` (`listUsers`, `setRole`, `banUser`, `unbanUser`, `removeUser`, `revokeUserSessions`, `impersonateUser`, `createUser`, `setUserPassword`, `listUserSessions`) over `AdminUserStore`, on `/admin/users` (list with `filter[email]` and `page[offset]` / `page[limit]`, `PATCH` a `role`, `DELETE` a user or `/admin/users/:id/sessions`), `/user-bans` (ban, lift) and `/impersonations` (start, `DELETE /impersonations/current` to end). A ban takes effect on the next request with no plugin: `SessionService` refuses a banned user's sessions, and the ban revokes their sessions, API keys and OIDC grants.
 
 ### API keys
 
-`Auth.ApiKeyService` (`create`, `verify`, `check` (verify without spending a use), `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
+`Auth.ApiKey.ApiKeyService` (`create`, `verify`, `check` (verify without spending a use), `verifyWithRateLimit`, `get`, `list`, `update`, `delete`, `deleteAllExpired`) over `ApiKeyStore`, on `/api-keys` and `/api-keys/:id` (the plaintext only in the create's `meta.key`). Keys are stored as digests only and carry permissions plus time-based quota refill ([ADR 0012](../adr/0012-api-key-design.md)).
 
 ### Enterprise SSO (as a relying party) and the OIDC provider
 
 Two separate features, as in Better Auth:
 
-- **`Auth.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso-providers` (registration, admin-gated), `POST /sso-authorizations` (start a sign-in), `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
-- **`Auth.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*` (client administration is `/oauth-clients`, admin-gated), `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
+- **`Auth.Sso.SsoService`** signs your users in _through_ someone else's IdP: `registerProvider`, `registerSamlProvider`, `resolveProviderForEmail`, `signIn`, `handleCallback`, `handleSamlCallback`, `samlMetadata`, on `POST /sso-providers` (registration, admin-gated), `POST /sso-authorizations` (start a sign-in), `POST /sso/callback`, `POST /sso/saml/acs/:providerId`, `GET /sso/saml/metadata/:providerId`. OIDC providers work out of core; SAML additionally needs `SamlVerifier` + `SamlReplayStore`, implemented by `@thomasfosterau/effect-auth/saml`.
+- **`Auth.OidcProvider.OidcProviderService`** makes _you_ the IdP: `registerClient`, `authorize`, `consent`, `token`, `userinfo`, `getMetadata`, RFC 7591/7592 dynamic client registration, on `/oauth2/*` (client administration is `/oauth-clients`, admin-gated), `/register*`, `/.well-known/openid-configuration` and `/.well-known/jwks.json`. `Auth.OidcProvider.mcpProviderPreset` is a ready-made config for an MCP-facing auth server; see [`mcp-provider.md`](./mcp-provider.md).
 
-SCIM provisioning (`Auth.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
+SCIM provisioning (`Auth.Scim.ScimService`) has no Better Auth counterpart; [`scim.md`](./scim.md) covers it.
 
 ### Delivery of email and SMS
 
-Better Auth takes a `sendX` callback per feature. effect-auth does too, but adds a single seam so you write the transport once: implement `Auth.EmailSender` / `Auth.SmsSender` and derive every per-feature callback with `Auth.emailCallbacks(sender, identifiers)` and `Auth.smsCallbacks(sender, identifiers)`. `EmailSender.layerConnect` / `SmsSender.layerConnect` back them with any effect-connect provider (`@thomasfosterau/effect-connect-resend`, `@thomasfosterau/effect-connect-twilio`).
+Better Auth takes a `sendX` callback per feature. effect-auth does too, but adds a single seam so you write the transport once: implement `Auth.Delivery.EmailSender` / `Auth.Delivery.SmsSender` and derive every per-feature callback with `Auth.Delivery.emailCallbacks(sender, identifiers)` and `Auth.Delivery.smsCallbacks(sender, identifiers)`. `EmailSender.layerConnect` / `SmsSender.layerConnect` back them with any effect-connect provider (`@thomasfosterau/effect-connect-resend`, `@thomasfosterau/effect-connect-twilio`).
 
-Better Auth leaves it to the app to schedule a send outside the response (the `waitUntil` workaround). effect-auth does that itself for the flows that hide whether an account exists: they hand the send to `Auth.DeliveryScheduler`, and on Workers you provide `Auth.DeliveryScheduler.waitUntil(...)` per request. Every other send is awaited. The [sign-in methods guide](./sign-in-methods.md#delivery) lists which flow does which.
+Better Auth leaves it to the app to schedule a send outside the response (the `waitUntil` workaround). effect-auth does that itself for the flows that hide whether an account exists: they hand the send to `Auth.DeliveryScheduler.DeliveryScheduler`, and on Workers you provide `Auth.DeliveryScheduler.DeliveryScheduler.waitUntil(...)` per request. Every other send is awaited. The [sign-in methods guide](./sign-in-methods.md#delivery) lists which flow does which.
 
 ## 5. Client migration
 
@@ -323,7 +323,7 @@ Be honest with yourself about these before committing:
 - **Sessions do not carry over cleanly** (§6). Plan a forced re-authentication. Password hashes are a separate question with a happier answer: an Argon2id hash carries over unchanged, because both Argon2id hashers verify against the parameters stored in the PHC string itself. Only a hash in a format effect-auth cannot verify — Better Auth's default scrypt among them — needs the custom-`PasswordHasher` or forced-reset path in §6.
 - **No user email on the user record.** Code that reads `user.email` must go through `IdentifierStore` (or the derived optional `email` / `emailVerified` fields the HTTP `UserView` still exposes for wire compatibility).
 - **Protocol _server_ plugins have no plugin-config equivalent.** The tier Better Auth exposes as plugins — OIDC provider, SSO, SCIM, MCP dynamic client registration, the device grant — ships here too ([ADR 0017](../adr/0017-batteries-included-auth-framework.md) supersedes the older "out of scope" record), but as services and stores you provide with layers; there is no plugin object to port across.
-- **Feature gaps at the edges.** Better Auth plugins with no effect-auth counterpart today include Stripe/polar-style billing integrations, SIWE, and the various framework-specific server helpers. Conversely, effect-auth has features Better Auth does not: SCIM 2.0 provisioning, a policy kernel with Cedar-shaped semantics (`Auth.Policy`, `Auth.Authorizer`, `protectedField`), and hierarchical teams.
+- **Feature gaps at the edges.** Better Auth plugins with no effect-auth counterpart today include Stripe/polar-style billing integrations, SIWE, and the various framework-specific server helpers. Conversely, effect-auth has features Better Auth does not: SCIM 2.0 provisioning, a policy kernel with Cedar-shaped semantics (`Auth.Policy`, `Auth.Authorizer.Authorizer`, `protectedField`), and hierarchical teams.
 - **`packages/effect-auth/src/sql` does not implement every contract.** `OneTimeTokenStore`, `TrustedDeviceStore`, `PhoneOtp*Store`, `OrganizationStore`, `AdminUserStore`, `ApiKeyStore`, the OIDC provider stores, `SsoProviderStore`, `SamlReplayStore`, `DeviceAuthorizationStore`, `GoogleOneTapNonceStore`, `JwtKeyStore`, `OtpSecondFactorStore`, `AnonymousUserStore`, `AccountManagementStore` and `PolicyStore` are not covered — use the `KeyValueStore` defaults in `KeyValueStores.ts` or bring your own ([`byo-stores.md`](./byo-stores.md)).
 
 ## Further reading

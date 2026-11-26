@@ -34,14 +34,17 @@ import { layer as storesLayer } from "./Layers.ts";
 import { tables } from "./PgSchema.ts";
 import { migratedPglite, truncateTables } from "./testing/PgliteTemplate.ts";
 
-type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
+type StoreServices =
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.Identifier.IdentifierStore;
 
 const at = (offsetMs: number): Date =>
   DateTime.toDateUtc(
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const makeSession = (id: string, userId: string): Auth.Session => ({
+const makeSession = (id: string, userId: string): Auth.Types.Session => ({
   id,
   userId,
   expiresAt: at(60_000),
@@ -120,7 +123,7 @@ describe("databaseLayer doors", () => {
         const db = yield* EffectPglite.make();
 
         return yield* Effect.gen(function* () {
-          const sessions = yield* Auth.SessionStore;
+          const sessions = yield* Auth.SessionStore.SessionStore;
           const created = yield* sessions.create(makeSession("effect-driver", "user-1"));
           const read = yield* sessions.get("effect-driver");
           yield* sessions.delete("effect-driver");
@@ -197,9 +200,13 @@ describe("overlapping requests", () => {
       db: PgliteDatabase,
       arrived: Latch.Latch,
       other: Latch.Latch,
-    ): Effect.Effect<ReadonlyArray<Option.Option<Auth.Session>>, Auth.AuthError, StoreServices> =>
+    ): Effect.Effect<
+      ReadonlyArray<Option.Option<Auth.Types.Session>>,
+      Auth.Errors.AuthError,
+      StoreServices
+    > =>
       Effect.gen(function* () {
-        const sessions = yield* Auth.SessionStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
         const before = yield* sessions.get("shared");
         yield* Latch.open(arrived);
         yield* other.await;

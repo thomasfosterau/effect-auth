@@ -262,10 +262,10 @@ const postgresString = pgliteEngine("PostgreSQL (PGlite, int8 as string)", (text
 const makeUser = (email: string) =>
   Effect.gen(function* () {
     const store = yield* Auth.Email.EmailPasswordStore;
-    const identifiers = yield* Auth.IdentifierStore;
+    const identifiers = yield* Auth.Identifier.IdentifierStore;
     const { user } = yield* store.createUser({ name: "Test User", attributes: { plan: "pro" } });
     yield* identifiers.create(
-      Auth.makeIdentifier({
+      Auth.Identifier.makeIdentifier({
         userId: user.id,
         type: "email",
         value: email,
@@ -310,7 +310,7 @@ const reset = (token: string, userId: string): Auth.Password.PasswordResetToken 
   expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 3_600_000,
 });
 
-const magicLink = (token: string, email: string): Auth.MagicLinkToken => ({
+const magicLink = (token: string, email: string): Auth.MagicLink.MagicLinkToken => ({
   token,
   email,
   createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
@@ -324,7 +324,7 @@ const lockoutOptions = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60
 const simulatedFailure = () => driverError(new SimulatedFailure({ message: "simulated failure" }));
 
 const userEmail = (userId: string, value: string, verified = false) =>
-  Auth.makeIdentifier({
+  Auth.Identifier.makeIdentifier({
     userId,
     type: "email",
     value,
@@ -383,9 +383,9 @@ const storeContract = (engine: StoreEngine): void => {
     it("SessionStore roundtrips sessions with Date/attribute codecs", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.SessionStore;
+          const store = yield* Auth.SessionStore.SessionStore;
           const now = yield* DateTime.nowAsDate;
-          const session: Auth.Session = {
+          const session: Auth.Types.Session = {
             id: "sess-1",
             userId: "user-1",
             expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 60_000)),
@@ -429,8 +429,8 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const emailPassword = yield* Auth.Email.EmailPasswordStore;
-          const identifiers = yield* Auth.IdentifierStore;
-          const users = yield* Auth.UserStore;
+          const identifiers = yield* Auth.Identifier.IdentifierStore;
+          const users = yield* Auth.UserStore.UserStore;
           const created = yield* makeUser("a@example.com");
           const byEmail = yield* identifiers.getByValue("email", "a@example.com");
           const missingEmail = yield* identifiers.getByValue("email", "nobody@example.com");
@@ -457,7 +457,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("UserServiceStore updates and deletes users", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           const created = yield* makeUser("b@example.com");
           const updated = yield* store.update({
             ...created,
@@ -480,7 +480,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           const gone = yield* makeUser("roles-gone@example.com");
           const kept = yield* makeUser("roles-kept@example.com");
           yield* sql`INSERT INTO auth_user_roles (user_id, role) VALUES (${gone.id}, 'admin')`;
@@ -501,9 +501,9 @@ const storeContract = (engine: StoreEngine): void => {
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient;
           const user = yield* makeUser("purge-tx@example.com");
-          const apiKeys = yield* Auth.ApiKeyStore;
-          const sessions = yield* Auth.SessionStore;
-          const identifiers = yield* Auth.IdentifierStore;
+          const apiKeys = yield* Auth.ApiKey.ApiKeyStore;
+          const sessions = yield* Auth.SessionStore.SessionStore;
+          const identifiers = yield* Auth.Identifier.IdentifierStore;
           const now = yield* Clock.currentTimeMillis;
           yield* apiKeys.create({
             id: crypto.randomUUID(),
@@ -527,7 +527,8 @@ const storeContract = (engine: StoreEngine): void => {
               ...(yield* userPurgeStores),
               identifiers: Option.some(identifiers),
               revokeSessions: sessions.deleteByUserId,
-              deleteUser: () => Effect.fail(new Auth.AuthError({ message: "user delete failed" })),
+              deleteUser: () =>
+                Effect.fail(new Auth.Errors.AuthError({ message: "user delete failed" })),
             },
             user.id,
           );
@@ -632,7 +633,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("RateLimitStore get/set/increment/delete (atomic upsert)", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           const before = yield* store.get("k");
           const first = yield* store.increment("k", 60);
           const second = yield* store.increment("k", 60);
@@ -976,8 +977,8 @@ const storeContract = (engine: StoreEngine): void => {
     it("MagicLinkStore roundtrips and deletes by email", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.MagicLinkStore;
-          const userStore = yield* Auth.MagicLinkUserStore;
+          const store = yield* Auth.MagicLink.MagicLinkStore;
+          const userStore = yield* Auth.MagicLink.MagicLinkUserStore;
           yield* store.create(magicLink("ml-1", "a@example.com"));
           yield* store.create(magicLink("ml-2", "a@example.com"));
           yield* store.create(magicLink("ml-3", "b@example.com"));
@@ -1038,9 +1039,9 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis;
-          const links = yield* Auth.MagicLinkStore;
+          const links = yield* Auth.MagicLink.MagicLinkStore;
           const otps = yield* Auth.Email.EmailOtpStore;
-          const link = (token: string, expiresAt: number): Auth.MagicLinkToken => ({
+          const link = (token: string, expiresAt: number): Auth.MagicLink.MagicLinkToken => ({
             token,
             email: `${token}@example.com`,
             createdAt: now - 600_000,
@@ -1083,7 +1084,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(1_000_000);
-          yield* (yield* Auth.MagicLinkStore).create({
+          yield* (yield* Auth.MagicLink.MagicLinkStore).create({
             token: "edge",
             email: "edge@example.com",
             createdAt: 0,
@@ -1105,7 +1106,7 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("purgeExpired deletes rate-limit rows whose window and block have both passed, and keeps open or blocked ones", async () => {
       const now = 1_000_000;
-      const entries: ReadonlyArray<Auth.RateLimitEntry> = [
+      const entries: ReadonlyArray<Auth.RateLimit.RateLimitEntry> = [
         { key: "purge-stale", count: 3, resetAt: now - 60_000 },
         { key: "purge-stale-block", count: 9, resetAt: now - 60_000, blockedUntil: now - 1 },
         { key: "purge-edge", count: 1, resetAt: now, blockedUntil: now },
@@ -1115,7 +1116,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* Effect.forEach(entries, (entry) => store.set(entry.key, entry, 60), {
             concurrency: 1,
             discard: true,
@@ -1135,21 +1136,21 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row", async () => {
       const now = 1_000_000;
-      const stale = Arr.makeBy(5, (i): Auth.RateLimitEntry => ({
+      const stale = Arr.makeBy(5, (i): Auth.RateLimit.RateLimitEntry => ({
         key: `bounded-stale-${i}`,
         count: 1,
         resetAt: now - 60_000,
         ...definedKeys({ blockedUntil: i % 2 !== 0 ? now - 1 : undefined }),
       }));
-      const kept: ReadonlyArray<Auth.RateLimitEntry> = [
+      const kept: ReadonlyArray<Auth.RateLimit.RateLimitEntry> = [
         { key: "bounded-open", count: 2, resetAt: now + 1 },
         { key: "bounded-blocked", count: 9, resetAt: now - 60_000, blockedUntil: now + 1 },
       ];
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const store = yield* Auth.RateLimitStore;
-          const links = yield* Auth.MagicLinkStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
+          const links = yield* Auth.MagicLink.MagicLinkStore;
           const otps = yield* Auth.Email.EmailOtpStore;
           yield* Effect.forEach([...stale, ...kept], (entry) => store.set(entry.key, entry, 60), {
             concurrency: 1,
@@ -1205,7 +1206,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* Effect.forEach(
             Arr.range(0, 4),
             (i) =>
@@ -1234,7 +1235,7 @@ const storeContract = (engine: StoreEngine): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const sessions = yield* Auth.SessionStore;
+          const sessions = yield* Auth.SessionStore.SessionStore;
           const states = yield* Auth.OAuth.OAuthStateStore;
           const challenges = yield* Auth.MultiFactor.ChallengeStore;
           const pending = yield* Auth.MultiFactor.PendingMultiFactorStore;
@@ -1496,8 +1497,8 @@ const storeContract = (engine: StoreEngine): void => {
       expect(Option.isNone(result.deleted)).toBe(true);
       expect(result.loadedPending).toEqual(Option.some(pending));
       expect(result.attempts).toEqual([1, 2, 3]);
-      expect(result.unknownAttempt).toBeInstanceOf(Auth.AuthError);
-      expect(result.attemptAfterDelete).toBeInstanceOf(Auth.AuthError);
+      expect(result.unknownAttempt).toBeInstanceOf(Auth.Errors.AuthError);
+      expect(result.attemptAfterDelete).toBeInstanceOf(Auth.Errors.AuthError);
       expect(result.recreatedAttempt).toBe(1);
       expect(Option.isNone(result.deletedPending)).toBe(true);
     });
@@ -1555,8 +1556,8 @@ const storeContract = (engine: StoreEngine): void => {
       const FAR_FUTURE_MS = 2_200_000_000_000; // ~2039-09
       const result = await run(
         Effect.gen(function* () {
-          const sessionStore = yield* Auth.SessionStore;
-          const session: Auth.Session = {
+          const sessionStore = yield* Auth.SessionStore.SessionStore;
+          const session: Auth.Types.Session = {
             id: "bigint-test",
             userId: "user-bigint",
             expiresAt: DateTime.toDateUtc(DateTime.makeUnsafe(FAR_FUTURE_MS)),
@@ -1575,7 +1576,7 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("IdentifierStore roundtrips create/getByValue/listByUser/setVerified/delete/deleteByUser", async () => {
       const now = DateTime.toDateUtc(DateTime.makeUnsafe("2026-07-04T00:00:00.000Z"));
-      const emailId: Auth.Identifier = {
+      const emailId: Auth.Identifier.Identifier = {
         id: "ident-email",
         userId: "user-ident",
         type: "email",
@@ -1583,7 +1584,7 @@ const storeContract = (engine: StoreEngine): void => {
         verified: false,
         createdAt: now,
       };
-      const usernameId: Auth.Identifier = {
+      const usernameId: Auth.Identifier.Identifier = {
         id: "ident-username",
         userId: "user-ident",
         type: "username",
@@ -1594,7 +1595,7 @@ const storeContract = (engine: StoreEngine): void => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailId);
           yield* store.create(usernameId);
           const byEmail = yield* store.getByValue("email", "alice@example.com");
@@ -1639,7 +1640,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("IdentifierStore.replace swaps a user's identifier in one transaction, and keeps it on any refusal", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(userEmail("user-ada", "ada@example.com", true));
           yield* store.create(userEmail("user-grace", "grace@example.com"));
 
@@ -1660,12 +1661,20 @@ const storeContract = (engine: StoreEngine): void => {
             store.replace(replaced, userEmail("user-ada", "grace@example.com")),
           );
           const taken = yield* Effect.flip(
-            Auth.replaceIdentifier(store, replaced, userEmail("user-ada", "grace@example.com")),
+            Auth.Identifier.replaceIdentifier(
+              store,
+              replaced,
+              userEmail("user-ada", "grace@example.com"),
+            ),
           );
           // `from` is no longer held: null, and nothing is written.
           const stale = yield* store.replace(ada, userEmail("user-ada", "ada-other@example.com"));
           const staleTyped = yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada, userEmail("user-ada", "ada-other@example.com")),
+            Auth.Identifier.replaceIdentifier(
+              store,
+              ada,
+              userEmail("user-ada", "ada-other@example.com"),
+            ),
           );
           // Another user's replacement, or one reusing `from`'s id, is refused outright.
           const wrongUser = yield* Effect.flip(
@@ -1716,7 +1725,7 @@ const storeContract = (engine: StoreEngine): void => {
       // claim is taken back.
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(email("ada@example.com"));
           const foundFirst = yield* store.replace(ada, email("ada-a@example.com"));
           assert(Option.isSome(foundFirst), "the first replace succeeds");
@@ -1726,7 +1735,7 @@ const storeContract = (engine: StoreEngine): void => {
           // the unique index (this user already holds the value), and
           // replaceIdentifier reports that `from` is gone.
           const again = yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada, email("ada-a@example.com")),
+            Auth.Identifier.replaceIdentifier(store, ada, email("ada-a@example.com")),
           );
           // The guard is the whole record, not just the id: the held row with a
           // value it no longer has is not released.
@@ -1754,7 +1763,7 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
-      const apiKey: Auth.ApiKey = {
+      const apiKey: Auth.ApiKey.ApiKey = {
         id: "key-1",
         name: "CI deploy key",
         prefix: "ak_",
@@ -1776,7 +1785,7 @@ const storeContract = (engine: StoreEngine): void => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.ApiKeyStore;
+          const store = yield* Auth.ApiKey.ApiKeyStore;
           yield* store.create(apiKey);
           yield* store.create({ ...apiKey, id: "key-2", keyHash: "hash-2" });
           yield* store.create({ ...apiKey, id: "key-3", userId: "user-2", keyHash: "hash-3" });
@@ -1819,7 +1828,7 @@ const storeContract = (engine: StoreEngine): void => {
 
     it("ApiKeyStore treats minimal records (no permissions/metadata/refill/rateLimit) as absent, not null", async () => {
       const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
-      const minimal: Auth.ApiKey = {
+      const minimal: Auth.ApiKey.ApiKey = {
         id: "key-min",
         start: "ghijkl",
         keyHash: "hash-min",
@@ -1831,7 +1840,7 @@ const storeContract = (engine: StoreEngine): void => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.ApiKeyStore;
+          const store = yield* Auth.ApiKey.ApiKeyStore;
           yield* store.create(minimal);
           return yield* store.get("key-min");
         }),
@@ -1852,7 +1861,7 @@ const storeContract = (engine: StoreEngine): void => {
           const now = yield* Clock.currentTimeMillis;
           yield* sql`INSERT INTO auth_api_keys (id, name, prefix, start, key_hash, user_id, enabled, expires_at, last_used_at, permissions, metadata, remaining, refill_amount, refill_interval, refill_max, last_refill_at, rate_limit_max_requests, rate_limit_window_ms, created_at, updated_at)
             VALUES (${"key-corrupt"}, ${null}, ${null}, ${"abcdef"}, ${"hash-corrupt"}, ${"user-1"}, ${1}, ${null}, ${null}, ${"INVALID_JSON"}, ${"{}"}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${null}, ${now}, ${now})`;
-          const store = yield* Auth.ApiKeyStore;
+          const store = yield* Auth.ApiKey.ApiKeyStore;
           return yield* Effect.flip(store.get("key-corrupt"));
         }),
       );
@@ -1863,7 +1872,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("AdminUserStore lists/paginates/searches users by earliest email and manages passwords", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.AdminUserStore;
+          const store = yield* Auth.Admin.AdminUserStore;
           const emailPassword = yield* Auth.Email.EmailPasswordStore;
           const alice = yield* makeUser("alice@example.com");
           const bob = yield* makeUser("bob@example.com");
@@ -1911,7 +1920,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("AdminUserStore.listUsers matches LIKE wildcards literally and pages past an offset", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.AdminUserStore;
+          const store = yield* Auth.Admin.AdminUserStore;
           const underscore = yield* makeUser("a_b@example.com");
           const plain = yield* makeUser("axb@example.com");
           const percent = yield* makeUser("c%d@example.com");
@@ -1938,12 +1947,12 @@ const storeContract = (engine: StoreEngine): void => {
     });
 
     it("integration: SessionService runs over the aggregate layer", async () => {
-      const config: Auth.SessionConfig = {
+      const config: Auth.Types.SessionConfig = {
         sessionExpiresIn: { activePeriod: 60_000, idlePeriod: 30_000 },
       };
       const program = Effect.gen(function* () {
         const user = yield* makeUser("manager@example.com");
-        const manager = yield* Auth.SessionService;
+        const manager = yield* Auth.SessionService.SessionService;
         const session = yield* manager.createSession(user.id, { ip: "127.0.0.1" });
         const validated = yield* manager.validateSession(session.token);
         yield* manager.invalidateSession(session.token);
@@ -1951,7 +1960,9 @@ const storeContract = (engine: StoreEngine): void => {
         return { user, session, validated, invalidated };
       }).pipe(
         Effect.provide(
-          Auth.SessionService.layer(config).pipe(Layer.provideMerge(Auth.Hooks.Default)),
+          Auth.SessionService.SessionService.layer(config).pipe(
+            Layer.provideMerge(Auth.Hooks.Hooks.Default),
+          ),
         ),
       );
 
@@ -1984,9 +1995,9 @@ const storeContract = (engine: StoreEngine): void => {
         Effect.gen(function* () {
           const challenges = yield* Auth.MultiFactor.ChallengeStore;
           const credentials = yield* Auth.MultiFactor.CredentialStore;
-          const rateLimits = yield* Auth.RateLimitStore;
-          const apiKeys = yield* Auth.ApiKeyStore;
-          const adminUsers = yield* Auth.AdminUserStore;
+          const rateLimits = yield* Auth.RateLimit.RateLimitStore;
+          const apiKeys = yield* Auth.ApiKey.ApiKeyStore;
+          const adminUsers = yield* Auth.Admin.AdminUserStore;
           const e1 = yield* Effect.flip(challenges.get(new Uint8Array([1, 2, 3])));
           const e2 = yield* Effect.flip(credentials.get("cred-id"));
           const e3 = yield* Effect.flip(rateLimits.get("key"));
@@ -2011,7 +2022,7 @@ const storeContract = (engine: StoreEngine): void => {
           const now = yield* Clock.currentTimeMillis;
           yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
             VALUES (${"u-corrupt"}, ${null}, ${null}, ${null}, ${"INVALID_JSON"}, ${now}, ${now})`;
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           return yield* Effect.flip(store.get("u-corrupt"));
         }),
       );
@@ -2069,7 +2080,7 @@ const storeContract = (engine: StoreEngine): void => {
     it("concurrent rateLimit.increment does not undercount", async () => {
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* Effect.all(
             Array.from({ length: 20 }, () => store.increment("burst", 60)),
             { concurrency: "unbounded" },
@@ -2084,7 +2095,7 @@ const storeContract = (engine: StoreEngine): void => {
     // The core's published conformance suites (`@thomasfosterau/effect-auth/testing`),
     // over the same engine. Every case mints its own ids, so they share the database.
     const encodeAttributes = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-    const seedUser = (user: Auth.User) =>
+    const seedUser = (user: Auth.Types.User) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
         yield* sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
@@ -2123,7 +2134,7 @@ storeContract(postgresBigint);
 storeContract(postgresString);
 
 const email = (value: string) =>
-  Auth.makeIdentifier({
+  Auth.Identifier.makeIdentifier({
     userId: "user-ada",
     type: "email",
     value,
@@ -2136,7 +2147,7 @@ const replaceUnder = (trigger: string) =>
     Effect.gen(function* () {
       yield* migrate;
       const sql = yield* SqlClient.SqlClient;
-      const store = yield* Auth.IdentifierStore;
+      const store = yield* Auth.Identifier.IdentifierStore;
       const ada = yield* store.create(email("ada@example.com"));
       yield* sql.unsafe(trigger);
       const outcome = yield* Effect.result(store.replace(ada, email("ada-new@example.com")));

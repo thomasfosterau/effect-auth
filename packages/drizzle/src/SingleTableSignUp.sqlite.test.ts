@@ -72,7 +72,7 @@ afterEach(() => {
 
 const runWith =
   (users: SingleTableUsers) =>
-  <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     Effect.runPromise(
       build().pipe(Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(db))))),
     );

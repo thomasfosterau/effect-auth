@@ -20,7 +20,7 @@ import * as Http from "@thomasfosterau/effect-auth/http";
 // `services` connects to a database while it builds.
 const { handler, dispose } = await Http.makeAsync({
   services, // with a RateLimiter merged in
-  trustedProxy: Auth.ClientIP.cloudflare,
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
 });
 ```
 
@@ -28,12 +28,16 @@ To keep `Http.make` and have it refuse a build it cannot finish, set `strict: tr
 
 ```typescript
 // Throws ServicesBuildPendingError if `services` cannot finish building synchronously.
-const { handler } = Http.make({ services, trustedProxy: Auth.ClientIP.cloudflare, strict: true });
+const { handler } = Http.make({
+  services,
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
+  strict: true,
+});
 ```
 
 ## Sign-up attributes
 
-A sign-up never sets an attribute that carries authority. Whatever reaches it, `EmailPasswordService.signUp` (and so `UsernameService.signUp`) and `AuthLifecycleService.signUp` drop, after the `beforeSignUp` hooks, the `UserService`'s server-only attributes (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) and `Auth.SIGN_UP_PROTECTED_ATTRIBUTES`: the ban keys (`banned`, `banReason`, `banExpires`), the SCIM keys (`scimUserName`, `scimDeactivated`, `scimExternalId`), the managed-user stamp (`provisionedBy`) and `isAnonymous`. Set those once the user exists, through their own door (`AdminService.setRole`, `banUser`, SCIM provisioning). `EmailPasswordService` reads `UserService`'s list when `UserService` is in context as its layer is built; `AuthLifecycleService` always does.
+A sign-up never sets an attribute that carries authority. Whatever reaches it, `EmailPasswordService.signUp` (and so `UsernameService.signUp`) and `AuthLifecycleService.signUp` drop, after the `beforeSignUp` hooks, the `UserService`'s server-only attributes (`UserServiceConfig.serverOnlyAttributes`, default `["role"]`) and `Auth.User.SIGN_UP_PROTECTED_ATTRIBUTES`: the ban keys (`banned`, `banReason`, `banExpires`), the SCIM keys (`scimUserName`, `scimDeactivated`, `scimExternalId`), the managed-user stamp (`provisionedBy`) and `isAnonymous`. Set those once the user exists, through their own door (`AdminService.setRole`, `banUser`, SCIM provisioning). `EmailPasswordService` reads `UserService`'s list when `UserService` is in context as its layer is built; `AuthLifecycleService` always does.
 
 Over HTTP, `POST /users` keeps only the `attributes` keys you list in `signUpAttributes`. The default is none:
 

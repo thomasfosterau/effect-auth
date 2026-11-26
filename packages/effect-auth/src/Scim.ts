@@ -49,7 +49,7 @@ import { tokenHasher } from "./TokenHash.ts";
 import { revokeStandingAccess, userCredentialStores } from "./UserCredentials.ts";
 import { isScimDeactivated, SCIM_DEACTIVATED_ATTRIBUTE } from "./UserStanding.ts";
 import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 import * as Effect from "effect/Effect";
 import type { SignInInput, SignUpInput } from "../email/EmailPassword.ts";
 import * as Hooks from "../Hooks.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 
 /**
  * Normalises the email with `normalizeEmail` on `beforeSignUp` and

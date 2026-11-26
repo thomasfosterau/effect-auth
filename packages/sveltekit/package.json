@@ -34,6 +34,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./Actions": {
+      "types": "./dist/Actions.d.ts",
+      "import": "./dist/Actions.js"
+    },
+    "./Handle": {
+      "types": "./dist/Handle.d.ts",
+      "import": "./dist/Handle.js"
     }
   },
   "publishConfig": {

@@ -255,7 +255,7 @@ export const authTableNames: readonly string[] = schemaStatements.flatMap((state
  * Run this once during provisioning, or on each cold start — every statement
  * uses `IF NOT EXISTS`, so repeated runs are no-ops.
  */
-export const migrate: Effect.Effect<void, Auth.AuthError, SqlClient.SqlClient> =
+export const migrate: Effect.Effect<void, Auth.Errors.AuthError, SqlClient.SqlClient> =
   SqlClient.SqlClient.use((sql) =>
     Effect.forEach(
       schemaStatements,
@@ -264,7 +264,7 @@ export const migrate: Effect.Effect<void, Auth.AuthError, SqlClient.SqlClient> =
           .unsafe(statement)
           .pipe(
             Effect.mapError(
-              (cause) => new Auth.AuthError({ message: "sql migrate failed", cause }),
+              (cause) => new Auth.Errors.AuthError({ message: "sql migrate failed", cause }),
             ),
           ),
       { concurrency: 1, discard: true },

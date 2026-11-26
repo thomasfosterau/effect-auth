@@ -28,7 +28,9 @@ export const USER_CREATED_AT = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-0
 /** The database a suite runs against. */
 export interface StoreHarness {
   /** Run `build`'s program against the store under test on the file's database. */
-  readonly run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>) => Promise<A>;
+  readonly run: <A, E>(
+    build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
+  ) => Promise<A>;
   /**
    * Insert {@link USER}'s `ada` and `grace` rows, as the application's own user
    * writer would, with no login handle. A store that keeps identifiers in its
@@ -48,8 +50,8 @@ export interface SingleTableHarness extends StoreHarness {
   ) => Promise<{ readonly email: string | null; readonly emailVerified: boolean } | null>;
 }
 
-const emailFor = (userId: string, value: string, verified = false): Auth.Identifier =>
-  Auth.makeIdentifier({
+const emailFor = (userId: string, value: string, verified = false): Auth.Identifier.Identifier =>
+  Auth.Identifier.makeIdentifier({
     userId,
     type: "email",
     value,
@@ -65,7 +67,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("resolves an email by its value, and misses with null", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const created = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             created,
@@ -89,7 +91,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("keeps values that differ only by case or accent distinct", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const bob = yield* store.create(emailFor(USER.ada, "bob@example.com"));
           return {
             bob,
@@ -98,7 +100,10 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
             cased: yield* store.getByValue("email", "BOB@example.com"),
             fullWidth: yield* store.getByValue("email", "ｂｏｂ@example.com"),
             // The look-alike is a free value another user can claim.
-            claimed: yield* Auth.claimIdentifier(store, emailFor(USER.grace, "bob@exämple.com")),
+            claimed: yield* Auth.Identifier.claimIdentifier(
+              store,
+              emailFor(USER.grace, "bob@exämple.com"),
+            ),
             ownerOfBob: yield* store.getByValue("email", "bob@example.com"),
             ownerOfLookAlike: yield* store.getByValue("email", "bob@exämple.com"),
           };
@@ -117,16 +122,16 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("refuses a claimed (type, value) with AuthError, which claimIdentifier reports as taken", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
 
           const duplicate = yield* Effect.flip(
             store.create(emailFor(USER.grace, "ada@example.com")),
           );
           const claim = yield* Effect.flip(
-            Auth.claimIdentifier(store, emailFor(USER.grace, "ada@example.com")),
+            Auth.Identifier.claimIdentifier(store, emailFor(USER.grace, "ada@example.com")),
           );
-          const free = yield* Auth.claimIdentifier(
+          const free = yield* Auth.Identifier.claimIdentifier(
             store,
             emailFor(USER.grace, "grace@example.com"),
           );
@@ -144,7 +149,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
       expect(result.duplicate.cause).toBeDefined();
 
       expect(result.claim._tag).toBe("IdentifierTakenError");
-      assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+      assert.instanceOf(result.claim, Auth.Identifier.IdentifierTakenError);
       expect(result.claim.identifierType).toBe("email");
 
       expect(result.free.userId).toBe(USER.grace);
@@ -155,7 +160,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("lists a user's identifiers, and [] for a user with none", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             listed: yield* store.listByUser(USER.ada),
@@ -174,7 +179,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("setVerified marks the identifier verified, and returns null for an unknown id", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const created = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             verified: yield* store.setVerified(
@@ -198,7 +203,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("delete removes one identifier, and is a no-op when it is absent", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           yield* store.create(emailFor(USER.grace, "grace@example.com"));
 
@@ -221,7 +226,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("deleteByUser removes that user's identifiers, and is a no-op for a user with none", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           yield* store.create(emailFor(USER.grace, "grace@example.com"));
 
@@ -244,7 +249,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("replace swaps the user's email for a new one, and the old one resolves to nothing", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           const replaced = yield* store.replace(
             ada,
@@ -256,7 +261,10 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
             old: yield* store.getByValue("email", "ada@example.com"),
             current: yield* store.getByValue("email", "ada-new@example.com"),
             // Free again once released: another user can claim it.
-            moved: yield* Auth.claimIdentifier(store, emailFor(USER.grace, "ada@example.com")),
+            moved: yield* Auth.Identifier.claimIdentifier(
+              store,
+              emailFor(USER.grace, "ada@example.com"),
+            ),
           };
         }),
       );
@@ -275,7 +283,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("replace refuses an address another user holds with AuthError, which replaceIdentifier reports as taken, and keeps the old one", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com", true));
           yield* store.create(emailFor(USER.grace, "grace@example.com"));
 
@@ -284,7 +292,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
             store.replace(ada, emailFor(USER.ada, "grace@example.com")),
           );
           const taken = yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada, emailFor(USER.ada, "grace@example.com")),
+            Auth.Identifier.replaceIdentifier(store, ada, emailFor(USER.ada, "grace@example.com")),
           );
           return {
             refused,
@@ -297,7 +305,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
 
       expect(result.refused._tag).toBe("AuthError");
       expect(result.taken._tag).toBe("IdentifierTakenError");
-      assert.instanceOf(result.taken, Auth.IdentifierTakenError);
+      assert.instanceOf(result.taken, Auth.Identifier.IdentifierTakenError);
       expect(result.taken.identifierType).toBe("email");
       expect(result.adaListed.map((identifier) => [identifier.value, identifier.verified])).toEqual(
         [["ada@example.com", true]],
@@ -308,14 +316,18 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("replace of an identifier the user no longer holds resolves to null and writes nothing", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           // The same record with an address the user does not hold: a stale read.
-          const stale: Auth.Identifier = { ...ada, value: "ada-old@example.com" };
+          const stale: Auth.Identifier.Identifier = { ...ada, value: "ada-old@example.com" };
           return {
             replaced: yield* store.replace(stale, emailFor(USER.ada, "ada-new@example.com")),
             notFound: yield* Effect.flip(
-              Auth.replaceIdentifier(store, stale, emailFor(USER.ada, "ada-new@example.com")),
+              Auth.Identifier.replaceIdentifier(
+                store,
+                stale,
+                emailFor(USER.ada, "ada-new@example.com"),
+              ),
             ),
             listed: yield* store.listByUser(USER.ada),
             newAddress: yield* store.getByValue("email", "ada-new@example.com"),
@@ -332,7 +344,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
     it("replace refuses a replacement for another user, of another type, with the same id, or of the same value", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             otherUser: yield* Effect.flip(
@@ -341,7 +353,7 @@ export const identifierStoreContract = (label: string, harness: StoreHarness) =>
             otherType: yield* Effect.flip(
               store.replace(
                 ada,
-                Auth.makeIdentifier({
+                Auth.Identifier.makeIdentifier({
                   userId: USER.ada,
                   type: "username",
                   value: "ada",
@@ -382,7 +394,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("uses the user's id as the identifier's id and the user's created_at as its createdAt", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const created = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             created,
@@ -400,9 +412,9 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("never reports a verifiedAt, since the table has no column for one", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const created = yield* store.create(
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: USER.ada,
               type: "email",
               value: "ada@example.com",
@@ -427,11 +439,11 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("holds only email: other types never resolve and cannot be created", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           const username = yield* Effect.flip(
             store.create(
-              Auth.makeIdentifier({
+              Auth.Identifier.makeIdentifier({
                 userId: USER.ada,
                 type: "username",
                 value: "ada",
@@ -441,7 +453,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           );
           const phone = yield* Effect.flip(
             store.create(
-              Auth.makeIdentifier({
+              Auth.Identifier.makeIdentifier({
                 userId: USER.grace,
                 type: "phone",
                 value: "+61400000000",
@@ -472,7 +484,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("allows one email per user: a second address is refused and the first is kept", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           const second = yield* Effect.flip(
             store.create(emailFor(USER.ada, "ada@work.example.com")),
@@ -480,7 +492,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
           // claimIdentifier only reports IdentifierTakenError for an address
           // another user holds; this refusal passes through as it is.
           const claim = yield* Effect.flip(
-            Auth.claimIdentifier(store, emailFor(USER.ada, "ada@work.example.com")),
+            Auth.Identifier.claimIdentifier(store, emailFor(USER.ada, "ada@work.example.com")),
           );
           return {
             second,
@@ -501,7 +513,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("refuses an email for a user with no row, and writes nothing", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const error = yield* Effect.flip(store.create(emailFor(USER.ghost, "ghost@example.com")));
           return {
             error,
@@ -520,7 +532,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("replace rewrites the row's address in place, keeping the user's id and created_at", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return yield* store.replace(ada, emailFor(USER.ada, "ada-new@example.com", true));
         }),
@@ -537,7 +549,7 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("a user whose email is NULL holds no identifier, and setVerified finds none", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return {
             listed: yield* store.listByUser(USER.grace),
             verified: yield* store.setVerified(
@@ -555,19 +567,19 @@ export const singleTableContract = (label: string, harness: SingleTableHarness) 
     it("delete clears the address and keeps the user row, so the address can be claimed again", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com", true));
           yield* store.delete(USER.ada);
           const cleared = yield* Effect.orDie(
             Effect.tryPromise({
               try: () => harness.readUserRow(USER.ada),
-              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
             }),
           );
           const afterDelete = yield* store.getByValue("email", "ada@example.com");
           const adaListed = yield* store.listByUser(USER.ada);
           // Once cleared, the address is free for another user to claim.
-          const moved = yield* Auth.claimIdentifier(
+          const moved = yield* Auth.Identifier.claimIdentifier(
             store,
             emailFor(USER.grace, "ada@example.com", true),
           );
@@ -607,7 +619,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("reads the seeded addresses as identifiers", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return {
             ada: yield* store.getByValue("email", "ada@example.com"),
             adaListed: yield* store.listByUser(USER.ada),
@@ -622,7 +634,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("refuses a targeted delete with AuthError while the row holds the address, and keeps it", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return {
             refused: yield* Effect.flip(store.delete(USER.ada)),
             still: yield* store.getByValue("email", "ada@example.com"),
@@ -642,7 +654,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("a targeted delete of a user with no row is still a no-op", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.delete(USER.ghost);
           return "ok" as const;
         }),
@@ -654,7 +666,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("replace rewrites a NOT NULL address in place: the row is never NULL", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
           assert(Option.isSome(ada), "ada's email is seeded");
           return {
@@ -680,11 +692,15 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("replace with an address another user holds is refused, and the NOT NULL row keeps its address", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.getByValue("email", "ada@example.com");
           assert(Option.isSome(ada), "ada's email is seeded");
           return yield* Effect.flip(
-            Auth.replaceIdentifier(store, ada.value, emailFor(USER.ada, "grace@example.com")),
+            Auth.Identifier.replaceIdentifier(
+              store,
+              ada.value,
+              emailFor(USER.ada, "grace@example.com"),
+            ),
           );
         }),
       );
@@ -699,7 +715,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("account deletion: deleteByUser leaves the address for the row delete, which removes it", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.deleteByUser(USER.ada);
           return {
             // Still held: deleteByUser does not write NULL.
@@ -719,7 +735,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
 
       const after = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return {
             gone: yield* store.getByValue("email", "ada@example.com"),
             listed: yield* store.listByUser(USER.ada),
@@ -735,7 +751,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("refuses a second address for a user who already holds one", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return yield* Effect.flip(store.create(emailFor(USER.ada, "ada-work@example.com")));
         }),
       );
@@ -750,7 +766,7 @@ export const notNullContract = (label: string, harness: NotNullHarness) =>
     it("setVerified works on a NOT NULL row", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return yield* store.setVerified(
             USER.ada,
             DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
@@ -785,7 +801,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
       const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           return {
             verified: yield* store.setVerified(USER.ada, verifiedAt),
@@ -803,9 +819,9 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
       const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-03T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return yield* store.create(
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: USER.ada,
               type: "email",
               value: "ada@example.com",
@@ -824,7 +840,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
     it("reports no verifiedAt for an identifier that was never verified", async () => {
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           return yield* store.create(emailFor(USER.ada, "ada@example.com"));
         }),
       );
@@ -837,11 +853,11 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
       const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-04T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           const ada = yield* store.create(emailFor(USER.ada, "ada@example.com"));
           const verified = yield* store.replace(
             ada,
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: USER.ada,
               type: "email",
               value: "ada-new@example.com",
@@ -853,7 +869,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
           const storedVerifiedAt = yield* Effect.orDie(
             Effect.tryPromise({
               try: () => harness.readVerifiedAt(USER.ada),
-              catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+              catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
             }),
           );
           assert(Option.isSome(verified), "the verified replace succeeds");
@@ -875,7 +891,7 @@ export const verifiedAtContract = (label: string, harness: VerifiedAtHarness) =>
       const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z"));
       const result = await harness.run(() =>
         Effect.gen(function* () {
-          const store = yield* Auth.IdentifierStore;
+          const store = yield* Auth.Identifier.IdentifierStore;
           yield* store.create(emailFor(USER.ada, "ada@example.com"));
           yield* store.setVerified(USER.ada, verifiedAt);
           yield* store.delete(USER.ada);

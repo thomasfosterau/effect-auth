@@ -32,7 +32,7 @@ const AuthDatabase = Cloudflare.D1.Database("auth");
 // Your auth routes, using effect-auth services over the D1 stores.
 const handle = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const users = yield* Auth.UserStore;
+  const users = yield* Auth.UserStore.UserStore;
   const user = yield* users.get(new URL(request.url).searchParams.get("id") ?? "");
   return HttpServerResponse.text(user === null ? "unknown" : user.id);
 }).pipe(
@@ -49,12 +49,12 @@ export default Cloudflare.Worker(
     // Bind the database at init; build the stores in each event.
     const db = yield* Cloudflare.D1.QueryDatabase(AuthDatabase);
     return {
-      fetch: handle.pipe(Effect.provide(AuthD1.layer(db))),
+      fetch: handle.pipe(Effect.provide(AuthD1.Storage.layer(db))),
     };
   }).pipe(Effect.provide(Cloudflare.D1.QueryDatabaseBinding)),
 );
 
-`AuthD1.layer(db)` provides every store `@thomasfosterau/effect-auth/sql`
+`AuthD1.Storage.layer(db)` provides every store `@thomasfosterau/effect-auth/sql`
 implements — `SessionStore`, `UserStore`, `EmailPasswordStore`,
 `RateLimitStore`, `EmailVerificationStore`, `ChallengeStore`, `CredentialStore`,
 `OAuthStateStore`, `OAuthAccountStore`, `PasswordResetStore`, `MagicLinkStore`,
@@ -124,7 +124,7 @@ under `alchemy dev`:
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import { Effect } from "effect";
-import { AuthSchema } from "@thomasfosterau/effect-auth-alchemy-cloudflare";
+import { AuthSchema } from "@thomasfosterau/effect-auth-alchemy-cloudflare/AuthSchema";
 
 export default Alchemy.Stack(
   "api",
@@ -204,11 +204,11 @@ URL:
 ```ts
 import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
-const providers = Postgres.AuthSchemaProvider({
-  database: Postgres.database(Redacted.make(process.env.DATABASE_URL)),
+const providers = Postgres.AuthSchema.AuthSchemaProvider({
+  database: Postgres.Postgres.database(Redacted.make(process.env.DATABASE_URL)),
 });
 // in the program:
-yield * Postgres.AuthSchema("auth-schema");
+yield * Postgres.AuthSchema.AuthSchema("auth-schema");
 ```
 
 Several databases register by name (`AuthSchemaProvider({ databases })`), and

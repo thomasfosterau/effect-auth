@@ -55,7 +55,7 @@ const AuthDatabase = Cloudflare.D1.Database("auth");
 // Your auth routes, using effect-auth services over the D1 stores.
 const handle = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
-  const users = yield* Auth.UserStore;
+  const users = yield* Auth.UserStore.UserStore;
   const user = yield* users.get(new URL(request.url).searchParams.get("id") ?? "");
   return HttpServerResponse.text(user === null ? "unknown" : user.id);
 }).pipe(
@@ -72,7 +72,7 @@ export default Cloudflare.Worker(
     // Bind the database at init; build the stores in each event.
     const db = yield* Cloudflare.D1.QueryDatabase(AuthDatabase);
     return {
-      fetch: handle.pipe(Effect.provide(AuthD1.layer(db))),
+      fetch: handle.pipe(Effect.provide(AuthD1.Storage.layer(db))),
     };
   }).pipe(Effect.provide(Cloudflare.D1.QueryDatabaseBinding)),
 );

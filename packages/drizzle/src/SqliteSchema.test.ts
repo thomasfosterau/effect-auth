@@ -10,7 +10,7 @@
  * The assertions deliberately mirror the PostgreSQL suites, because that is the
  * claim being made: epoch-millisecond integers behave like `timestamptz`,
  * JSON-mode `text` behaves like `jsonb`, `0`/`1` behaves like `boolean`, and the
- * `(type, value)` unique index still drives `Auth.claimIdentifier`.
+ * `(type, value)` unique index still drives `Auth.Identifier.claimIdentifier`.
  */
 
 import Database from "better-sqlite3";
@@ -43,7 +43,10 @@ import * as Testing from "@thomasfosterau/effect-auth/testing";
 // Harness
 // ---------------------------------------------------------------------------
 
-type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
+type StoreServices =
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.Identifier.IdentifierStore;
 
 interface QueryLog {
   readonly logger: Logger;
@@ -136,7 +139,7 @@ const at = (offsetMs: number): Date =>
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
+const makeSession = (overrides: Partial<Auth.Types.Session> = {}): Auth.Types.Session => ({
   id: "session-1",
   userId: "user-1",
   expiresAt: at(60_000),
@@ -146,7 +149,9 @@ const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
   ...overrides,
 });
 
-const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier => ({
+const identifier = (
+  overrides: Partial<Auth.Identifier.Identifier> = {},
+): Auth.Identifier.Identifier => ({
   id: "identifier-1",
   userId: "user-1",
   type: "email",
@@ -181,7 +186,7 @@ const seedUser = (
           .execute();
         return id;
       },
-      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
@@ -193,7 +198,7 @@ describe("SQLite / SessionStore", () => {
   it("round-trips a session through create/get/update/delete", async () => {
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         const session = makeSession({ attributes: { device: "laptop" } });
 
         const created = yield* store.create(session);
@@ -237,7 +242,7 @@ describe("SQLite / SessionStore", () => {
 
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         yield* store.create(makeSession({ attributes }));
         yield* store.create(makeSession({ id: "session-2", attributes: {} }));
         return {
@@ -254,7 +259,7 @@ describe("SQLite / SessionStore", () => {
   it("returns null on a miss, no-ops absent deletes, and scopes deleteByUserId", async () => {
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         const missing = yield* store.get("nope");
         yield* store.delete("nope");
         yield* store.deleteByUserId("nobody");
@@ -301,7 +306,7 @@ describe("SQLite / UserStore", () => {
         });
         yield* seedUser(db, activeTables, { id: "bare" });
 
-        const store = yield* Auth.UserStore;
+        const store = yield* Auth.UserStore.UserStore;
         return {
           full: yield* store.get("full"),
           bare: yield* store.get("bare"),
@@ -342,7 +347,7 @@ describe("SQLite / IdentifierStore", () => {
   it("creates, resolves by (type, value), lists by createdAt and deletes", async () => {
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         const created = yield* store.create(identifier());
         yield* store.create(
           identifier({ id: "identifier-2", type: "username", value: "ada", createdAt: at(1000) }),
@@ -401,16 +406,19 @@ describe("SQLite / IdentifierStore", () => {
   it("rejects a duplicate (type, value) with AuthError, which claimIdentifier reads as taken", async () => {
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier());
 
         const duplicate = yield* Effect.flip(
           store.create(identifier({ id: "identifier-2", userId: "user-2" })),
         );
         const claim = yield* Effect.flip(
-          Auth.claimIdentifier(store, identifier({ id: "identifier-3", userId: "user-2" })),
+          Auth.Identifier.claimIdentifier(
+            store,
+            identifier({ id: "identifier-3", userId: "user-2" }),
+          ),
         );
-        const free = yield* Auth.claimIdentifier(
+        const free = yield* Auth.Identifier.claimIdentifier(
           store,
           identifier({ id: "identifier-4", userId: "user-2", value: "grace@example.com" }),
         );
@@ -429,7 +437,7 @@ describe("SQLite / IdentifierStore", () => {
     expect(result.duplicate.cause).toBeDefined();
 
     expect(result.claim._tag).toBe("IdentifierTakenError");
-    assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+    assert.instanceOf(result.claim, Auth.Identifier.IdentifierTakenError);
     expect(result.claim.identifierType).toBe("email");
 
     expect(result.free.id).toBe("identifier-4");
@@ -442,7 +450,7 @@ describe("SQLite / IdentifierStore", () => {
     // path has to behave identically here to the PostgreSQL suite's.
     const result = await runStores(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier());
         const verified = yield* store.setVerified("identifier-1", at(9000));
         return {
@@ -478,9 +486,9 @@ describe("SQLite / Schema", () => {
         Effect.gen(function* () {
           yield* seedUser(db, activeTables, { id: "user-1" });
 
-          const sessions = yield* Auth.SessionStore;
-          const users = yield* Auth.UserStore;
-          const identifiers = yield* Auth.IdentifierStore;
+          const sessions = yield* Auth.SessionStore.SessionStore;
+          const users = yield* Auth.UserStore.UserStore;
+          const identifiers = yield* Auth.Identifier.IdentifierStore;
 
           yield* sessions.create(makeSession({ attributes: { via: "custom" } }));
           yield* identifiers.create(identifier());
@@ -677,7 +685,7 @@ describe("SQLite / IdentifierStore contract", () => {
   });
 
   identifierStoreContract("IdentifierStore (multi-identifier) SQLite", {
-    run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+    run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
       Effect.runPromise(
         build().pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(db))))),
       ),

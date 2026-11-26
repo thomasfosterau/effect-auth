@@ -116,7 +116,8 @@ const aesKey = (bytes: Uint8Array): Effect.Effect<Aead.Key<Aead.AesGcm>, AuthErr
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { aes256GcmCipher, PlatformCrypto } from "@thomasfosterau/effect-auth"
+ * import { aes256GcmCipher } from "@thomasfosterau/effect-auth/Cipher"
+ * import { PlatformCrypto } from "@thomasfosterau/effect-auth"
  *
  * const program = Effect.gen(function* () {
  *   const cipher = yield* aes256GcmCipher("example-encryption-secret")

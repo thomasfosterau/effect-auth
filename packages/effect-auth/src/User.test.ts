@@ -15,7 +15,7 @@ import {
   resolveUserByIdentifier,
   type Identifier,
 } from "./Identifier.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 import type { User as UserRecord } from "./Types.ts";
 
 const users = MutableHashMap.empty<string, UserRecord>();

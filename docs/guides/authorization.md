@@ -19,7 +19,7 @@ const AuthorizationLive = Auth.Rbac.layer({
 });
 
 const program = Effect.gen(function* () {
-  const authorizer = yield* Auth.Authorizer;
+  const authorizer = yield* Auth.Authorizer.Authorizer;
 
   // Boolean form.
   const canCreate = yield* authorizer.check({
@@ -34,12 +34,12 @@ const program = Effect.gen(function* () {
     resource: Auth.Entity.ref("posts", "post-1"),
   });
   return canCreate;
-}).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-123")));
+}).pipe(Auth.Authorizer.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-123")));
 
 console.log(await Effect.runPromise(Effect.provide(program, AuthorizationLive)));
 ```
 
-Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md).
+Because the output is `DeclarativePolicy` data, a rule authored this way is storable, traceable, validatable against an `AuthorizationModel`, and enforceable at the data boundary with `Auth.Protected.protectedField`. Mix it with hand-written policies by composing `Auth.Rbac.policies(...)` into your own `Auth.Authorizer.Authorizer.layer({ policies })`. Migrating from the removed `RoleStore` / `AuthorizationPolicy` API? See [docs/guides/authorization-kernel-migration.md](https://github.com/thomasfosterau/effect-auth/blob/trunk/docs/guides/authorization-kernel-migration.md).
 
 ### Empty entity ids and types
 
@@ -75,7 +75,7 @@ const Model = Auth.AuthorizationModel.make({
   },
 });
 
-const AuthorizationLive = Auth.Authorizer.layer({
+const AuthorizationLive = Auth.Authorizer.Authorizer.layer({
   model: Model,
   policies: [
     // The billing job may charge invoices, and nothing else.
@@ -88,7 +88,7 @@ const AuthorizationLive = Auth.Authorizer.layer({
 });
 
 const chargeInvoices = Effect.gen(function* () {
-  const authorizer = yield* Auth.Authorizer;
+  const authorizer = yield* Auth.Authorizer.Authorizer;
   yield* authorizer.authorize({
     action: "invoice:charge",
     resource: Auth.Entity.ref("Invoice", "inv-1"),
@@ -115,7 +115,7 @@ The rules a system principal follows:
 - **No roles.** Role assignment is for users. `Rbac` refuses `"System"` as its principal type, and
   a role permit never matches a system principal, whatever parents a resolver gives it, so a role
   change cannot widen what a job may do. One exception is under the application's control: if its entity resolver places a `Role` inside a `System` group, a grant to that group (`inScope(System::"…")`) reaches every member of the role, users included, so keep `Role` entities out of `System` groups.
-- **Named in the audit.** `Authorizer` and `Auth.protectedField` log every decision about a system
+- **Named in the audit.** `Authorizer` and `Auth.Protected.protectedField` log every decision about a system
   principal with `System::"<name>"` and the policies that decided it (allows at info, denials at
   warning), and a denial's error message names it.
 
@@ -130,7 +130,7 @@ the system gate: it admits the current principal when it is a system principal a
 action (decided by the `Authorizer` in context, so the decision is logged), and yields its
 `EntityRef`. Ask the user gate when a viewer is signed in (`guards.isSignedIn`) and the system gate
 otherwise; `requireSystem`'s docs have the full example. After the write, report it with
-`Auth.recordWrite({ principal, action, resource })`, naming whichever principal passed:
+`Auth.Hooks.recordWrite({ principal, action, resource })`, naming whichever principal passed:
 `AuditPlugin` logs it as `auth.write`, so unattended writes are audited alongside a person's.
 
 ### Owned and reference material

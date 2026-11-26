@@ -142,7 +142,7 @@ const runAdopted = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    Auth.Email.EmailPasswordStore | Auth.UserStore | Auth.UserServiceStore
+    Auth.Email.EmailPasswordStore | Auth.UserStore.UserStore | Auth.User.UserServiceStore
   >,
   passwordHash: Option.Option<"passwordHash"> = Option.some("passwordHash"),
 ): Promise<A> =>
@@ -163,7 +163,7 @@ describe("EmailPasswordStore on an application's own users table", () => {
     const result = await runAdopted(
       Effect.gen(function* () {
         const store = yield* Auth.Email.EmailPasswordStore;
-        const users = yield* Auth.UserStore;
+        const users = yield* Auth.UserStore.UserStore;
         const member = yield* store.createUser({ name: "Ada" });
         const admin = yield* store.createUser({ name: "Grace", attributes: { role: "admin" } });
         yield* store.setPasswordHash(admin.user.id, "hash");
@@ -188,7 +188,7 @@ describe("EmailPasswordStore on an application's own users table", () => {
         }),
       ),
     );
-    expect(error).toBeInstanceOf(Auth.AuthError);
+    expect(error).toBeInstanceOf(Auth.Errors.AuthError);
     expect(error.message).toContain("no attribute bag for team");
   });
 
@@ -213,7 +213,7 @@ describe("UserServiceStore on an application's own users table", () => {
         const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
           store.createUser({ name: "Ada" }),
         );
-        const store = yield* Auth.UserServiceStore;
+        const store = yield* Auth.User.UserServiceStore;
         yield* store.update({
           ...user,
           name: "Grace",
@@ -245,14 +245,14 @@ describe("UserServiceStore on an application's own users table", () => {
         const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
           store.createUser({ name: "Ada" }),
         );
-        const store = yield* Auth.UserServiceStore;
+        const store = yield* Auth.User.UserServiceStore;
         const error = yield* Effect.flip(
           store.update({ ...user, name: "Grace", attributes: { role: "admin", team: "core" } }),
         );
         return { error, read: yield* store.get(user.id) };
       }),
     );
-    expect(result.error).toBeInstanceOf(Auth.AuthError);
+    expect(result.error).toBeInstanceOf(Auth.Errors.AuthError);
     expect(result.error.message).toContain("drizzle userService.update failed");
     expect(result.error.message).toContain("no attribute bag for team");
     expect(Option.getOrUndefined(result.read)?.name).toBe("Ada");
@@ -263,7 +263,7 @@ describe("UserServiceStore on an application's own users table", () => {
     const result = await runAdopted(
       Effect.gen(function* () {
         const { user } = yield* Auth.Email.EmailPasswordStore.use((store) => store.createUser({}));
-        const store = yield* Auth.UserServiceStore;
+        const store = yield* Auth.User.UserServiceStore;
         yield* store.delete(user.id);
         return yield* store.get(user.id);
       }),

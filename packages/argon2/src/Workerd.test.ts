@@ -71,7 +71,7 @@ const ENTRY = join(srcDir, "__workerd_entry__.ts");
 
 const WORKER_SOURCE = `
 import { Effect } from "effect";
-import { argon2Hasher } from "./index.ts";
+import { argon2Hasher } from "./Argon2.ts";
 
 // The smallest valid wasm module: the magic number and version 1.
 const EMPTY_MODULE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);

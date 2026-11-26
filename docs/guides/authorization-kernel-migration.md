@@ -12,8 +12,8 @@ than one that refuses to build.
 
 | Removed                                               | Replacement                                                                           |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `Auth.AuthorizationPolicy`                            | `Auth.Authorizer`                                                                     |
-| `Auth.RoleStore`                                      | `Auth.Rbac.entities` / an `Auth.EntityResolver`                                       |
+| `Auth.AuthorizationPolicy`                            | `Auth.Authorizer.Authorizer`                                                          |
+| `Auth.RoleStore`                                      | `Auth.Rbac.entities` / an `Auth.Authorizer.EntityResolver`                            |
 | `Rbac.make(config)` (returned a `RoleStore`)          | `Auth.Rbac.policies` / `.entities` / `.model` / `.layer`                              |
 | `Auth.InMemoryRoleStoreConfig`                        | `Auth.Rbac.RbacConfig` (same shape)                                                   |
 | `Auth.requirePermission(userId, resource, action)`    | `Authorizer.authorize({ action, resource })`                                          |
@@ -79,18 +79,18 @@ const layer = Auth.Rbac.layer({
 });
 
 const program = Effect.gen(function* () {
-  const authorizer = yield* Auth.Authorizer;
+  const authorizer = yield* Auth.Authorizer.Authorizer;
   const canRead = yield* authorizer.check({
     action: "read",
     resource: Auth.Entity.ref("posts", "post-1"),
   });
-}).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")));
+}).pipe(Auth.Authorizer.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")));
 ```
 
 ## The three shape changes to expect
 
 **1. The principal moves from an argument to context.** `checkPermission` took a `userId: string`.
-The kernel reads `Auth.CurrentPrincipal` — an `Entity.EntityRef` — so a user id becomes
+The kernel reads `Auth.Authorizer.CurrentPrincipal` — an `Entity.EntityRef` — so a user id becomes
 `Entity.ref("User", userId)`. Provide it once per request (`CurrentPrincipal.provide(...)`, or via
 the HTTP session middleware) instead of threading it through every call site.
 
@@ -144,7 +144,7 @@ const ownerMayEdit = Auth.Policy.permit({
   when: Auth.Condition.eq(Auth.Condition.attr("resource", "ownerId"), Auth.Condition.principal),
 });
 
-const authorizer = Auth.Authorizer.layer({
+const authorizer = Auth.Authorizer.Authorizer.layer({
   policies: [...Auth.Rbac.policies(rbac), ownerMayEdit],
 });
 ```
@@ -165,7 +165,7 @@ import * as Sql from "@thomasfosterau/effect-auth/sql";
 
 const authorizer = Layer.unwrap(
   Effect.map(Sql.readRbacPolicies, (policies) =>
-    Auth.Authorizer.layer({ policies, useStore: false }),
+    Auth.Authorizer.Authorizer.layer({ policies, useStore: false }),
   ),
 ).pipe(Layer.provideMerge(Sql.RbacEntityResolverLayer));
 ```

@@ -23,7 +23,7 @@ One object per key holds the counter. The semantics are those of `effect/persist
 import { DurableObject } from "cloudflare:workers";
 import { Duration, Effect, Layer } from "effect";
 import { RateLimiter as PersistenceRateLimiter } from "effect/persistence";
-import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth";
+import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth/RateLimitPersistence";
 
 interface Counter {
   readonly count: number;
@@ -127,7 +127,7 @@ import * as Option from "effect/Option";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 /** When an entry can be dropped: its window is over and any block has lapsed. */
-const cleanupAt = (entry: Auth.RateLimitEntry): number =>
+const cleanupAt = (entry: Auth.RateLimit.RateLimitEntry): number =>
   Math.max(entry.resetAt, entry.blockedUntil ?? 0);
 
 /**
@@ -137,19 +137,19 @@ const cleanupAt = (entry: Auth.RateLimitEntry): number =>
  * delivers the next request. That is what makes `increment` atomic.
  */
 export class RateLimitCounter extends DurableObject {
-  async read(): Promise<Auth.RateLimitEntry | null> {
-    return (await this.ctx.storage.get<Auth.RateLimitEntry>("entry")) ?? null;
+  async read(): Promise<Auth.RateLimit.RateLimitEntry | null> {
+    return (await this.ctx.storage.get<Auth.RateLimit.RateLimitEntry>("entry")) ?? null;
   }
 
-  async write(entry: Auth.RateLimitEntry, ttlSeconds: number): Promise<void> {
+  async write(entry: Auth.RateLimit.RateLimitEntry, ttlSeconds: number): Promise<void> {
     await this.ctx.storage.put("entry", entry);
     await this.ctx.storage.setAlarm(Math.max(cleanupAt(entry), Date.now() + ttlSeconds * 1000));
   }
 
   async increment(key: string, ttlSeconds: number): Promise<number> {
     const now = Date.now();
-    const existing = await this.ctx.storage.get<Auth.RateLimitEntry>("entry");
-    const entry: Auth.RateLimitEntry =
+    const existing = await this.ctx.storage.get<Auth.RateLimit.RateLimitEntry>("entry");
+    const entry: Auth.RateLimit.RateLimitEntry =
       existing === undefined || now >= existing.resetAt
         ? { key, count: 1, resetAt: now + ttlSeconds * 1000 }
         : { ...existing, count: existing.count + 1 };
@@ -166,7 +166,7 @@ export class RateLimitCounter extends DurableObject {
   // The stored expiry: once the window and any block are over, the object
   // empties itself, so idle keys cost no storage.
   override async alarm(): Promise<void> {
-    const entry = await this.ctx.storage.get<Auth.RateLimitEntry>("entry");
+    const entry = await this.ctx.storage.get<Auth.RateLimit.RateLimitEntry>("entry");
     if (entry !== undefined && Date.now() < cleanupAt(entry)) {
       await this.ctx.storage.setAlarm(cleanupAt(entry));
       return;
@@ -175,16 +175,16 @@ export class RateLimitCounter extends DurableObject {
   }
 }
 
-const call = <A>(label: string, run: () => Promise<A>): Effect.Effect<A, Auth.AuthError> =>
+const call = <A>(label: string, run: () => Promise<A>): Effect.Effect<A, Auth.Errors.AuthError> =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new Auth.AuthError({ message: `${label} failed`, cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: `${label} failed`, cause }),
   });
 
 /** `RateLimitStore` over the `RateLimitCounter` namespace: one object per key. */
 export const makeRateLimitStore = (
   namespace: DurableObjectNamespace<RateLimitCounter>,
-): typeof Auth.RateLimitStore.Service => {
+): typeof Auth.RateLimit.RateLimitStore.Service => {
   const counter = (key: string) => namespace.get(namespace.idFromName(key));
   return {
     // An object answers a miss with `null` over RPC; the store contract's is `None`.
@@ -200,7 +200,7 @@ export const makeRateLimitStore = (
 };
 
 export const rateLimitStoreLayer = (namespace: DurableObjectNamespace<RateLimitCounter>) =>
-  Layer.succeed(Auth.RateLimitStore, makeRateLimitStore(namespace));
+  Layer.succeed(Auth.RateLimit.RateLimitStore, makeRateLimitStore(namespace));
 ```
 
 An exact store does not make `RateLimiter.layer()` strict. That limiter decides before it increments, so use §1 for limits that must hold under concurrency.
@@ -230,13 +230,13 @@ const sessionKey = (sessionId: string) => `session:${sessionId}`;
  * `listByUserId` and `deleteByUserId` are one object's local reads and writes.
  */
 export class UserSessions extends DurableObject {
-  async put(session: Auth.Session): Promise<void> {
+  async put(session: Auth.Types.Session): Promise<void> {
     await this.ctx.storage.put(sessionKey(session.id), session);
     await this.scheduleCleanup();
   }
 
-  async read(sessionId: string): Promise<Auth.Session | null> {
-    return (await this.ctx.storage.get<Auth.Session>(sessionKey(sessionId))) ?? null;
+  async read(sessionId: string): Promise<Auth.Types.Session | null> {
+    return (await this.ctx.storage.get<Auth.Types.Session>(sessionKey(sessionId))) ?? null;
   }
 
   /**
@@ -244,7 +244,10 @@ export class UserSessions extends DurableObject {
    * unexpired. One object's read and write, so a concurrent `put` of new
    * attributes or a `remove` is never undone.
    */
-  async touch(sessionId: string, touch: Auth.SessionTouch): Promise<Auth.Session | null> {
+  async touch(
+    sessionId: string,
+    touch: Auth.SessionStore.SessionTouch,
+  ): Promise<Auth.Types.Session | null> {
     const session = await this.read(sessionId);
     if (session === null || session.expiresAt < touch.lastActivityAt) return null;
     const touched = { ...session, ...touch };
@@ -257,8 +260,8 @@ export class UserSessions extends DurableObject {
     await this.ctx.storage.delete(sessionKey(sessionId));
   }
 
-  async list(): Promise<ReadonlyArray<Auth.Session>> {
-    const sessions = await this.ctx.storage.list<Auth.Session>({ prefix: "session:" });
+  async list(): Promise<ReadonlyArray<Auth.Types.Session>> {
+    const sessions = await this.ctx.storage.list<Auth.Types.Session>({ prefix: "session:" });
     return [...sessions.values()];
   }
 
@@ -311,17 +314,17 @@ export class SessionPointer extends DurableObject {
   }
 }
 
-const call = <A>(label: string, run: () => Promise<A>): Effect.Effect<A, Auth.AuthError> =>
+const call = <A>(label: string, run: () => Promise<A>): Effect.Effect<A, Auth.Errors.AuthError> =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new Auth.AuthError({ message: `${label} failed`, cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: `${label} failed`, cause }),
   });
 
 /** `SessionStore` over the `UserSessions` and `SessionPointer` namespaces. */
 export const makeSessionStore = (
   users: DurableObjectNamespace<UserSessions>,
   pointers: DurableObjectNamespace<SessionPointer>,
-): typeof Auth.SessionStore.Service => {
+): typeof Auth.SessionStore.SessionStore.Service => {
   const user = (userId: string) => users.get(users.idFromName(`user:${userId}`));
   const pointer = (sessionId: string) => pointers.get(pointers.idFromName(`session:${sessionId}`));
 
@@ -376,7 +379,7 @@ export const makeSessionStore = (
 export const sessionStoreLayer = (
   users: DurableObjectNamespace<UserSessions>,
   pointers: DurableObjectNamespace<SessionPointer>,
-) => Layer.succeed(Auth.SessionStore, makeSessionStore(users, pointers));
+) => Layer.succeed(Auth.SessionStore.SessionStore, makeSessionStore(users, pointers));
 ```
 
 This store passes the `SessionStore` conformance suite from `@thomasfosterau/effect-auth/testing`.
@@ -431,9 +434,9 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
     const program = Effect.gen(function* () {
-      const limiter = yield* Auth.RateLimiter;
+      const limiter = yield* Auth.RateLimit.RateLimiter;
       yield* limiter.consumeToken(`sign-in:${ip}`, { maxRequests: 5, windowMs: 60_000 });
-      const sessions = yield* Auth.SessionStore;
+      const sessions = yield* Auth.SessionStore.SessionStore;
       return (yield* sessions.listByUserId("u-1")).length;
     });
     return Effect.runPromise(

@@ -159,8 +159,8 @@ describe("the client/atoms subpath", () => {
   });
 });
 
-describe("the ladder subpath", () => {
-  // `@thomasfosterau/effect-auth/ladder` is imported by browser bundles for UX
+describe("the Ladder subpath", () => {
+  // `@thomasfosterau/effect-auth/Ladder` is imported by browser bundles for UX
   // gates, so it loads `effect/Option` (its spelling of anonymous) and nothing
   // else.
   it("imports only effect/Option", async () => {

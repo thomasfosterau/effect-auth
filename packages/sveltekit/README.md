@@ -21,7 +21,7 @@ pnpm add @thomasfosterau/effect-auth-sveltekit @thomasfosterau/effect-auth effec
 import { sequence } from "@sveltejs/kit/hooks";
 import { Effect } from "effect";
 import * as Http from "@thomasfosterau/effect-auth/http";
-import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit";
+import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit/Handle";
 
 const authHook = auth({
   cookies: { name: "app_session" },

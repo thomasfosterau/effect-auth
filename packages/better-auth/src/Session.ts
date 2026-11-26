@@ -33,7 +33,7 @@ import { requireGoodStanding, toSession, toUser } from "./Convert.ts";
  * @category models
  */
 export interface SessionLookup {
-  readonly session: Option.Option<Auth.SessionWithUser>;
+  readonly session: Option.Option<Auth.Types.SessionWithUser>;
   readonly setCookie: ReadonlyArray<string>;
 }
 
@@ -79,7 +79,7 @@ export class BetterAuthSessions extends Context.Service<
      * (BetterAuth's `bearer()` plugin) is marked `credentialClass: "machine"`.
      * Any failure of the call is a fault (`AuthError`), never anonymous.
      */
-    readonly lookup: (request: Request) => Effect.Effect<SessionLookup, Auth.AuthError>;
+    readonly lookup: (request: Request) => Effect.Effect<SessionLookup, Auth.Errors.AuthError>;
     /** The cookie naming for `SessionResolution` and the SvelteKit `handle`. */
     readonly credentialConfig: Auth.SessionResolution.CredentialConfig;
   }
@@ -114,7 +114,7 @@ export class BetterAuthSessions extends Context.Service<
                     ...session,
                     attributes: {
                       ...session.attributes,
-                      [Auth.CREDENTIAL_CLASS_ATTRIBUTE]: "machine",
+                      [Auth.Types.CREDENTIAL_CLASS_ATTRIBUTE]: "machine",
                     },
                   }
                 : session,
@@ -145,7 +145,7 @@ const PROTECTED_SESSION_COLUMNS = HashSet.make(
 );
 
 const unsupported = (method: string, reason: string) =>
-  new Auth.AuthError({
+  new Auth.Errors.AuthError({
     message: `SessionService.${method} is not supported over BetterAuth: ${reason}`,
   });
 
@@ -165,116 +165,117 @@ const unsupported = (method: string, reason: string) =>
  * @since 0.1.0
  * @category layers
  */
-export const sessionServiceLayer: Layer.Layer<Auth.SessionService, never, BetterAuthInstance> =
-  Layer.effect(
-    Auth.SessionService,
-    Effect.gen(function* () {
-      const { context } = yield* BetterAuthInstance;
-      const internal = context.internalAdapter;
-      const writable = HashSet.fromIterable(
-        Arr.filter(
-          columnsOf(context, "session"),
-          (key) => !HashSet.has(PROTECTED_SESSION_COLUMNS, key),
-        ),
-      );
+export const sessionServiceLayer: Layer.Layer<
+  Auth.SessionService.SessionService,
+  never,
+  BetterAuthInstance
+> = Layer.effect(
+  Auth.SessionService.SessionService,
+  Effect.gen(function* () {
+    const { context } = yield* BetterAuthInstance;
+    const internal = context.internalAdapter;
+    const writable = HashSet.fromIterable(
+      Arr.filter(
+        columnsOf(context, "session"),
+        (key) => !HashSet.has(PROTECTED_SESSION_COLUMNS, key),
+      ),
+    );
 
-      const liveSessions = Effect.fn("SessionService.listSessions")(function* (userId: string) {
+    const liveSessions = Effect.fn("SessionService.listSessions")(function* (userId: string) {
+      const sessions = yield* adapterCall("listSessions", () => internal.listSessions(userId));
+      const now = yield* Clock.currentTimeMillis;
+      return Arr.filter(sessions, (session) => session.expiresAt.getTime() > now);
+    });
+
+    return {
+      createSession: () =>
+        Effect.fail(unsupported("createSession", "BetterAuth's routes issue sessions")),
+
+      validateSession: Effect.fn("SessionService.validateSession")(function* (token: string) {
+        const found = yield* adapterCall("findSession", () => internal.findSession(token));
+        if (found === null) {
+          return yield* new Auth.Errors.SessionNotFoundError({
+            message: "Session not found",
+            sessionId: "",
+          });
+        }
+        const session = toSession(found.session);
+        if (session.expiresAt.getTime() <= (yield* Clock.currentTimeMillis)) {
+          return yield* new Auth.Errors.SessionExpiredError({
+            message: "Session expired",
+            sessionId: session.id,
+          });
+        }
+        const user = toUser(found.user);
+        yield* requireGoodStanding(user);
+        return { session, user };
+      }),
+
+      invalidateSession: (token: string) =>
+        Effect.asVoid(adapterCall("deleteSession", () => internal.deleteSession(token))),
+
+      invalidateUserSessions: (userId: string) =>
+        Effect.asVoid(adapterCall("deleteUserSessions", () => internal.deleteUserSessions(userId))),
+
+      listSessions: (userId: string) => Effect.map(liveSessions(userId), Arr.map(toSession)),
+
+      revokeSessionById: Effect.fn("SessionService.revokeSessionById")(function* (
+        userId: string,
+        storedSessionId: string,
+      ) {
         const sessions = yield* adapterCall("listSessions", () => internal.listSessions(userId));
-        const now = yield* Clock.currentTimeMillis;
-        return Arr.filter(sessions, (session) => session.expiresAt.getTime() > now);
-      });
+        const match = Arr.findFirst(sessions, (session) => session.id === storedSessionId);
+        if (Option.isNone(match)) return false;
+        yield* adapterCall("deleteSession", () => internal.deleteSession(match.value.token));
+        return true;
+      }),
 
-      return {
-        createSession: () =>
-          Effect.fail(unsupported("createSession", "BetterAuth's routes issue sessions")),
+      revokeOtherSessions: Effect.fn("SessionService.revokeOtherSessions")(function* (
+        userId: string,
+        keepSessionId: string,
+      ) {
+        const sessions = yield* adapterCall("listSessions", () => internal.listSessions(userId));
+        const others = Arr.filterMap(sessions, (session) =>
+          session.id === keepSessionId ? Result.failVoid : Result.succeed(session.token),
+        );
+        if (Arr.isArrayNonEmpty(others)) {
+          yield* adapterCall("deleteSessions", () => internal.deleteSessions(others));
+        }
+      }),
 
-        validateSession: Effect.fn("SessionService.validateSession")(function* (token: string) {
-          const found = yield* adapterCall("findSession", () => internal.findSession(token));
-          if (found === null) {
-            return yield* new Auth.SessionNotFoundError({
-              message: "Session not found",
-              sessionId: "",
-            });
-          }
-          const session = toSession(found.session);
-          if (session.expiresAt.getTime() <= (yield* Clock.currentTimeMillis)) {
-            return yield* new Auth.SessionExpiredError({
-              message: "Session expired",
-              sessionId: session.id,
-            });
-          }
-          const user = toUser(found.user);
-          yield* requireGoodStanding(user);
-          return { session, user };
-        }),
-
-        invalidateSession: (token: string) =>
-          Effect.asVoid(adapterCall("deleteSession", () => internal.deleteSession(token))),
-
-        invalidateUserSessions: (userId: string) =>
-          Effect.asVoid(
-            adapterCall("deleteUserSessions", () => internal.deleteUserSessions(userId)),
-          ),
-
-        listSessions: (userId: string) => Effect.map(liveSessions(userId), Arr.map(toSession)),
-
-        revokeSessionById: Effect.fn("SessionService.revokeSessionById")(function* (
-          userId: string,
-          storedSessionId: string,
-        ) {
-          const sessions = yield* adapterCall("listSessions", () => internal.listSessions(userId));
-          const match = Arr.findFirst(sessions, (session) => session.id === storedSessionId);
-          if (Option.isNone(match)) return false;
-          yield* adapterCall("deleteSession", () => internal.deleteSession(match.value.token));
-          return true;
-        }),
-
-        revokeOtherSessions: Effect.fn("SessionService.revokeOtherSessions")(function* (
-          userId: string,
-          keepSessionId: string,
-        ) {
-          const sessions = yield* adapterCall("listSessions", () => internal.listSessions(userId));
-          const others = Arr.filterMap(sessions, (session) =>
-            session.id === keepSessionId ? Result.failVoid : Result.succeed(session.token),
-          );
-          if (Arr.isArrayNonEmpty(others)) {
-            yield* adapterCall("deleteSessions", () => internal.deleteSessions(others));
-          }
-        }),
-
-        setSessionAttributes: Effect.fn("SessionService.setSessionAttributes")(function* (
-          storedSessionId: string,
-          attributes: Auth.Attributes,
-        ) {
-          const refused = Arr.findFirst(R.keys(attributes), (key) => !HashSet.has(writable, key));
-          if (Option.isSome(refused)) {
-            return yield* new Auth.AuthError({
-              message: `"${refused.value}" is not a session column BetterAuth declares, or is one it owns`,
-            });
-          }
-          const stored = yield* adapterCall("findOne(session)", () =>
-            context.adapter.findOne<BetterAuthSession>({
-              model: "session",
-              where: [{ field: "id", value: storedSessionId }],
-            }),
-          );
-          if (stored === null) {
-            return yield* new Auth.SessionNotFoundError({
-              message: "Session not found",
-              sessionId: storedSessionId,
-            });
-          }
-          const updated = yield* adapterCall("updateSession", () =>
-            internal.updateSession(stored.token, { ...attributes }),
-          );
-          if (updated === null) {
-            return yield* new Auth.SessionNotFoundError({
-              message: "Session not found",
-              sessionId: storedSessionId,
-            });
-          }
-          return toSession(updated);
-        }),
-      };
-    }),
-  );
+      setSessionAttributes: Effect.fn("SessionService.setSessionAttributes")(function* (
+        storedSessionId: string,
+        attributes: Auth.Types.Attributes,
+      ) {
+        const refused = Arr.findFirst(R.keys(attributes), (key) => !HashSet.has(writable, key));
+        if (Option.isSome(refused)) {
+          return yield* new Auth.Errors.AuthError({
+            message: `"${refused.value}" is not a session column BetterAuth declares, or is one it owns`,
+          });
+        }
+        const stored = yield* adapterCall("findOne(session)", () =>
+          context.adapter.findOne<BetterAuthSession>({
+            model: "session",
+            where: [{ field: "id", value: storedSessionId }],
+          }),
+        );
+        if (stored === null) {
+          return yield* new Auth.Errors.SessionNotFoundError({
+            message: "Session not found",
+            sessionId: storedSessionId,
+          });
+        }
+        const updated = yield* adapterCall("updateSession", () =>
+          internal.updateSession(stored.token, { ...attributes }),
+        );
+        if (updated === null) {
+          return yield* new Auth.Errors.SessionNotFoundError({
+            message: "Session not found",
+            sessionId: storedSessionId,
+          });
+        }
+        return toSession(updated);
+      }),
+    };
+  }),
+);

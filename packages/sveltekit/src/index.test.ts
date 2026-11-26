@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { createHash } from "node:crypto";
-import type { SessionWithUser } from "@thomasfosterau/effect-auth";
+import type { SessionWithUser } from "@thomasfosterau/effect-auth/Types";
 import { makeServerFixture } from "@thomasfosterau/effect-auth/client/testing";
 import * as Http from "@thomasfosterau/effect-auth/http";
 import {
@@ -15,12 +15,10 @@ import {
   credentialAction,
   credentialCommand,
   credentialForm,
-  handle,
-  type LocalsAuth,
   parseSetCookie,
-  PRIVATE_CACHE_CONTROL,
   submitCredential,
-} from "./index.ts";
+} from "./Actions.ts";
+import { handle, type LocalsAuth, PRIVATE_CACHE_CONTROL } from "./Handle.ts";
 
 /** The `locals` a hook fills. */
 interface Locals {

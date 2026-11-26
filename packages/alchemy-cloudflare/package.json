@@ -39,6 +39,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./AuthSchema": {
+      "types": "./dist/AuthSchema.d.ts",
+      "import": "./dist/AuthSchema.js"
+    },
+    "./D1Client": {
+      "types": "./dist/D1Client.d.ts",
+      "import": "./dist/D1Client.js"
+    },
+    "./Storage": {
+      "types": "./dist/Storage.d.ts",
+      "import": "./dist/Storage.js"
     }
   },
   "publishConfig": {

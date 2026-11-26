@@ -48,7 +48,7 @@ export const FIXTURE_DEVICE_CLIENT = {
   id: "fixture-device",
   name: "Fixture device",
   scopes: ["read", "write"],
-} as const satisfies Auth.DeviceClient;
+} as const satisfies Auth.DeviceAuthorization.DeviceClient;
 
 export interface ServerFixtureOptions {
   /**
@@ -88,24 +88,24 @@ export interface ServerFixtureOptions {
   /** The server's cookie settings beyond `secure: false` (`apiKeyHeaders`, …). */
   readonly cookie?: Http.CookieConfig;
   /** The `RateLimitStore` every limiter in the fixture runs on; default in-memory. */
-  readonly rateLimitStore?: typeof Auth.RateLimitStore.Service;
+  readonly rateLimitStore?: typeof Auth.RateLimit.RateLimitStore.Service;
 }
 
 export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
-  const usersById = MutableHashMap.empty<string, Auth.User>();
-  const identifierRecords = MutableHashMap.empty<string, Auth.Identifier>();
+  const usersById = MutableHashMap.empty<string, Auth.Types.User>();
+  const identifierRecords = MutableHashMap.empty<string, Auth.Identifier.Identifier>();
   const passwordHashes = MutableHashMap.empty<string, string>();
-  const sessions = MutableHashMap.empty<string, Auth.Session>();
+  const sessions = MutableHashMap.empty<string, Auth.Types.Session>();
   const verifications = MutableHashMap.empty<string, Auth.Email.EmailVerification>();
   const resets = MutableHashMap.empty<string, Auth.Password.PasswordResetToken>();
   let userSeq = 0;
 
   const createUser = (input: {
     readonly name?: string;
-    readonly attributes?: Auth.User["attributes"];
-  }): Auth.User => {
+    readonly attributes?: Auth.Types.User["attributes"];
+  }): Auth.Types.User => {
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
-    const user: Auth.User = {
+    const user: Auth.Types.User = {
       id: `user-${++userSeq}`,
       ...(input.name !== undefined && { name: input.name }),
       createdAt: now,
@@ -118,11 +118,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const getUserById = (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId));
 
-  const identifierStore = Auth.memoryIdentifierStore(identifierRecords);
+  const identifierStore = Auth.Identifier.memoryIdentifierStore(identifierRecords);
 
   const sessionStore = memorySessionStore(sessions);
 
-  const userStore: typeof Auth.UserStore.Service = {
+  const userStore: typeof Auth.UserStore.UserStore.Service = {
     get: getUserById,
   };
 
@@ -135,7 +135,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.sync(() => void MutableHashMap.set(passwordHashes, userId, hash)),
   };
 
-  const userServiceStore: typeof Auth.UserServiceStore.Service = {
+  const userServiceStore: typeof Auth.User.UserServiceStore.Service = {
     get: getUserById,
     update: (user) =>
       Effect.sync(() => {
@@ -187,19 +187,19 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   };
 
   const storeLayer = Layer.mergeAll(
-    Layer.succeed(Auth.SessionStore)(sessionStore),
-    Layer.succeed(Auth.UserStore)(userStore),
-    Layer.succeed(Auth.IdentifierStore)(identifierStore),
+    Layer.succeed(Auth.SessionStore.SessionStore)(sessionStore),
+    Layer.succeed(Auth.UserStore.UserStore)(userStore),
+    Layer.succeed(Auth.Identifier.IdentifierStore)(identifierStore),
     Layer.succeed(Auth.Email.EmailPasswordStore)(emailPasswordStore),
     Layer.succeed(Auth.Password.PasswordHasher)(hasher),
     Layer.succeed(Auth.Email.EmailVerificationStore)(emailVerificationStore),
     Layer.succeed(Auth.Password.PasswordResetStore)(passwordResetStore),
     Layer.succeed(Auth.Password.PasswordResetUserStore)(passwordResetUserStore),
-    Layer.succeed(Auth.UserServiceStore)(userServiceStore),
-    Auth.Hooks.Default,
+    Layer.succeed(Auth.User.UserServiceStore)(userServiceStore),
+    Auth.Hooks.Hooks.Default,
   );
 
-  const sessionServiceLayer = Auth.SessionService.layer({
+  const sessionServiceLayer = Auth.SessionService.SessionService.layer({
     sessionExpiresIn: { activePeriod: HOUR, idlePeriod: HOUR },
   }).pipe(Layer.provide(storeLayer));
 
@@ -207,7 +207,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const stage1 = Layer.mergeAll(
     storeLayer,
     sessionServiceLayer,
-    Auth.UserService.layer().pipe(Layer.provide(storeLayer)),
+    Auth.User.UserService.layer().pipe(Layer.provide(storeLayer)),
     Auth.Email.EmailVerificationService.layer({ sendEmail: () => Effect.void }).pipe(
       Layer.provide(storeLayer),
     ),
@@ -223,7 +223,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   const stage2 = Layer.mergeAll(stage1, emailPasswordServiceLayer, passwordResetServiceLayer);
 
   // Stage 3: AuthLifecycleService needs EmailPasswordService + others from stage 2.
-  const authLifecycleServiceLayer = Auth.AuthLifecycleService.layer().pipe(Layer.provide(stage2));
+  const authLifecycleServiceLayer = Auth.AuthLifecycle.AuthLifecycleService.layer().pipe(
+    Layer.provide(stage2),
+  );
 
   const core = Layer.mergeAll(stage2, authLifecycleServiceLayer);
 
@@ -244,13 +246,13 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     readonly token: string;
   }> = [];
 
-  const anonymousUserStore: typeof Auth.AnonymousUserStore.Service = {
+  const anonymousUserStore: typeof Auth.Anonymous.AnonymousUserStore.Service = {
     createAnonymousUser: Effect.sync(() => createUser({ attributes: { isAnonymous: true } })),
     deleteUser: (userId) => Effect.sync(() => void MutableHashMap.remove(usersById, userId)),
   };
 
-  const accountTokens = MutableHashMap.empty<string, Auth.AccountToken>();
-  const accountStore: typeof Auth.AccountManagementStore.Service = {
+  const accountTokens = MutableHashMap.empty<string, Auth.AccountManagement.AccountToken>();
+  const accountStore: typeof Auth.AccountManagement.AccountManagementStore.Service = {
     create: (token) =>
       Effect.sync(() => (MutableHashMap.set(accountTokens, token.token, token), token)),
     get: (token) => Effect.sync(() => MutableHashMap.get(accountTokens, token)),
@@ -322,19 +324,21 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       }),
   };
 
-  const phoneOtpUserStore: typeof Auth.PhoneOtpUserStore.Service = {
+  const phoneOtpUserStore: typeof Auth.PhoneOtp.PhoneOtpUserStore.Service = {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
   const featureBase = Layer.mergeAll(
     core,
-    Layer.succeed(Auth.AnonymousUserStore)(anonymousUserStore),
-    Layer.succeed(Auth.AccountManagementStore)(accountStore),
+    Layer.succeed(Auth.Anonymous.AnonymousUserStore)(anonymousUserStore),
+    Layer.succeed(Auth.AccountManagement.AccountManagementStore)(accountStore),
     Layer.succeed(Auth.MultiFactor.MultiFactorStore)(multiFactorStore),
     Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
-    Layer.succeed(Auth.PhoneOtpStore)(memoryPhoneOtpStore()),
-    Layer.succeed(Auth.PhoneOtpUserStore)(phoneOtpUserStore),
-    Layer.succeed(Auth.DeviceAuthorizationStore)(memoryDeviceAuthorizationStore()),
+    Layer.succeed(Auth.PhoneOtp.PhoneOtpStore)(memoryPhoneOtpStore()),
+    Layer.succeed(Auth.PhoneOtp.PhoneOtpUserStore)(phoneOtpUserStore),
+    Layer.succeed(Auth.DeviceAuthorization.DeviceAuthorizationStore)(
+      memoryDeviceAuthorizationStore(),
+    ),
   );
 
   const multiFactorServiceLayer = Auth.MultiFactor.MultiFactorService.layer({
@@ -343,9 +347,9 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   const featureLayer = Layer.mergeAll(
     featureBase,
-    Auth.AnonymousService.layer().pipe(Layer.provide(featureBase)),
-    Auth.UsernameService.layer().pipe(Layer.provide(featureBase)),
-    Auth.AccountManagementService.layer({
+    Auth.Anonymous.AnonymousService.layer().pipe(Layer.provide(featureBase)),
+    Auth.Username.UsernameService.layer().pipe(Layer.provide(featureBase)),
+    Auth.AccountManagement.AccountManagementService.layer({
       sendChangeEmailVerification: ({ newEmail, token }) =>
         Effect.sync(() => void sentChangeEmail.push({ newEmail, token })),
       sendEmailChangeNotice: ({ oldEmail, newEmail }) =>
@@ -353,11 +357,11 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       sendDeleteAccountVerification: ({ token }) =>
         Effect.sync(() => void sentDeleteTokens.push(token)),
     }).pipe(Layer.provide(featureBase)),
-    Auth.PhoneOtpService.layer({
+    Auth.PhoneOtp.PhoneOtpService.layer({
       sendOtp: (phoneNumber, otp) =>
         Effect.sync(() => void sentPhoneOtps.push({ phoneNumber, otp })),
     }).pipe(Layer.provide(featureBase)),
-    Auth.DeviceAuthorizationService.layer({
+    Auth.DeviceAuthorization.DeviceAuthorizationService.layer({
       verificationUri: "https://client.test/device",
       clients: [FIXTURE_DEVICE_CLIENT],
       // interval 0 so back-to-back polls in one test never hit `slow_down`.
@@ -370,21 +374,21 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
 
   // --- Organization module ---------------------------------------------------
 
-  const orgs = MutableHashMap.empty<string, Auth.Organization>();
-  const members: Auth.Member[] = [];
-  const invitations = MutableHashMap.empty<string, Auth.Invitation>();
-  const teams = MutableHashMap.empty<string, Auth.Team>();
-  const teamMembers: Auth.TeamMember[] = [];
+  const orgs = MutableHashMap.empty<string, Auth.Organization.Organization>();
+  const members: Auth.Organization.Member[] = [];
+  const invitations = MutableHashMap.empty<string, Auth.Organization.Invitation>();
+  const teams = MutableHashMap.empty<string, Auth.Organization.Team>();
+  const teamMembers: Auth.Organization.TeamMember[] = [];
   const removeTeamMembers = (teamId: string): void => {
     const kept = teamMembers.filter((m) => m.teamId !== teamId);
     teamMembers.splice(0, teamMembers.length, ...kept);
   };
-  const orgRoles = MutableHashMap.empty<string, Auth.OrgRole>();
-  const domainRecords = MutableHashMap.empty<string, Auth.OrganizationDomain>();
+  const orgRoles = MutableHashMap.empty<string, Auth.Organization.OrgRole>();
+  const domainRecords = MutableHashMap.empty<string, Auth.Organization.OrganizationDomain>();
   /** Domains whose DNS TXT record the stub verifier should "find". */
   const publishedDnsDomains = MutableHashSet.empty<string>();
 
-  const organizationStore: typeof Auth.OrganizationStore.Service = {
+  const organizationStore: typeof Auth.Organization.OrganizationStore.Service = {
     createOrganization: (org) => Effect.sync(() => (MutableHashMap.set(orgs, org.id, org), org)),
     getOrganizationById: (id) => Effect.succeed(MutableHashMap.get(orgs, id)),
     getOrganizationBySlug: (slug) =>
@@ -472,7 +476,10 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
         teamMembers
           .filter((m) => m.userId === userId)
           .map((m) => Option.getOrUndefined(MutableHashMap.get(teams, m.teamId)))
-          .filter((t): t is Auth.Team => t !== undefined && t.organizationId === organizationId),
+          .filter(
+            (t): t is Auth.Organization.Team =>
+              t !== undefined && t.organizationId === organizationId,
+          ),
       ),
     upsertOrgRole: (role) =>
       Effect.sync(
@@ -492,19 +499,21 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
       Effect.sync(() => void MutableHashMap.remove(orgRoles, `${organizationId} ${role}`)),
   };
 
-  const domainVerifier: typeof Auth.DomainVerifier.Service = {
+  const domainVerifier: typeof Auth.Organization.DomainVerifier.Service = {
     verify: (domain) => Effect.succeed(MutableHashSet.has(publishedDnsDomains, domain)),
   };
 
   const organizationBase = Layer.mergeAll(
     core,
-    Layer.succeed(Auth.OrganizationStore)(organizationStore),
-    Layer.succeed(Auth.OrganizationDomainStore)(Auth.memoryOrganizationDomainStore(domainRecords)),
-    Layer.succeed(Auth.DomainVerifier)(domainVerifier),
+    Layer.succeed(Auth.Organization.OrganizationStore)(organizationStore),
+    Layer.succeed(Auth.Organization.OrganizationDomainStore)(
+      Auth.Organization.memoryOrganizationDomainStore(domainRecords),
+    ),
+    Layer.succeed(Auth.Organization.DomainVerifier)(domainVerifier),
   );
   const organizationLayer = Layer.mergeAll(
     organizationBase,
-    Auth.OrganizationService.layer({
+    Auth.Organization.OrganizationService.layer({
       // Clients resend at once; the cooldown has its own service tests.
       invitationResendCooldown: 0,
       sendInvitationEmail: ({ invitation, token }) =>
@@ -524,18 +533,20 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
   // an in-memory one. Device approve/deny are limited to 5 per user code per 15
   // minutes, as in production.
   const rateLimitStore = options.rateLimitStore ?? memoryRateLimitStore();
-  const rateLimitStoreLayer = Layer.succeed(Auth.RateLimitStore, rateLimitStore);
-  const rateLimiterLayer = Auth.RateLimiter.layer().pipe(Layer.provide(rateLimitStoreLayer));
+  const rateLimitStoreLayer = Layer.succeed(Auth.RateLimit.RateLimitStore, rateLimitStore);
+  const rateLimiterLayer = Auth.RateLimit.RateLimiter.layer().pipe(
+    Layer.provide(rateLimitStoreLayer),
+  );
 
   // API keys over an in-memory store, with the RateLimiter their per-key
   // `rateLimit` runs on, and the UserStore that `verify` reads the key's
   // owner from.
-  const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey>();
-  const apiKeyLayer = Auth.ApiKeyService.layer().pipe(
+  const apiKeyRecords = MutableHashMap.empty<string, Auth.ApiKey.ApiKey>();
+  const apiKeyLayer = Auth.ApiKey.ApiKeyService.layer().pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.succeed(Auth.ApiKeyStore, memoryApiKeyStore(apiKeyRecords)),
-        Layer.succeed(Auth.UserStore)(userStore),
+        Layer.succeed(Auth.ApiKey.ApiKeyStore, memoryApiKeyStore(apiKeyRecords)),
+        Layer.succeed(Auth.UserStore.UserStore)(userStore),
         rateLimiterLayer,
       ),
     ),
@@ -565,8 +576,8 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
    * Claim a `username` login handle for a user (there is no HTTP endpoint for
    * it: usernames are registered by the app, then used by a `POST /sessions` with a `username` credential).
    */
-  const registerUsername = (userId: string, username: string): Auth.Identifier => {
-    const identifier = Auth.makeIdentifier({
+  const registerUsername = (userId: string, username: string): Auth.Identifier.Identifier => {
+    const identifier = Auth.Identifier.makeIdentifier({
       userId,
       type: "username",
       value: username,

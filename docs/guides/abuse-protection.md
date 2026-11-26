@@ -10,8 +10,8 @@ import * as Auth from "@thomasfosterau/effect-auth";
 
 // An in-process store: one instance only. Use a shared store (`/sql`, Redis)
 // when you run more than one, where `increment` must be one atomic statement.
-const counts = new Map<string, Auth.RateLimitEntry>();
-const rateLimitStore: typeof Auth.RateLimitStore.Service = {
+const counts = new Map<string, Auth.RateLimit.RateLimitEntry>();
+const rateLimitStore: typeof Auth.RateLimit.RateLimitStore.Service = {
   get: (key) => Effect.sync(() => Option.fromUndefinedOr(counts.get(key))),
   set: (key, entry, _ttl) => Effect.sync(() => void counts.set(key, entry)),
   // Count one request, opening a new window when there is none or it has ended.
@@ -28,21 +28,21 @@ const rateLimitStore: typeof Auth.RateLimitStore.Service = {
   delete: (key) => Effect.sync(() => void counts.delete(key)),
 };
 
-const RateLimiterLive = Auth.RateLimiter.layer().pipe(
-  Layer.provide(Layer.succeed(Auth.RateLimitStore)(rateLimitStore)),
+const RateLimiterLive = Auth.RateLimit.RateLimiter.layer().pipe(
+  Layer.provide(Layer.succeed(Auth.RateLimit.RateLimitStore)(rateLimitStore)),
 );
 
 // Fails with `RateLimitError` once the key is over its limit.
 const guardSignIn = (ip: string) =>
   Effect.gen(function* () {
-    const limiter = yield* Auth.RateLimiter;
-    yield* limiter.consumeToken(`sign-in:${ip}`, Auth.RateLimitPresets.login);
+    const limiter = yield* Auth.RateLimit.RateLimiter;
+    yield* limiter.consumeToken(`sign-in:${ip}`, Auth.RateLimit.RateLimitPresets.login);
   });
 
 // Presets: login 5 per 15 min · passwordReset 3 per hour · emailVerification
 // 3 per 10 min · registration 3 per hour · oauth 10 per 5 min ·
 // totpVerification 5 per 5 min. Or write your own:
-const strict: Auth.RateLimitConfig = {
+const strict: Auth.RateLimit.RateLimitConfig = {
   maxRequests: 10,
   windowMs: 60 * 1000, // 1 minute
   blockDurationMs: 5 * 60 * 1000, // then block for 5 minutes
@@ -71,10 +71,10 @@ import * as Http from "@thomasfosterau/effect-auth/http";
 // (`RateLimiterLive` above) merged in.
 const { handler } = Http.make({
   services: Layer.merge(services, RateLimiterLive),
-  trustedProxy: Auth.ClientIP.cloudflare, // trusts CF-Connecting-IP alone
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare, // trusts CF-Connecting-IP alone
 });
 
-// Behind another edge, name its header instead: Auth.ClientIP.trustedHeader("x-real-ip").
+// Behind another edge, name its header instead: Auth.ClientIP.ClientIP.trustedHeader("x-real-ip").
 ```
 
 This is correct only when the app is reachable solely through Cloudflare. A request that bypasses the edge can set `CF-Connecting-IP` to any value and choose its own key. Only that one header is read; `X-Forwarded-For` and the rest are ignored. A value is taken only when it is exactly one IPv4 or IPv6 address. A missing, empty or malformed value, or a comma-separated list, falls back to the socket address. The first entry of a list is never used. Behind Cloudflare that fallback is an edge address shared by many visitors, so it is a fallback, not a per-visitor key. Under `Http.make` serving Web `Request`s (Workers, for example) there is no socket address. So the IP limit, which is on unless `ipRateLimit: false`, needs a `trustedProxy`: without one no request has an address, the limit would refuse every request, and `Http.make` throws `ClientAddressConfigError` at build instead. When the header is unusable, the request resolves no address, and a request to a rate-limited endpoint is refused with `429`. It is never let through unlimited and never counted under a bucket shared with other callers. An accepted IPv6 address is canonicalised (RFC 5952), and an IPv4-mapped address becomes dotted IPv4, so one visitor has one key. The limits then key an IPv6 visitor on its /64, the block one customer is usually given, so rotating through the addresses of one block earns no fresh budget; `ipRateLimit: { ipv6PrefixLength }` (and the same option on `IPRateLimitPlugin`) changes the length, from 1 to 128, where `128` keys each address on its own.
@@ -107,7 +107,7 @@ import * as Http from "@thomasfosterau/effect-auth/http";
 // so every other endpoint keeps its default.
 const { handler } = Http.make({
   services,
-  trustedProxy: Auth.ClientIP.cloudflare,
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
   ipRateLimit: {
     rules: [
       { path: "/oauth2/token", methods: ["POST"], maxRequests: 600, windowMs: 60_000 },
@@ -136,7 +136,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Reject compromised passwords (k-anonymity range query) and require a captcha
 // token on sign-up, password sign-in and every code or link send. Array order
 // is execution order.
-const plugins = Auth.composePlugins([
+const plugins = Auth.Hooks.composePlugins([
   Auth.Password.HaveIBeenPwnedPlugin({ threshold: 1 }),
   Auth.Plugins.CaptchaPlugin({
     provider: "cloudflare-turnstile",
@@ -149,7 +149,7 @@ const plugins = Auth.composePlugins([
 
 // The plugin stack requires `Hooks.Default` and an `HttpClient`.
 export const HooksLive = plugins.pipe(
-  Layer.provide(Auth.Hooks.Default),
+  Layer.provide(Auth.Hooks.Hooks.Default),
   Layer.provide(FetchHttpClient.layer),
 );
 ```

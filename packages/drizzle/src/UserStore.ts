@@ -58,17 +58,17 @@ export const selection = (users: UserSchema): UserColumns => {
 };
 
 /**
- * Row → `Auth.User`. A promoted column is the sole authority for its attribute:
+ * Row → `Auth.Types.User`. A promoted column is the sole authority for its attribute:
  * it replaces any value the `jsonb` bag holds under the same key, and a `NULL`
  * column leaves the key absent.
  */
 export const userFromRow =
   (users: UserSchema) =>
-  (row: UserRow): Auth.User => {
+  (row: UserRow): Auth.Types.User => {
     // A users table with no mapped attribute bag reads back `undefined` here.
-    // SAFETY: `UserColumns.attributes` is a `NullableColumn<Auth.JsonObject>`;
+    // SAFETY: `UserColumns.attributes` is a `NullableColumn<Auth.Types.JsonObject>`;
     // only its being an optional field blurs the projected type.
-    const bag = (row.attributes ?? {}) as Auth.Attributes;
+    const bag = (row.attributes ?? {}) as Auth.Types.Attributes;
     // SAFETY: `selection` projects each promoted column under its `promotedKey`, and
     // `AuthSchemaSpec` only admits promoted columns that read back as a `PromotedValue`.
     const promotedFields = row as UserRow & PromotedFields;
@@ -80,7 +80,7 @@ export const userFromRow =
       { ...bag, ...promoted },
       // A bag read from JSON holds no `undefined`, so only a promoted column
       // that read back absent or `NULL` is dropped.
-      (value, attribute): value is Auth.Json =>
+      (value, attribute): value is Auth.Types.Json =>
         value !== undefined && !(R.has(users.promoted, attribute) && value === null),
     );
     return {
@@ -99,7 +99,7 @@ export const userFromRow =
 /** Build a `UserStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   schema: SchemaInput = defaultTables,
-): Effect.Effect<typeof Auth.UserStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.UserStore.UserStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const users: UserSchema = resolveSchema(schema).users;
@@ -111,21 +111,21 @@ export const make = (
     const byId = (
       userId: string,
       label: string,
-    ): Effect.Effect<Option.Option<UserRow>, Auth.AuthError> =>
+    ): Effect.Effect<Option.Option<UserRow>, Auth.Errors.AuthError> =>
       query(label, (db) =>
         db.select(projection).from(table).where(eq(column.id, userId)).limit(1).execute(),
       ).pipe(Effect.map(Arr.head));
 
     return {
       get: (userId) => byId(userId, "user.get").pipe(Effect.map(Option.map(toUser))),
-    } satisfies typeof Auth.UserStore.Service;
+    } satisfies typeof Auth.UserStore.UserStore.Service;
   });
 
 /** `UserStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   schema: SchemaInput = defaultTables,
-): Layer.Layer<Auth.UserStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.UserStore, make(schema));
+): Layer.Layer<Auth.UserStore.UserStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.UserStore.UserStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Requests / Resolver
@@ -137,8 +137,8 @@ export const layer = (
  */
 export class GetUser extends Request.TaggedClass("GetUser")<
   { readonly id: string },
-  Option.Option<Auth.User>,
-  Auth.AuthError
+  Option.Option<Auth.Types.User>,
+  Auth.Errors.AuthError
 > {}
 
 /** Every request served by {@link makeResolver}. */

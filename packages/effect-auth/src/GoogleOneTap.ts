@@ -31,7 +31,7 @@ import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
 import { UserStore } from "./UserStore.ts";
 import { tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeEmail } from "./Normalize.ts";
 
 /** Failure to verify a One Tap credential or complete the sign-in. */
 export class GoogleOneTapError extends Schema.TaggedError<

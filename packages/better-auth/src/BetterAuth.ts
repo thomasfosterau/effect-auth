@@ -233,14 +233,16 @@ export class BetterAuthInstance extends Context.Service<
    * Resolve `auth.$context` once. A failure to initialise (a bad adapter, a
    * missing secret) fails the layer with `AuthError`.
    */
-  static readonly layer = (auth: BetterAuthLike): Layer.Layer<BetterAuthInstance, Auth.AuthError> =>
+  static readonly layer = (
+    auth: BetterAuthLike,
+  ): Layer.Layer<BetterAuthInstance, Auth.Errors.AuthError> =>
     Layer.effect(
       BetterAuthInstance,
       Effect.map(
         Effect.tryPromise({
           try: () => auth.$context,
           catch: (cause) =>
-            new Auth.AuthError({ message: "BetterAuth failed to initialise", cause }),
+            new Auth.Errors.AuthError({ message: "BetterAuth failed to initialise", cause }),
         }),
         (context) => ({ api: auth.api, context }),
       ),
@@ -265,8 +267,9 @@ export const columnsOf = (context: BetterAuthContext, model: string): ReadonlyAr
 export const adapterCall = <A>(
   operation: string,
   run: () => Promise<A>,
-): Effect.Effect<A, Auth.AuthError> =>
+): Effect.Effect<A, Auth.Errors.AuthError> =>
   Effect.tryPromise({
     try: run,
-    catch: (cause) => new Auth.AuthError({ message: `BetterAuth ${operation} failed`, cause }),
+    catch: (cause) =>
+      new Auth.Errors.AuthError({ message: `BetterAuth ${operation} failed`, cause }),
   });

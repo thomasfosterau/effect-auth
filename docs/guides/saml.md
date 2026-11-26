@@ -29,7 +29,8 @@ sessions. Only the XML job lives here.
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/http";
 import * as Saml from "@thomasfosterau/effect-auth/saml";
-import { SamlReplayStore, SsoService, memorySamlReplayStore } from "@thomasfosterau/effect-auth";
+import { SamlReplayStore, memorySamlReplayStore } from "@thomasfosterau/effect-auth/Saml";
+import { SsoService } from "@thomasfosterau/effect-auth/Sso";
 
 const samlSupport = Layer.mergeAll(
   Saml.layer,
@@ -45,7 +46,7 @@ Register a connection, then start and finish sign-ins:
 
 ```ts
 import { Effect } from "effect";
-import { SsoService } from "@thomasfosterau/effect-auth";
+import { SsoService } from "@thomasfosterau/effect-auth/Sso";
 
 // Register once (admin-gated), with the IdP's signing certificate(s) pinned.
 const register = (adminUserId: string, idpCertificatePem: string) =>

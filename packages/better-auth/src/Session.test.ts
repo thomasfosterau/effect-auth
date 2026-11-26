@@ -28,7 +28,7 @@ describe("BetterAuthSessions.lookup", () => {
     expect(found.session.id).not.toBe(token);
     expect(found.session).not.toHaveProperty("token");
     expect(R.values(found.session.attributes)).not.toContain(token);
-    expect(Auth.sessionCredentialClass(found.session)).toBe("interactive");
+    expect(Auth.Types.sessionCredentialClass(found.session)).toBe("interactive");
   });
 
   it("is anonymous without a cookie, and for a cookie whose signature does not verify", async () => {
@@ -60,7 +60,7 @@ describe("BetterAuthSessions.lookup", () => {
       ),
     );
     assert(Option.isSome(lookup.session));
-    expect(Auth.sessionCredentialClass(lookup.session.value.session)).toBe("machine");
+    expect(Auth.Types.sessionCredentialClass(lookup.session.value.session)).toBe("machine");
   });
 
   it("reads a banned user as anonymous, until the ban expires", async () => {
@@ -105,7 +105,7 @@ describe("BetterAuthSessions.lookup", () => {
       auth,
       Effect.flatMap(Effect.service(BetterAuthSessions), (s) => s.lookup(requestWith({ cookie }))),
     );
-    expect(failureTag(exit)).toBeInstanceOf(Auth.AuthError);
+    expect(failureTag(exit)).toBeInstanceOf(Auth.Errors.AuthError);
   });
 });
 
@@ -143,7 +143,7 @@ describe("credentialConfig", () => {
 });
 
 describe("SessionService over BetterAuth", () => {
-  const sessions = Effect.service(Auth.SessionService);
+  const sessions = Effect.service(Auth.SessionService.SessionService);
 
   it("validates a raw token, and refuses an unknown, expired or banned one", async () => {
     const { auth, db } = makeAuth();
@@ -159,7 +159,7 @@ describe("SessionService over BetterAuth", () => {
       auth,
       Effect.flatMap(sessions, (s) => s.validateSession("nope")),
     );
-    expect(failureTag(unknown)).toBeInstanceOf(Auth.SessionNotFoundError);
+    expect(failureTag(unknown)).toBeInstanceOf(Auth.Errors.SessionNotFoundError);
 
     const userRow = rowOf(db, "user");
     userRow["banned"] = true;
@@ -167,7 +167,7 @@ describe("SessionService over BetterAuth", () => {
       auth,
       Effect.flatMap(sessions, (s) => s.validateSession(token)),
     );
-    expect(failureTag(banned)).toBeInstanceOf(Auth.UserBannedError);
+    expect(failureTag(banned)).toBeInstanceOf(Auth.Errors.UserBannedError);
     userRow["banned"] = false;
 
     const sessionRow = rowOf(db, "session");
@@ -176,7 +176,7 @@ describe("SessionService over BetterAuth", () => {
       auth,
       Effect.flatMap(sessions, (s) => s.validateSession(token)),
     );
-    expect(failureTag(expired)).toBeInstanceOf(Auth.SessionExpiredError);
+    expect(failureTag(expired)).toBeInstanceOf(Auth.Errors.SessionExpiredError);
   });
 
   it("lists only live sessions, and revokes by stored id or all but one", async () => {
@@ -269,12 +269,12 @@ describe("SessionService over BetterAuth", () => {
         ),
       ),
     );
-    Arr.forEach(refused, (exit) => expect(failureTag(exit)).toBeInstanceOf(Auth.AuthError));
+    Arr.forEach(refused, (exit) => expect(failureTag(exit)).toBeInstanceOf(Auth.Errors.AuthError));
     const missing = await runExit(
       auth,
       Effect.flatMap(sessions, (s) => s.setSessionAttributes("no-such-id", { device: "x" })),
     );
-    expect(failureTag(missing)).toBeInstanceOf(Auth.SessionNotFoundError);
+    expect(failureTag(missing)).toBeInstanceOf(Auth.Errors.SessionNotFoundError);
   });
 
   it("refuses to create a session: BetterAuth's routes issue them", async () => {
@@ -284,7 +284,7 @@ describe("SessionService over BetterAuth", () => {
       auth,
       Effect.flatMap(sessions, (s) => s.createSession(user.id)),
     );
-    expect(failureTag(exit)).toBeInstanceOf(Auth.AuthError);
+    expect(failureTag(exit)).toBeInstanceOf(Auth.Errors.AuthError);
   });
 });
 

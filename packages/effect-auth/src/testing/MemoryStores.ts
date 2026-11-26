@@ -833,8 +833,8 @@ export type MemoryStores =
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * const program = Effect.gen(function* () {
- *   const sessions = yield* Auth.SessionStore
- *   const users = yield* Auth.UserStore
+ *   const sessions = yield* Auth.SessionStore.SessionStore
+ *   const users = yield* Auth.UserStore.UserStore
  *   assert.ok(Option.isNone(yield* users.get("nobody")))
  *   assert.deepEqual(yield* sessions.listByUserId("nobody"), [])
  * })

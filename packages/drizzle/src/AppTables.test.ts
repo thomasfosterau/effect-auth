@@ -107,7 +107,7 @@ const apiKeyColumns = {
   expires: instant("expires"),
   lastUsed: instant("last_used"),
   scopes: jsonb("scopes").$type<ApiKeyPermissions>(),
-  extra: jsonb("extra").$type<Auth.JsonObject>(),
+  extra: jsonb("extra").$type<Auth.Types.JsonObject>(),
   usesLeft: integer("uses_left"),
   refillBy: integer("refill_by"),
   refillEvery: bigint("refill_every", { mode: "number" }),
@@ -211,7 +211,7 @@ authStoresContract("PostgreSQL, application tables", (effect) =>
   ),
 );
 
-const key = (id: string, owner: string): Auth.ApiKey => ({
+const key = (id: string, owner: string): Auth.ApiKey.ApiKey => ({
   id,
   start: "ea_",
   keyHash: hashToken(id),
@@ -247,7 +247,9 @@ describe("an application's own API key and token tables", () => {
       effect: Effect.Effect<
         A,
         E,
-        Auth.ApiKeyStore | Auth.Email.EmailVerificationStore | Auth.Password.PasswordResetStore
+        | Auth.ApiKey.ApiKeyStore
+        | Auth.Email.EmailVerificationStore
+        | Auth.Password.PasswordResetStore
       >,
     ) =>
       Effect.runPromise(
@@ -256,7 +258,7 @@ describe("an application's own API key and token tables", () => {
 
     await run(
       Effect.gen(function* () {
-        const keys = yield* Auth.ApiKeyStore;
+        const keys = yield* Auth.ApiKey.ApiKeyStore;
         yield* keys.create(key(globalThis.crypto.randomUUID(), userId));
         yield* keys.create(kept);
         yield* (yield* Auth.Email.EmailVerificationStore).create(verification);
@@ -267,7 +269,7 @@ describe("an application's own API key and token tables", () => {
 
     const after = await run(
       Effect.gen(function* () {
-        const keys = yield* Auth.ApiKeyStore;
+        const keys = yield* Auth.ApiKey.ApiKeyStore;
         return {
           keys: yield* keys.listByUserId(userId),
           kept: Option.getOrNull(yield* keys.get(kept.id)),
@@ -286,7 +288,7 @@ describe("an application's own API key and token tables", () => {
   it("refuses a key whose owner the users table does not hold", async () => {
     const error = await Effect.runPromise(
       Effect.flip(
-        Auth.ApiKeyStore.use((keys) =>
+        Auth.ApiKey.ApiKeyStore.use((keys) =>
           keys.create({
             id: globalThis.crypto.randomUUID(),
             start: "ea_",
@@ -300,6 +302,6 @@ describe("an application's own API key and token tables", () => {
         ).pipe(Effect.provide(stores.pipe(Layer.provide(databaseLayer(drizzle({ client })))))),
       ),
     );
-    expect(error).toBeInstanceOf(Auth.AuthError);
+    expect(error).toBeInstanceOf(Auth.Errors.AuthError);
   });
 });

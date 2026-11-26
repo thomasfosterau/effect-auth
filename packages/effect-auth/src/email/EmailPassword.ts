@@ -18,7 +18,7 @@ import {
   verifyPasswordOrDecoy,
 } from "../password/DecoyVerify.ts";
 import type * as Types from "../Types.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 import { SessionService } from "../SessionService.ts";
 import {
   DEFAULT_SERVER_ONLY_ATTRIBUTES,
@@ -271,7 +271,7 @@ export const SecondFactorExemptMethods: Context.Reference<ReadonlyArray<SignInMe
  * import {
  *   SecondFactorExemptMethods,
  *   exemptFromSecondFactor,
- * } from "@thomasfosterau/effect-auth/email"
+ * } from "@thomasfosterau/effect-auth/Email"
  *
  * const program = Effect.gen(function* () {
  *   assert.deepEqual(yield* SecondFactorExemptMethods, ["sso", "passkey"])

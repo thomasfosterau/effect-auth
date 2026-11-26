@@ -36,7 +36,7 @@ const sessionColumns = () => ({
   expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   lastActivityAt: timestamp("last_activity_at", { mode: "date", withTimezone: true }).notNull(),
-  attributes: jsonb("attributes").$type<Auth.JsonObject>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.Types.JsonObject>().notNull().default({}),
 });
 
 const userColumns = () => ({
@@ -44,7 +44,7 @@ const userColumns = () => ({
   name: text("name"),
   image: text("image"),
   passwordHash: text("password_hash"),
-  attributes: jsonb("attributes").$type<Auth.JsonObject>().notNull().default({}),
+  attributes: jsonb("attributes").$type<Auth.Types.JsonObject>().notNull().default({}),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull(),
 });
@@ -52,7 +52,7 @@ const userColumns = () => ({
 const identifierColumns = () => ({
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
-  type: text("type").$type<Auth.IdentifierType>().notNull(),
+  type: text("type").$type<Auth.Identifier.IdentifierType>().notNull(),
   value: text("value").notNull(),
   verified: boolean("verified").notNull().default(false),
   verifiedAt: timestamp("verified_at", { mode: "date", withTimezone: true }),
@@ -74,7 +74,7 @@ const apiKeyColumns = () => ({
   expiresAt: instant("expires_at"),
   lastUsedAt: instant("last_used_at"),
   permissions: jsonb("permissions").$type<ApiKeyPermissions>(),
-  metadata: jsonb("metadata").$type<Auth.JsonObject>().notNull().default({}),
+  metadata: jsonb("metadata").$type<Auth.Types.JsonObject>().notNull().default({}),
   remaining: integer("remaining"),
   refillAmount: integer("refill_amount"),
   refillInterval: bigint("refill_interval", { mode: "number" }),

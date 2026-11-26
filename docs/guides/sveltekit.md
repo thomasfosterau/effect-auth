@@ -15,7 +15,7 @@ credential form action.
 // src/hooks.server.ts
 import { sequence } from "@sveltejs/kit/hooks";
 import { Effect } from "effect";
-import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit";
+import { handle as auth } from "@thomasfosterau/effect-auth-sveltekit/Handle";
 
 export const handle = sequence(
   auth({
@@ -91,7 +91,7 @@ Put the hook first in `sequence`. The later hooks and every `load` then see `eve
 ```ts
 // src/routes/login/+page.server.ts
 import { fail, redirect } from "@sveltejs/kit";
-import { credentialAction } from "@thomasfosterau/effect-auth-sveltekit";
+import { credentialAction } from "@thomasfosterau/effect-auth-sveltekit/Actions";
 
 export const actions = {
   default: (event) =>
@@ -145,7 +145,7 @@ The action forwards the browser's `Origin`, `User-Agent`, `X-Forwarded-For` and 
 // src/routes/login/sign-in.remote.ts
 import { getRequestEvent, form } from "$app/server";
 import { redirect } from "@sveltejs/kit";
-import { credentialForm } from "@thomasfosterau/effect-auth-sveltekit";
+import { credentialForm } from "@thomasfosterau/effect-auth-sveltekit/Actions";
 
 export const signIn = form(
   credentialForm(

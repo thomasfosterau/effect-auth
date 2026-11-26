@@ -12,7 +12,8 @@ import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
-import { HashingError, Password } from "@thomasfosterau/effect-auth";
+import { HashingError } from "@thomasfosterau/effect-auth/Errors";
+import { Password } from "@thomasfosterau/effect-auth";
 import {
   ARGON2ID,
   HASH_LENGTH,
@@ -272,7 +273,8 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
  *
  * @example
  * ```ts
- * import { argon2Hasher, argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
+ * import { argon2Hasher, argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
+ * import { serverProfile } from "@thomasfosterau/effect-auth-argon2/Common";
  *
  * const hasher = argon2Hasher();               // OWASP low-memory defaults
  * const layer = argon2HasherLayer(serverProfile); // 64 MiB, t = 3 on Node

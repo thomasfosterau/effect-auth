@@ -63,17 +63,17 @@ import { Effect, Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 const program = Effect.gen(function* () {
-  const sessions = yield* Auth.SessionService;
+  const sessions = yield* Auth.SessionService.SessionService;
   const { token } = yield* sessions.createSession(userId);
   return yield* sessions.validateSession(token);
 });
 
-const layer = Auth.SessionService.layer(sessionConfig).pipe(
+const layer = Auth.SessionService.SessionService.layer(sessionConfig).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
-      Layer.succeed(Auth.SessionStore)(sessionStore),
-      Layer.succeed(Auth.UserStore)(userStore),
-      Auth.Hooks.Default,
+      Layer.succeed(Auth.SessionStore.SessionStore)(sessionStore),
+      Layer.succeed(Auth.UserStore.UserStore)(userStore),
+      Auth.Hooks.Hooks.Default,
     ),
   ),
 );
@@ -84,7 +84,7 @@ await Effect.runPromise(Effect.provide(program, layer));
 - `X` is both the value you `yield*` and the tag you provide with
   `Layer.succeed(Auth.X)(impl)`. There is no separate `XShape` interface — an
   implementation's type is `typeof X.Service` (`const store: typeof
-  Auth.SessionStore.Service = {...}`).
+  Auth.SessionStore.SessionStore.Service = {...}`).
 - Store/hook/session dependencies are resolved **once, at Layer construction**
   (`Auth.X.layer(config)`), not threaded through every method call — method
   signatures on the returned service carry only the error channel (`R =
@@ -101,36 +101,35 @@ await Effect.runPromise(Effect.provide(program, layer));
 
 ## Module map (`src/`)
 
-The package root (`src/`) holds the core spine plus flat, non-clustered
+The package root (`src/`) holds the core spine plus the non-clustered
 feature modules; related modules are grouped into lowercase cluster
-directories, each with its own `index.ts` barrel and matching
-`effect-auth/<cluster>` subpath export.
+directories, each with its own `index.ts` barrel. The root barrel follows
+Effect's layout: every public module is a PascalCase namespace
+(`Auth.SessionService.SessionService`, `Auth.Policy.permit`), and each is also
+its own PascalCase subpath (`effect-auth/SessionService`, `effect-auth/Email`
+for a cluster). Nothing is re-exported flat, so no two modules' member names
+can collide (`Auth.Types.Session` is the record, and no module is called
+`Session`).
 
 - **Foundations** (root): `Types.ts` (schema'd `User`, `Session`,
   `SessionConfig`, …), `Errors.ts` (shared tagged errors), `Hooks.ts`
   (hooks/plugin system), `TokenHash.ts`, `Cipher.ts`, `Identifier.ts`,
   `Messages.ts`, `PlatformCrypto.ts` (default `SecureRandom` / `Digest` layer),
   `Observability.ts`.
-- **Session management** (root, flat — the spine nearly every feature module
+- **Session management** (root — the spine nearly every feature module
   depends on, so it is not a cluster): `SessionService.ts`, `SessionStore.ts`,
   `UserStore.ts`, `TrustedDevice.ts`, plus `SessionContext.ts`,
-  `SessionResolution.ts` and `SessionCookies.ts` (namespaced at the root:
-  app-edge session resolution and cookie naming). Exported flat from the package root
-  (`Auth.SessionService`, `Auth.SessionStore`, `Auth.UserStore`,
-  `Auth.TrustedDeviceStore`, …); `TrustedDevice.ts` is additionally namespaced
-  as `Auth.TrustedDevice` so its generic `make`/`gate` stay qualified. There is
-  no `Auth.Session` namespace — `Types.ts` already owns that name for the flat
-  `Session` record.
+  `SessionResolution.ts` and `SessionCookies.ts` (app-edge session resolution
+  and cookie naming).
 - **`email/` cluster**: `EmailAddress.ts`, `EmailOtp.ts`, `EmailPassword.ts`,
   `EmailVerification.ts`.
 - **`password/` cluster**: `Password.ts` (the PBKDF2 hasher over `effect/crypto`'s `Kdf`,
   multi-algorithm verifier), `PasswordReset.ts`, `HaveIBeenPwned.ts`. Argon2id
   is `Argon2.ts`, over `effect/crypto`'s `Kdf`; the separate `effect-auth-argon2`
   package covers runtimes whose `Kdf` has no Argon2id, Workers among them.
-- **Authorization** (root, flat — a first-class feature, not a cluster): the
+- **Authorization** (root — a first-class feature, not a cluster): the
   policy kernel `Entity.ts` / `Condition.ts` / `Policy.ts` /
-  `AuthorizationModel.ts` / `PolicyStore.ts` (namespaced at the root as
-  `Auth.Entity`, `Auth.Policy`, … because their member names are generic),
+  `AuthorizationModel.ts` / `PolicyStore.ts`,
   the `Authorizer.ts` shell, `System.ts` (non-human principals: the reserved
   `System` entity type, provided and granted explicitly, [ADR 0019](adr/0019-system-principals.md)),
   `Protected.ts` (schema-embedded field guards),
@@ -138,7 +137,7 @@ directories, each with its own `index.ts` barrel and matching
   `Rbac.ts` + `Permission.ts` (RBAC authoring sugar and the
   `"resource:action"` vocabulary it is written in), and `Ladder.ts` (an ordered
   role ladder with named capability axes — import-free, also published as the
-  `./ladder` subpath for browser UX gates; `Policy.roleAtLeast` compiles an
+  `./Ladder` subpath for browser UX gates; `Policy.roleAtLeast` compiles an
   axis into a declarative policy), and `Guard.ts` (the zero-IO gates,
   predicates and capability hooks over an application-declared viewer — the
   kernel's fast path over a slice built from facts the caller holds; defines
@@ -223,12 +222,12 @@ directories, each with its own `index.ts` barrel and matching
   tokens/OTPs, pending multi-factor) over `effect/persistence`
   `KeyValueStore` (in-memory, file system, Redis, …).
 
-Every cluster namespace except `http` is also re-exported from the package
-root (`Auth.Email`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
-`Auth.MultiFactor`), so `import * as Auth from "@thomasfosterau/effect-auth"` reaches the
-whole headless surface; the per-cluster subpaths (`effect-auth/email`,
-`/oauth`, `/password`, `/plugins`, `/multifactor`) exist for consumers who
-want a narrower import. The HTTP tier is published only as the
+Every module and cluster namespace except `http` is re-exported from the
+package root (`Auth.Email`, `Auth.OAuth`, `Auth.Password`, `Auth.Plugins`,
+`Auth.MultiFactor`, `Auth.SessionService`, …), so `import * as Auth from
+"@thomasfosterau/effect-auth"` reaches the whole headless surface; the
+per-module subpaths (`effect-auth/Email`, `/SessionService`, `/Policy`, …)
+exist for consumers who want a narrower import. The HTTP tier is published only as the
 `effect-auth/http` subpath, so the root import's module graph never
 reaches `effect/http-api`; `ModuleGraph.test.ts` holds that line. The same
 goes for `effect-auth/client`, `effect-auth/client/atoms`,

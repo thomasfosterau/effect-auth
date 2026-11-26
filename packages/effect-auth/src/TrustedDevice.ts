@@ -9,7 +9,7 @@
  * ```ts
  * import assert from "node:assert/strict"
  * import { Context, Effect } from "effect"
- * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
+ * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth/TrustedDevice"
  *
  * // The incoming request, with its cookie reader.
  * const request = {
@@ -62,7 +62,7 @@ export { type TrustedDeviceRecord, TrustedDeviceStore } from "./TrustedDeviceSto
  * ```ts
  * import assert from "node:assert/strict"
  * import { Context, Effect } from "effect"
- * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth"
+ * import { TrustedDeviceCookieRef } from "@thomasfosterau/effect-auth/TrustedDevice"
  *
  * // The incoming request, with its cookie reader.
  * const req = {
@@ -324,20 +324,20 @@ export const gate = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Redacted } from "effect"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
  * import {
- *   Hooks,
- *   SessionService,
  *   TrustedDeviceService,
  *   type TrustedDeviceStore,
  *   TrustedDeviceWithMultiFactorGateLayer,
- * } from "@thomasfosterau/effect-auth"
- * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * } from "@thomasfosterau/effect-auth/TrustedDevice"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/Email"
  * import {
  *   MultiFactorService,
  *   type MultiFactorStore,
  *   type PendingMultiFactorStore,
- * } from "@thomasfosterau/effect-auth/multifactor"
- * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * } from "@thomasfosterau/effect-auth/MultiFactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/Password"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's storage adapters, passed in.

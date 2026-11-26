@@ -21,7 +21,7 @@ import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
 import { buildRecipientSendGate } from "../RecipientSendLimit.ts";
 import type { RecipientSendLimit } from "../Types.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 
 /**
  * Email verification token
