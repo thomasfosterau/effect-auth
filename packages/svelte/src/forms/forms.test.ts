@@ -85,7 +85,7 @@ describe("SignInForm", () => {
     const calls: unknown[] = [];
     const seen: AuthSuccess[] = [];
     const client = stub({
-      signIn: (payload: object) => {
+      signIn: (payload) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -146,7 +146,7 @@ describe("SignInForm", () => {
   it('switches to signInUsername under variant="username"', async () => {
     const calls: unknown[] = [];
     const client = stub({
-      signInUsername: (payload: object) => {
+      signInUsername: (payload) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -236,7 +236,7 @@ describe("SignUpForm", () => {
   it("omits a blank name and trims a filled one", async () => {
     const calls: unknown[] = [];
     const client = stub({
-      signUp: (payload: object) => {
+      signUp: (payload) => {
         calls.push(payload);
         return Promise.resolve(authSuccess);
       },
@@ -276,7 +276,7 @@ describe("PasswordResetRequestForm", () => {
     const calls: unknown[] = [];
     const seen: StatusResponse[] = [];
     const client = stub({
-      passwordResetRequest: (payload: object) => {
+      passwordResetRequest: (payload) => {
         calls.push(payload);
         return Promise.resolve(ok);
       },
@@ -299,7 +299,7 @@ describe("PasswordResetRequestForm", () => {
   it("sends the captcha token the getter returns at submit time", async () => {
     const calls: unknown[] = [];
     const client = stub({
-      passwordResetRequest: (payload: object) => {
+      passwordResetRequest: (payload) => {
         calls.push(payload);
         return Promise.resolve(ok);
       },
@@ -322,7 +322,7 @@ describe("PasswordResetConfirmForm", () => {
   it("submits the token with the new password once the entries match", async () => {
     const calls: unknown[] = [];
     const client = stub({
-      passwordResetConfirm: (payload: object) => {
+      passwordResetConfirm: (payload) => {
         calls.push(payload);
         return Promise.resolve(ok);
       },
@@ -379,7 +379,7 @@ describe("MagicLinkForm", () => {
     const calls: unknown[] = [];
     const client = stub({
       magicLink: {
-        send: (payload: object) => {
+        send: (payload) => {
           calls.push(payload);
           return Promise.resolve(ok);
         },
@@ -401,7 +401,7 @@ describe("MagicLinkForm", () => {
     const calls: unknown[] = [];
     const client = stub({
       magicLink: {
-        send: (payload: object) => {
+        send: (payload) => {
           calls.push(payload);
           return Promise.resolve(ok);
         },
@@ -443,11 +443,11 @@ describe("EmailOtpForm", () => {
   const otpClient = (calls: unknown[]) =>
     stub({
       emailOtp: {
-        send: (payload: object) => {
+        send: (payload) => {
           calls.push(["send", payload]);
           return Promise.resolve(ok);
         },
-        signIn: (payload: object) => {
+        signIn: (payload) => {
           calls.push(["signIn", payload]);
           return Promise.resolve(authSuccess);
         },

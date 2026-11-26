@@ -120,7 +120,6 @@ export default defineConfig({
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
       // Renaming these would change the published API or the wire format.
-      "effect/no-object-parameters": "off",
       "effect/no-known-value-widening": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
       "effect/avoid-object-type": "off",
@@ -435,7 +434,9 @@ export default defineConfig({
         // (`str`, `nested`), SCIM patch values (`Scim`), the conformance
         // suite's record comparison (`StoreConformance`), BetterAuth's thrown
         // `APIError` (`better-auth`'s `Convert.fromApiError`), the Svelte binding's
-        // `onError(cause)` and the client plugin's `request` body.
+        // `onError(cause)`, the client plugin's `request` body, the
+        // WebAuthn client-data JSON readers (`WebAuthnCodec`) and the
+        // key-value stores' JSON writer (`KeyValueStores`).
         files: [
           "packages/effect-auth/src/PolicyStore.ts",
           "packages/effect-auth/src/OwnedAccess.ts",
@@ -448,6 +449,8 @@ export default defineConfig({
           "packages/svelte/src/forms/internal.ts",
           "packages/svelte/src/forms/submission.svelte.ts",
           "packages/effect-auth/src/client/Client.ts",
+          "packages/effect-auth/src/multifactor/WebAuthnCodec.ts",
+          "packages/effect-auth/src/KeyValueStores.ts",
         ],
         rules: {
           "effect/no-unknown-parameters": "off",
@@ -523,6 +526,15 @@ export default defineConfig({
           "effect/casting-awareness": "off",
           "typescript/no-unsafe-type-assertion": "off",
         },
+      },
+      {
+        // Third-party API boundaries: drizzle's dialect table brands leave
+        // its three handles no shared type, so `databaseLayer`'s
+        // implementation takes what its overloads checked as `unknown` and
+        // erases it once; the D1 test shim hands its fake to Alchemy's client
+        // as workerd's `D1Database`, which the fake implements only in part.
+        files: ["packages/drizzle/src/Database.ts", "packages/alchemy-cloudflare/src/testShim.ts"],
+        rules: { "effect/no-unknown-parameters": "off" },
       },
       {
         // SvelteKit's `handle` is a Promise-facing entrypoint: it runs the

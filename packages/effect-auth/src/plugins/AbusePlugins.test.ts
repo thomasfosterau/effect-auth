@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
+import type * as Schema from "effect/Schema";
 import { Digest } from "effect/crypto";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ClientIP } from "../ClientIP.ts";
@@ -237,7 +238,7 @@ describe("CaptchaPlugin", () => {
   });
 
   describe("checks what the token was minted for", () => {
-    const passes = async (cfg: Parameters<typeof CaptchaPlugin>[0], answer: object) => {
+    const passes = async (cfg: Parameters<typeof CaptchaPlugin>[0], answer: Schema.Json) => {
       const client = stubHttpClient(() => Response.json(answer));
       const result = await drive(CaptchaPlugin(cfg), client, (hooks) =>
         Effect.result(hooks.beforeSignUp(signUp("pw", "tok"))),

@@ -11,6 +11,7 @@ import * as Http from "@thomasfosterau/effect-auth/http";
 import {
   type ActionEvent,
   type CookieOptions,
+  type CredentialRequestOptions,
   credentialAction,
   credentialCommand,
   credentialForm,
@@ -188,8 +189,14 @@ class NoClientAddress extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()("NoClientAddress", {}) {}
 
+/** The address options a case overrides. */
+type AddressOptions = Pick<
+  CredentialRequestOptions<undefined, never>,
+  "clientAddress" | "clientAddressHeader" | "forwardClientIpHeaders"
+>;
+
 describe("submitCredential's client address", () => {
-  const options = (extra: object = {}) => ({
+  const options = (extra?: AddressOptions) => ({
     fetch: async () => new Response(null, { status: 401 }),
     endpoint: "https://auth.internal/api/auth/sessions",
     body: () => ({}),
@@ -206,7 +213,7 @@ describe("submitCredential's client address", () => {
     getClientAddress,
     cookies: { set: () => undefined },
   });
-  const sent = async (event: ActionEvent, extra?: object): Promise<Headers> => {
+  const sent = async (event: ActionEvent, extra?: AddressOptions): Promise<Headers> => {
     const seen: Array<Request> = [];
     await submitCredential(event, undefined, {
       ...options(extra),

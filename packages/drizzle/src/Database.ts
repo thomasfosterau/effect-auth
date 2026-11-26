@@ -274,10 +274,9 @@ export class DrizzleDatabase extends Context.Service<DrizzleDatabase, DrizzleHan
  * implement it at runtime, which is precisely what the callers' overloads have
  * just checked.
  */
-const isHandleEffect = (db: object | Effect.Effect<object>): db is Effect.Effect<object> =>
-  Effect.isEffect(db);
+const isHandleEffect = (db: unknown): db is Effect.Effect<unknown> => Effect.isEffect(db);
 
-const toHandle = (db: object | Effect.Effect<object>): DrizzleHandle => ({
+const toHandle = (db: unknown): DrizzleHandle => ({
   database: isHandleEffect(db)
     ? Effect.map(db, asAuthDatabase)
     : Effect.succeed(asAuthDatabase(db)),
@@ -286,7 +285,7 @@ const toHandle = (db: object | Effect.Effect<object>): DrizzleHandle => ({
 // SAFETY: the callers' overloads have checked `db` is a drizzle PostgreSQL,
 // SQLite or MySQL handle, each of which implements `AuthDatabase` at runtime;
 // only the dialect table brands keep the types from lining up.
-const asAuthDatabase = (db: object): AuthDatabase => db as AuthDatabase;
+const asAuthDatabase = (db: unknown): AuthDatabase => db as AuthDatabase;
 
 /**
  * Provide a Promise-shaped drizzle handle as {@link DrizzleDatabase}.
@@ -337,7 +336,7 @@ export function databaseLayer<
     | MySqlAsyncDatabase<TQueryResult, TRelations>
     | Effect.Effect<MySqlAsyncDatabase<TQueryResult, TRelations>>,
 ): Layer.Layer<DrizzleDatabase>;
-export function databaseLayer(db: object | Effect.Effect<object>): Layer.Layer<DrizzleDatabase> {
+export function databaseLayer(db: unknown): Layer.Layer<DrizzleDatabase> {
   return Layer.succeed(DrizzleDatabase, toHandle(db));
 }
 
