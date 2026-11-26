@@ -560,6 +560,7 @@ What the service enforces:
 
 - **A challenge is bound to its ceremony.** Each stored `WebAuthnChallenge` carries `ceremony: "registration" | "authentication"`; `verifyRegistration` refuses an authentication challenge and `verifyAuthentication` a registration one, leaving it in place. A registration challenge is also bound to the user it was issued to, which must be the `userId` passed to `verifyRegistration`. A `ChallengeStore` must persist the ceremony; a stored challenge without a known one reads as `null` (`Testing.challengeStoreConformance` pins the contract).
 - **`userVerification: "required"` is enforced**, not only advertised: a registration or assertion without the UV flag is refused. Under `"preferred"` (the default) or `"discouraged"`, both results report `userVerified`, with the backup flags `backupEligible` and `backupState`, for the host to act on (for example, to require a second factor when `userVerified` is `false`).
+- **The backup flags and AAGUID are stored.** A registered `WebAuthnCredential` carries `backupEligible` (BE), `backupState` (BS) and the authenticator's `aaguid` (a lowercase hyphenated UUID; under `none` attestation it is the authenticator's claim). BE never changes for a credential (WebAuthn Level 3 §6.1.3), so an assertion reporting another BE is refused; each sign-in records BS. A credential stored before the flags were has them absent, and its next sign-in records them. A `CredentialStore` must persist all three (`Testing.credentialStoreConformance` pins it).
 - **The stored credential is the attested one.** Its id is the credential id inside the attestation, which must equal `response.credentialId`; an id already registered, to any user, is refused rather than overwritten. ES256 keys must be on P-256, and a `clientDataJSON` with `crossOrigin: true` is refused.
 
 ## OAuth 2.0 social login
@@ -771,16 +772,17 @@ const Sms = Auth.SmsSender.layerConnect().pipe(
 const Delivery = Layer.mergeAll(Email, Sms).pipe(Layer.provide(FetchHttpClient.layer));
 ```
 
-| Flow                                                                                 | Send                  | Why                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sign-up: verification email and existing-account notice                              | off the response path | Under `antiEnumeration` a fresh address gets the verification email and a held one the notice (or nothing), so neither answer may wait on the vendor. The send is advisory: a lost one is resent through `POST /email-verifications`. |
-| Magic link with `disableSignUp`                                                      | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
-| Email OTP `sign-in` with `disableSignUp`, and `forget-password`                      | off the response path | Only a known address gets the code.                                                                                                                                                                                                   |
-| Phone OTP `sign-in` with `disableSignUp`                                             | off the response path | Only a known number gets the code.                                                                                                                                                                                                    |
-| Password reset request                                                               | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
-| Magic link and OTP sign-in with sign-up enabled, OTP `email-verification`            | inline                | Every address gets the message, and the user is waiting on it: a failed send is answered, not dropped.                                                                                                                                |
-| Verification email sent directly (`createVerification`, `POST /email-verifications`) | inline                | No account is being hidden.                                                                                                                                                                                                           |
-| Change email, delete account, second-factor OTP, organization invitations            | inline                | The caller is signed in; nothing is hidden.                                                                                                                                                                                           |
+| Flow                                                                      | Send                  | Why                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sign-up: verification email and existing-account notice                   | off the response path | Under `antiEnumeration` a fresh address gets the verification email and a held one the notice (or nothing), so neither answer may wait on the vendor. The send is advisory: a lost one is resent through `POST /email-verifications`. |
+| Magic link with `disableSignUp`                                           | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
+| Email OTP `sign-in` with `disableSignUp`, and `forget-password`           | off the response path | Only a known address gets the code.                                                                                                                                                                                                   |
+| Phone OTP `sign-in` with `disableSignUp`                                  | off the response path | Only a known number gets the code.                                                                                                                                                                                                    |
+| Password reset request                                                    | off the response path | Only a known address gets the link.                                                                                                                                                                                                   |
+| Magic link and OTP sign-in with sign-up enabled, OTP `email-verification` | inline                | Every address gets the message, and the user is waiting on it: a failed send is answered, not dropped.                                                                                                                                |
+| Verification resend (`POST /email-verifications`)                         | off the response path | Only an unverified account gets the message.                                                                                                                                                                                          |
+| Verification email sent directly (`createVerification`)                   | inline                | No account is being hidden.                                                                                                                                                                                                           |
+| Change email, delete account, second-factor OTP, organization invitations | inline                | The caller is signed in; nothing is hidden.                                                                                                                                                                                           |
 
 A send off the response path never fails the request. Its failure is logged, counted on `effect_auth_delivery_sends_total` (by purpose and outcome) and passed to the `afterDeliveryFailure` hook, which `AuditPlugin` logs as `auth.deliveryFailure`. The message's parameters (its token or code) are in none of them.
 
@@ -807,15 +809,26 @@ Detaching does not make the two sign-up answers identical: the fresh branch stil
 ## Rate limiting
 
 ```typescript
-import { Effect, Layer } from "effect";
+import { Clock, Effect, Layer, Result } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 
-// Use a shared store (Redis, SQL) when you run more than one instance.
+// An in-process store: one instance only. Use a shared store (`/sql`, Redis)
+// when you run more than one, where `increment` must be one atomic statement.
 const counts = new Map<string, Auth.RateLimitEntry>();
 const rateLimitStore: typeof Auth.RateLimitStore.Service = {
   get: (key) => Effect.sync(() => counts.get(key) ?? null),
   set: (key, entry, _ttl) => Effect.sync(() => void counts.set(key, entry)),
-  increment: (_key, _ttl) => Effect.succeed(1), // must be atomic in a real store
+  // Count one request, opening a new window when there is none or it has ended.
+  increment: (key, ttlSeconds) =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      const entry = counts.get(key);
+      const next =
+        entry === undefined || now >= entry.resetAt
+          ? { key, count: 1, resetAt: now + ttlSeconds * 1000 }
+          : { ...entry, count: entry.count + 1 };
+      counts.set(key, next);
+      return next.count;
+    }),
   delete: (key) => Effect.sync(() => void counts.delete(key)),
 };
 
@@ -839,7 +852,13 @@ const strict: Auth.RateLimitConfig = {
   blockDurationMs: 5 * 60 * 1000, // then block for 5 minutes
 };
 
-await Effect.runPromise(Effect.provide(guardSignIn("192.0.2.1"), RateLimiterLive));
+// Five sign-ins from one address pass; the sixth is refused.
+const attempts = await Effect.runPromise(
+  Effect.forEach(Array.from({ length: 6 }), () => Effect.result(guardSignIn("192.0.2.1"))).pipe(
+    Effect.provide(RateLimiterLive),
+  ),
+);
+console.log(attempts.map(Result.isSuccess)); // [true, true, true, true, true, false]
 export { strict };
 ```
 
@@ -1428,7 +1447,7 @@ export const makeAuth = (SqlLive: Layer.Layer<SqlClient.SqlClient>) => {
 | `Auth.MagicLinkUserStore`                  | `makeMagicLinkUserStore` / `MagicLinkUserStoreLayer`           | `auth_users`                                                      |
 | `Auth.RateLimitStore`                      | `makeRateLimitStore` / `RateLimitStoreLayer`                   | `auth_rate_limits`                                                |
 | `Auth.MultiFactor.ChallengeStore`          | `makeChallengeStore` / `ChallengeStoreLayer`                   | `auth_webauthn_challenges`                                        |
-| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`                                       |
+| `Auth.MultiFactor.CredentialStore`         | `makeCredentialStore` / `CredentialStoreLayer`                 | `auth_webauthn_credentials`, `auth_webauthn_credential_flags`     |
 | `Auth.MultiFactor.MultiFactorStore`        | `makeMultiFactorStore` / `MultiFactorStoreLayer`               | `auth_multi_factor`                                               |
 | `Auth.MultiFactor.PendingMultiFactorStore` | `makePendingMultiFactorStore` / `PendingMultiFactorStoreLayer` | `auth_pending_multi_factor`, `auth_pending_multi_factor_attempts` |
 | `Auth.OAuth.OAuthStateStore`               | `makeOAuthStateStore` / `OAuthStateStoreLayer`                 | `auth_oauth_states`                                               |
@@ -1464,7 +1483,7 @@ Storage format: instants are epoch milliseconds in `BIGINT` columns (past 2038 o
 - `purgeExpired: Effect<PurgeExpiredResult, Auth.AuthError, SqlClient>` — deletes the `auth_magic_links` and `auth_email_otps` rows whose `expires_at` has passed, and the `auth_rate_limits` rows whose `reset_at` and `blocked_until` have both passed (read from the `Clock`), and reports how many went from each. A rate-limit row inside its window or still blocked stays. No store deletes them on its own: a code or link nobody redeems stays until a later send for the same address replaces it, and the sends that hide whether an account exists write one for any address, so without a purge those tables grow with every distinct address a caller tries. Schedule it from the host: a cron trigger on Workers, a timer or job on a long-lived server. The services already refuse an expired row, so a purge changes no outcome.
 - `purgeExpiredWith(options?)` — `purgeExpired` with `PurgeExpiredOptions`: `limit` (a positive integer) caps the rows deleted from each table in one run, as `DELETE … WHERE <expired> AND key IN (SELECT key … WHERE <expired> LIMIT n)` (the outer `<expired>` keeps a row refreshed concurrently after the subquery picked it), so a Workers cron tick does bounded work; call it until every count is `0`, or once per tick. Omitted, it is `purgeExpired`. Any other `limit` fails with `AuthError` before a statement runs.
 
-Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction, and `OAuthStateStore.consume` and the single-use token stores' `consume` (email verification, password reset, magic link, pending multi-factor challenge) are each one `DELETE … RETURNING`, so a state or token is handed out once; `MultiFactorStore.useTotpCounter` / `useBackupCode` are compare-and-set `UPDATE … RETURNING`s. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
+Upserts and counters are single `ON CONFLICT … DO UPDATE` / `UPDATE … RETURNING` statements, so they are atomic without a transaction, and `OAuthStateStore.consume` and the single-use token stores' `consume` (email verification, password reset, magic link, pending multi-factor challenge) are each one `DELETE … RETURNING`, so a state or token is handed out once; `MultiFactorStore.useTotpCounter` / `useBackupCode` are compare-and-set `UPDATE … RETURNING`s. Multi-step writes (`ChallengeStore.create` and `.delete`, which keep the ceremony in `auth_webauthn_challenge_ceremonies`, `CredentialStore`'s writes, which keep the backup flags and AAGUID in `auth_webauthn_credential_flags`, `OAuthStateStore.create`, `EmailOtpStore.upsert`, `IdentifierStore.replace`) run inside `sql.withTransaction`.
 
 ### Authorization
 
@@ -1633,6 +1652,7 @@ rejection, not a warning:
 | `SubjectConfirmationData` `NotOnOrAfter`                              | `/saml`                    |
 | `Destination` equals the ACS URL                                      | `/saml`                    |
 | Signed `InResponseTo` agrees with the `Response` attribute            | `/saml`                    |
+| `InResponseTo` read only from signed content                          | `/saml`                    |
 | Signature/digest algorithms on an allow-list (SHA-256+ by default)    | `/saml`                    |
 | HMAC signature methods refused outright                               | `/saml`                    |
 | Encrypted assertions refused with an actionable message               | `/saml`                    |

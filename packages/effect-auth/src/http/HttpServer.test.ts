@@ -115,8 +115,10 @@ import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
 import {
   CaptchaError,
   ClientAddressConfigError,
+  EmailVerificationError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
+  SignUpAttributesConfigError,
 } from "../Errors.ts";
 import { IPRateLimitPlugin } from "../plugins/IPRateLimit.ts";
 import { NormalizeEmailPlugin } from "../plugins/NormalizeEmail.ts";
@@ -189,6 +191,10 @@ const makeFixture = (
       | undefined;
     /** The `EmailVerificationService` `resendCooldown`. Default the service's 60 s. */
     readonly verificationResendCooldown?: number | undefined;
+    /** Replaces the `EmailVerificationService` send, which records the token by default. */
+    readonly verificationSendEmail?:
+      | ((to: string, token: string) => Effect.Effect<void, EmailVerificationError>)
+      | undefined;
     /** The `EmailPasswordService` config. Default `{}`. */
     readonly emailPassword?: EmailPasswordConfig | undefined;
     /** The `AuthLifecycleService` config. Default `{}`. */
@@ -417,7 +423,9 @@ const makeFixture = (
     sessionServiceLayer,
     UserService.layer().pipe(Layer.provide(storeLayer)),
     EmailVerificationService.layer({
-      sendEmail: (_to, token) => Effect.sync(() => void sentVerificationTokens.push(token)),
+      sendEmail:
+        options.verificationSendEmail ??
+        ((_to, token) => Effect.sync(() => void sentVerificationTokens.push(token))),
       ...(options.verificationResendCooldown !== undefined && {
         resendCooldown: options.verificationResendCooldown,
       }),
@@ -1862,6 +1870,22 @@ describe("email verification roundtrip", () => {
       authRequest("verify-email", { token: fixture.sentVerificationTokens[0] }),
     );
     expect(verify.status).toBe(201);
+  });
+
+  // An unverified account's send is detached, so a vendor failure is the
+  // scheduler's to report and the answer is the one any other address gets.
+  it("answers an unverified account alike when its send fails", async () => {
+    const fixture = makeFixture({
+      verificationSendEmail: () =>
+        Effect.fail(new EmailVerificationError({ message: "mail provider down" })),
+    });
+    const handler = handlerFor(fixture);
+    await signUp(handler, "a@b.com");
+
+    const known = await handler(authRequest("send-verification", { email: "a@b.com" }));
+    const unknown = await handler(authRequest("send-verification", { email: "no@one.com" }));
+    expect([known.status, unknown.status]).toEqual([202, 202]);
+    expect(await known.text()).toBe(await unknown.text());
   });
 
   it("acknowledges uniformly for unknown emails (anti-enumeration)", async () => {
@@ -5449,6 +5473,50 @@ describe("makeAsync builds services fully before it resolves", () => {
     const atDispose = counter.state.ticks;
     await untilTicks(counter.state, atDispose + 1);
     expect(counter.state.ticks).toBeGreaterThan(atDispose);
+  });
+});
+
+describe("signUpAttributes naming a protected attribute", () => {
+  const options = (strict: boolean) => ({
+    services: makeFixture().services,
+    cookie: { secure: false },
+    ipRateLimit: false as const,
+    signUpAttributes: ["nickname", "banned", "scimExternalId"],
+    strict,
+  });
+
+  it("warns, naming the protected keys, and starts without strict", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make(options(false));
+    onTestFinished(dispose);
+    const logged = log.mock.calls.map((args) => args.map(String).join(" "));
+    expect(logged).toContainEqual(
+      expect.stringMatching(/WARN .*signUpAttributes names "banned", "scimExternalId"/s),
+    );
+    expect(logged.join("\n")).not.toContain('"nickname"');
+  });
+
+  it("refuses to start under strict, in make and makeAsync", async () => {
+    const error = thrownBy(() => HttpServer.make(options(true)));
+    expect(error).toBeInstanceOf(SignUpAttributesConfigError);
+    assert(error instanceof SignUpAttributesConfigError);
+    expect(error.attributes).toStrictEqual(["banned", "scimExternalId"]);
+    await expect(HttpServer.makeAsync(options(true))).rejects.toBeInstanceOf(
+      SignUpAttributesConfigError,
+    );
+  });
+
+  it("says nothing about a list of unprotected keys", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    onTestFinished(() => {
+      log.mockRestore();
+    });
+    const { dispose } = HttpServer.make({ ...options(true), signUpAttributes: ["nickname"] });
+    onTestFinished(dispose);
+    expect(log.mock.calls.map(String).join("\n")).not.toContain("signUpAttributes");
   });
 });
 

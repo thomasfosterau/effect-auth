@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { memoryRateLimitStore } from "../testing/MemoryStores.ts";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
@@ -251,7 +252,10 @@ describe("PasswordResetService", () => {
           yield* service.requestPasswordReset("bob@exämple.com");
           yield* service.requestPasswordReset("ｂｏｂ@example.com");
           expect(sentEmails).toEqual([]);
-          expect(MutableHashMap.size(resetTokens)).toBe(0);
+          // Each is an unknown address: it gets a marker, never a row of Bob's.
+          expect(
+            Arr.filter(MutableHashMap.values(resetTokens), (r) => r.userId === bob.id),
+          ).toEqual([]);
 
           // Bob's own address still gets Bob's link, at the stored address.
           yield* service.requestPasswordReset("  Bob@Example.com ");
@@ -263,7 +267,9 @@ describe("PasswordResetService", () => {
     );
 
     expect(sentEmails.map((sent) => sent.email)).toEqual(["bob@example.com"]);
-    const [reset] = MutableHashMap.values(resetTokens);
+    const reset = Option.getOrUndefined(
+      Arr.findFirst(MutableHashMap.values(resetTokens), (r) => r.userId === bob.id),
+    );
     expect(reset?.userId).toBe(bob.id);
     expect(reset?.email).toBe("bob@example.com");
   });
@@ -285,7 +291,74 @@ describe("PasswordResetService", () => {
     );
 
     expect(sentEmails.length).toBe(0);
-    expect(MutableHashMap.size(resetTokens)).toBe(0);
+    // A marker stands in for the reset row, so the store work matches a known address's.
+    expect(MutableHashMap.size(resetTokens)).toBe(1);
+  });
+
+  it("makes the same store writes for an unknown address as for a known one", async () => {
+    const testContext = await makeTestContext();
+    const user: User = {
+      id: "user-reset-writes",
+      createdAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      updatedAt: DateTime.toDateUtc(DateTime.nowUnsafe()),
+      attributes: {},
+    };
+    MutableHashMap.set(users, user.id, user);
+    seedEmailIdentifier(user.id, "known@example.com", false);
+
+    const writes: Array<string> = [];
+    const recordingStore = {
+      ...passwordResetStore,
+      create: (reset: PasswordResetToken) =>
+        Effect.sync(() => writes.push("create")).pipe(
+          Effect.andThen(passwordResetStore.create(reset)),
+        ),
+      deleteByUserId: (userId: string) =>
+        Effect.sync(() => writes.push("deleteByUserId")).pipe(
+          Effect.andThen(passwordResetStore.deleteByUserId(userId)),
+        ),
+    };
+    const request = (email: string) =>
+      Effect.runPromise(
+        Effect.provide(
+          Effect.gen(function* () {
+            const service = yield* PasswordReset.make({ sendResetPassword: () => Effect.void });
+            yield* service.requestPasswordReset(email);
+          }).pipe(Effect.provideService(PasswordResetStore, recordingStore)),
+          testContext,
+        ).pipe(Effect.provide(TestHooks)),
+      );
+
+    await request("known@example.com");
+    const known = writes.splice(0);
+    await request("unknown@example.com");
+    expect(writes).toEqual(known);
+    expect(known).toEqual(["deleteByUserId", "create"]);
+
+    // A repeat request for the unknown address replaces its marker.
+    await request("unknown@example.com");
+    expect(MutableHashMap.size(resetTokens)).toBe(2);
+  });
+
+  it("never resets a password through an unknown address's marker", async () => {
+    const testContext = await makeTestContext();
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* PasswordReset.make({ sendResetPassword: () => Effect.void });
+          yield* service.requestPasswordReset("nobody@example.com");
+          // Were the marker's token known, redeeming it still finds no account.
+          const [marker] = MutableHashMap.values(resetTokens);
+          assert(marker !== undefined);
+          yield* passwordResetStore.create({ ...marker, token: sha256Hex("guessed") });
+          return yield* Effect.flip(service.resetPassword("guessed", "new-password-123"));
+        }),
+        testContext,
+      ).pipe(Effect.provide(TestHooks)),
+    );
+
+    expect(result._tag).toBe("PasswordResetError");
+    expect(MutableHashMap.size(passwordHashes)).toBe(0);
   });
 
   it("should revoke sessions by default on password reset", async () => {

@@ -71,7 +71,7 @@ import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
-import { onlyAttributes, UserService } from "../User.ts";
+import { onlyAttributes, SIGN_UP_PROTECTED_ATTRIBUTES, UserService } from "../User.ts";
 import {
   missingPermission,
   notAMember,
@@ -133,6 +133,7 @@ import {
   ClientAddressConfigError,
   RateLimiterConfigError,
   ServicesBuildPendingError,
+  SignUpAttributesConfigError,
 } from "../Errors.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { hashToken } from "../TokenHash.ts";
@@ -566,6 +567,38 @@ const resolveAdmin = resolveOptional(AdminService, "Admin is not enabled");
 /** Resolve the API-key service, or fail with 404. */
 const resolveApiKey = resolveOptional(ApiKeyService, "API keys are not enabled");
 
+/** `decodeURIComponent`, with a malformed percent-escape as `None` rather than a throw. */
+const decodeUriComponent: (encoded: string) => Option.Option<string> =
+  Option.liftThrowable(decodeURIComponent);
+
+/**
+ * The client credentials of a token request. A Basic Authorization header
+ * takes precedence over body credentials (RFC 6749 §2.3.1); a header that is
+ * not base64 carries none, so the body's (if any) apply. Both parts are
+ * form-encoded, and a malformed escape is a bad credential, not a server fault.
+ */
+const tokenClientCredentials = (
+  authorization: string | undefined,
+  body: { readonly client_id?: string | undefined; readonly client_secret?: string | undefined },
+): Effect.Effect<
+  { readonly clientId: string | undefined; readonly clientSecret: string | undefined },
+  S.OAuthError | S.OAuthInvalidClient,
+  HttpServerRequest.HttpServerRequest
+> => {
+  const fromBody = { clientId: body.client_id, clientSecret: body.client_secret };
+  if (authorization === undefined || !authorization.startsWith("Basic ")) {
+    return Effect.succeed(fromBody);
+  }
+  const decoded = Result.getOrElse(Base64.decodeString(authorization.slice(6)), () => "");
+  const sep = decoded.indexOf(":");
+  if (sep < 0) return Effect.succeed(fromBody);
+  const id = decodeUriComponent(decoded.slice(0, sep));
+  const secret = decodeUriComponent(decoded.slice(sep + 1));
+  return Option.isSome(id) && Option.isSome(secret)
+    ? Effect.succeed({ clientId: id.value, clientSecret: secret.value })
+    : tokenError("invalid_client", "Malformed client credentials");
+};
+
 /** Resolve the JWT service, or fail with 404. */
 const resolveJwt = resolveOptional(JwtService, "JWT is not enabled");
 
@@ -813,6 +846,28 @@ const registrationError = (
       ...(e.description !== undefined && { error_description: e.description }),
     }),
   );
+};
+
+/**
+ * An RFC 6749 §5.2 token-endpoint refusal: `{ error, error_description? }`,
+ * `401` with `WWW-Authenticate` for `invalid_client`, `400` for the rest.
+ */
+const tokenError = (
+  error: string,
+  description: string | undefined,
+): Effect.Effect<
+  never,
+  S.OAuthError | S.OAuthInvalidClient,
+  HttpServerRequest.HttpServerRequest
+> => {
+  const body = { ...(description !== undefined && { error_description: description }) };
+  return error === "invalid_client"
+    ? HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(
+          HttpServerResponse.setHeader(response, "WWW-Authenticate", 'Basic realm="oauth"'),
+        ),
+      ).pipe(Effect.andThen(Effect.fail(new S.OAuthInvalidClient({ error, ...body }))))
+    : Effect.fail(new S.OAuthError({ error, ...body }));
 };
 
 /** The `Authorization: Bearer` value of a request, if any. */
@@ -2154,17 +2209,21 @@ export const emailVerificationsGroupLayer = (
           // Anti-enumeration: the same answer whether or not the address has
           // an account, or is already verified, or is inside its resend
           // cooldown or past its send cap: a 429 there alone
-          // would name an unverified account.
+          // would name an unverified account. The send goes off the response
+          // path, so neither the mail round trip nor a vendor failure tells an
+          // unverified account apart either.
           if (identifier !== null && !identifier.verified) {
-            yield* verification.resendVerification(identifier.userId, identifier.value).pipe(
-              Effect.catchIf(isRecipientSendCapped, () => Effect.void),
-              Effect.catchTags({
-                ResendTooSoonError: () => Effect.void,
-                AuthError: (e) => internalServerError(e),
-                EmailVerificationError: (e) => internalServerError(e),
-                ...hookFailures,
-              }),
-            );
+            yield* verification
+              .resendVerification(identifier.userId, identifier.value, { offResponsePath: true })
+              .pipe(
+                Effect.catchIf(isRecipientSendCapped, () => Effect.void),
+                Effect.catchTags({
+                  ResendTooSoonError: () => Effect.void,
+                  AuthError: (e) => internalServerError(e),
+                  EmailVerificationError: (e) => internalServerError(e),
+                  ...hookFailures,
+                }),
+              );
           }
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -4173,20 +4232,10 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const oidc = yield* resolveOidcProvider;
           // RFC 6749 §5.1: a token response is `no-store`.
           yield* noStore;
-          // Client authentication: a Basic Authorization header takes
-          // precedence over body credentials (RFC 6749 §2.3.1).
-          let clientId = payload.client_id;
-          let clientSecret = payload.client_secret;
-          const auth = request.headers["authorization"];
-          if (auth !== undefined && auth.startsWith("Basic ")) {
-            // Not base64: no Basic credentials, so the body's (if any) apply.
-            const decoded = Result.getOrElse(Base64.decodeString(auth.slice(6)), () => "");
-            const sep = decoded.indexOf(":");
-            if (sep >= 0) {
-              clientId = decodeURIComponent(decoded.slice(0, sep));
-              clientSecret = decodeURIComponent(decoded.slice(sep + 1));
-            }
-          }
+          const { clientId, clientSecret } = yield* tokenClientCredentials(
+            request.headers["authorization"],
+            payload,
+          );
           const result = yield* oidc.service
             .token({
               grantType: payload.grant_type,
@@ -4206,13 +4255,7 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
             })
             .pipe(
               Effect.catchTags({
-                // RFC 6749 error codes: invalid_client -> 401, the rest -> 400.
-                OidcTokenError: (e) =>
-                  Effect.fail(
-                    e.error === "invalid_client"
-                      ? new S.Unauthorized({ message: e.error })
-                      : new S.BadRequest({ message: e.error }),
-                  ),
+                OidcTokenError: (e) => tokenError(e.error, e.description),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -4318,6 +4361,9 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         // 404 when the OIDC provider is disabled.
         Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
+  ).pipe(
+    // `/oauth2/token` answers a request it cannot decode as RFC 6749 §5.2 does.
+    Layer.provide(S.OAuthTokenSchemaErrors.layer),
   );
 };
 
@@ -5300,6 +5346,33 @@ export { ClientAddressConfigError } from "../Errors.ts";
 // under `strict`.
 export { ServicesBuildPendingError } from "../Errors.ts";
 
+// The class lives in Errors.ts with the other startup errors; `make` throws it
+// and `makeAsync` rejects with it under `strict`.
+export { SignUpAttributesConfigError } from "../Errors.ts";
+
+/**
+ * The startup check on `signUpAttributes`: a key of
+ * `SIGN_UP_PROTECTED_ATTRIBUTES` there does nothing, since a sign-up never
+ * stores one. Under `strict` the handler refuses to start
+ * ({@link SignUpAttributesConfigError}); otherwise it logs a warning naming
+ * the keys and starts.
+ */
+const checkSignUpAttributes = (
+  options: AuthWebHandlerOptions,
+): Effect.Effect<void, SignUpAttributesConfigError> => {
+  const named = Arr.filter(options.signUpAttributes ?? [], (key) =>
+    SIGN_UP_PROTECTED_ATTRIBUTES.includes(key),
+  );
+  if (Arr.isReadonlyArrayEmpty(named)) return Effect.void;
+  const message =
+    `signUpAttributes names ${named.map((key) => `"${key}"`).join(", ")}, which a sign-up never ` +
+    "stores (SIGN_UP_PROTECTED_ATTRIBUTES: the ban, SCIM and anonymous-user keys), so listing " +
+    "them does nothing. Remove them from signUpAttributes.";
+  return options.strict === true
+    ? Effect.fail(new SignUpAttributesConfigError({ message, attributes: named }))
+    : Effect.logWarning(`[effect-auth] ${message}`);
+};
+
 /**
  * Options for the mountable auth Web handler.
  */
@@ -5329,6 +5402,10 @@ export interface AuthWebHandlerOptions {
    * keys) from a sign-up. The kept attributes may take at most
    * {@link SIGN_UP_ATTRIBUTES_MAX_BYTES} as JSON; a larger bag is refused
    * with `400`.
+   *
+   * Naming a key of `SIGN_UP_PROTECTED_ATTRIBUTES` here does nothing, so the
+   * handler logs a warning naming it when it is built, and with
+   * {@link strict} refuses to start ({@link SignUpAttributesConfigError}).
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
@@ -5455,9 +5532,17 @@ export interface AuthWebHandlerOptions {
    */
   readonly allowMissingClientIp?: boolean | undefined;
   /**
-   * Make {@link make} throw {@link ServicesBuildPendingError} when the
+   * Refuse configuration that would otherwise only be warned about, and a
+   * `services` build `make` cannot check at startup. Default `false`.
+   *
+   * With it, {@link make} throws (and {@link makeAsync} rejects with)
+   * {@link SignUpAttributesConfigError} when {@link signUpAttributes} names a
+   * key of `SIGN_UP_PROTECTED_ATTRIBUTES`, which without it is a logged
+   * warning.
+   *
+   * It also makes {@link make} throw {@link ServicesBuildPendingError} when the
    * `services` build has not finished by the time `make` has run it as far as
-   * it runs synchronously. Default `false`.
+   * it runs synchronously.
    *
    * Without it, `make` returns for such a build (asynchronous work, merged
    * layers that yield, a forked fiber the build waits on, a failed build whose
@@ -5483,8 +5568,9 @@ export interface AuthWebHandlerOptions {
    * startup errors or the build's own failure, or returns the handler, as it
    * does without this option.
    *
-   * {@link makeAsync} ignores it: it waits for the build however it is
-   * composed, so its startup errors always reject at startup.
+   * {@link makeAsync} waits for the build however it is composed, so its
+   * startup errors always reject at startup; there `strict` only refuses
+   * protected `signUpAttributes`.
    */
   readonly strict?: boolean | undefined;
 }
@@ -5871,6 +5957,9 @@ const tooManyRequests = (
  *   defect the defect itself, as `Effect.runSync` throws.
  * - {@link ServicesBuildPendingError}, only with `strict: true`: the build had
  *   not finished when `make` had run it synchronously (below).
+ * - {@link SignUpAttributesConfigError}, only with `strict: true`:
+ *   `signUpAttributes` names a key of `SIGN_UP_PROTECTED_ATTRIBUTES`. Without
+ *   `strict` that is a logged warning.
  *
  * **When `make` throws, and when it cannot.** `make` is synchronous, so it can
  * throw only when the `services` build finishes before it returns. It runs the
@@ -5927,6 +6016,8 @@ const tooManyRequests = (
 export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
   const addressError = ipRateLimitAddressError(options);
   if (addressError !== undefined) throw addressError;
+  const signUpCheck = Effect.runSyncExit(checkSignUpAttributes(options));
+  if (Exit.isFailure(signUpCheck)) throw Cause.squash(signUpCheck.cause);
 
   // Build `services` here, synchronously until the build has an exit, so the
   // startup check below sees what the handler will serve. The handler
@@ -5977,14 +6068,16 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
  * - Any failure of the `services` build itself: the failure's error, or for a
  *   defect the defect itself, as `Effect.runPromise` rejects.
+ * - {@link SignUpAttributesConfigError}, only with `strict: true`, as `make`
+ *   throws it (a logged warning without `strict`).
  *
  * Before it rejects, `makeAsync` releases what the build acquired and waits
  * for every finalizer, asynchronous ones included. A finalizer that fails is
  * logged with `Effect.logError`, and the promise rejects with the reason the
  * services were refused.
  *
- * `makeAsync` ignores `strict`: it waits for the build whatever the option
- * says, so it never needs a synchronous one.
+ * `makeAsync` waits for the build whatever `strict` says, so it never needs a
+ * synchronous one; `strict` only refuses protected `signUpAttributes` here.
  *
  * A fiber the build forks with `Effect.forkChild` is interrupted when the layer
  * that forks it finishes building, and under `Layer.merge` or `Layer.mergeAll`
@@ -5999,6 +6092,7 @@ export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandle
     Effect.gen(function* () {
       const addressError = ipRateLimitAddressError(options);
       if (addressError !== undefined) return yield* addressError;
+      yield* checkSignUpAttributes(options);
       const servicesScope = yield* Scope.make();
       const services = yield* Layer.buildWithScope(options.services, servicesScope).pipe(
         Effect.tap((built) => {

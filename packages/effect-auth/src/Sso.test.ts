@@ -926,6 +926,43 @@ describe("SsoService — SAML", () => {
     expect(outcome.err.message).toMatch(/already been used/);
   });
 
+  it("remembers a spent assertion for as long as the clock skew still admits it", async () => {
+    const fx = makeSamlFixture();
+    const skew = 3 * 60 * 1000;
+    const sso = await runPromiseHttp(
+      Sso.make({ samlClockSkewMs: skew }).pipe(Effect.provide(fx.layer)),
+    );
+
+    // `NotOnOrAfter` has just passed, but within the skew the verifier still
+    // accepts the assertion, so its record must outlive it by the skew too.
+    const notOnOrAfter = DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1000;
+    const outcome = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* sso.registerSamlProvider("admin", ACME_SAML);
+        const answer = (index: number) =>
+          Effect.gen(function* () {
+            const start = yield* sso.signIn({ email: "worker@acme.test" });
+            const requestId = fx.requests[index]?.requestId ?? "";
+            return yield* sso.handleSamlCallback(
+              provider.id,
+              samlResponse({ id: "_skewed", inResponseTo: requestId, notOnOrAfter }),
+              start.state,
+            );
+          });
+        const first = yield* answer(0);
+        // The captured response, replayed against a fresh request inside the skew.
+        const replayed = yield* Effect.flip(answer(1));
+        return { first, replayed };
+      }).pipe(Effect.provide(fx.layer)),
+    );
+
+    expect(outcome.first.isNewUser).toBe(true);
+    assert.instanceOf(outcome.replayed, SsoError);
+    expect(outcome.replayed.message).toMatch(/already been used/);
+    const record = Option.getOrUndefined(MutableHashMap.get(fx.replayRecords, "_skewed"));
+    expect(record?.expiresAt).toBe(notOnOrAfter + skew);
+  });
+
   it("rejects a response answering an unknown or already-spent request", async () => {
     const fx = makeSamlFixture();
     const sso = await runPromiseHttp(Sso.make().pipe(Effect.provide(fx.layer)));

@@ -1591,12 +1591,13 @@ export const authGroup = HttpApiGroup.make("auth").add(
     error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
   }),
   // Token endpoint: authorization_code + refresh_token grants. Accepts JSON
-  // or form encoding; errors carry the RFC 6749 error code as the message.
+  // or form encoding; refusals are RFC 6749 §5.2 error responses, a request
+  // that does not decode included.
   HttpApiEndpoint.post("oidcToken", "/oauth2/token", {
     payload: [S.OidcTokenPayload, S.OidcTokenPayload.pipe(HttpApiSchema.asFormUrlEncoded())],
     success: S.OidcTokenView,
-    error: [S.NotFoundError, S.UnauthorizedError, S.BadRequestError, S.InternalError],
-  }),
+    error: [S.NotFoundError, S.OAuthInvalidClientError, S.OAuthBadRequestError, S.InternalError],
+  }).middleware(S.OAuthTokenSchemaErrors),
   // UserInfo endpoint: bearer access token -> standard claims.
   HttpApiEndpoint.get("oidcUserInfo", "/oauth2/userinfo", {
     success: S.ClaimsView,
