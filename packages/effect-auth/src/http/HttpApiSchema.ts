@@ -159,8 +159,8 @@ export const IdentifierView = Schema.Struct({
   type: Schema.Literals(["email", "username", "phone"]),
   value: Schema.String,
   verified: Schema.Boolean,
-  verifiedAt: Schema.optional(Schema.Number),
-  createdAt: Schema.Number,
+  verifiedAt: Schema.optional(Schema.Finite),
+  createdAt: Schema.Finite,
 });
 export type IdentifierView = typeof IdentifierView.Type;
 
@@ -183,8 +183,8 @@ export const UserView = Schema.Struct({
   emailVerified: Schema.optional(Schema.Boolean),
   name: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   attributes: Attributes,
 });
 export type UserView = typeof UserView.Type;
@@ -193,9 +193,9 @@ export type UserView = typeof UserView.Type;
 export const SessionView = Schema.Struct({
   id: Schema.String,
   userId: Schema.String,
-  expiresAt: Schema.Number,
-  createdAt: Schema.Number,
-  lastActivityAt: Schema.Number,
+  expiresAt: Schema.Finite,
+  createdAt: Schema.Finite,
+  lastActivityAt: Schema.Finite,
   attributes: Attributes,
 });
 export type SessionView = typeof SessionView.Type;
@@ -240,7 +240,7 @@ export type SignInPayload = typeof SignInPayload.Type;
 /** A pending second-factor challenge returned instead of a session. */
 export const SecondFactorChallengeView = Schema.Struct({
   token: Schema.String,
-  expiresAt: Schema.Number,
+  expiresAt: Schema.Finite,
 });
 export type SecondFactorChallengeView = typeof SecondFactorChallengeView.Type;
 
@@ -408,9 +408,9 @@ export const DeviceCodeView = Schema.Struct({
   verification_uri: Schema.String,
   verification_uri_complete: Schema.String,
   /** Seconds. */
-  expires_in: Schema.Number,
+  expires_in: Schema.Finite,
   /** Seconds between polls. */
-  interval: Schema.Number,
+  interval: Schema.Finite,
 });
 export type DeviceCodeView = typeof DeviceCodeView.Type;
 
@@ -435,7 +435,7 @@ export type DeviceTokenPayload = typeof DeviceTokenPayload.Type;
 export const DeviceTokenView = Schema.Struct({
   access_token: Schema.String,
   token_type: Schema.Literal("Bearer"),
-  expires_in: Schema.Number,
+  expires_in: Schema.Finite,
   scope: Schema.String,
 });
 export type DeviceTokenView = typeof DeviceTokenView.Type;
@@ -457,7 +457,7 @@ export const DeviceAuthorizationView = Schema.Struct({
   clientName: Schema.String,
   scopes: Schema.Array(Schema.String),
   status: Schema.Literals(["pending", "approved", "denied"]),
-  expiresAt: Schema.Number,
+  expiresAt: Schema.Finite,
 });
 export type DeviceAuthorizationView = typeof DeviceAuthorizationView.Type;
 
@@ -548,7 +548,7 @@ export const OidcSsoProviderView = Schema.Struct({
   jwksEndpoint: Schema.optional(Schema.String),
   scopes: Schema.Array(Schema.String),
   organizationId: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type OidcSsoProviderView = typeof OidcSsoProviderView.Type;
 
@@ -573,7 +573,7 @@ export const SamlSsoProviderView = Schema.Struct({
   wantAuthnResponseSigned: Schema.optional(Schema.Boolean),
   forceAuthn: Schema.optional(Schema.Boolean),
   organizationId: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type SamlSsoProviderView = typeof SamlSsoProviderView.Type;
 
@@ -718,7 +718,7 @@ export const OrganizationView = Schema.Struct({
   defaultRole: Schema.String,
   /** Whether a matching verified domain provisions membership on SSO sign-in. */
   jitProvisioning: Schema.Boolean,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type OrganizationView = typeof OrganizationView.Type;
 
@@ -732,7 +732,7 @@ export const MemberView = Schema.Struct({
   status: Schema.Literals(["active", "inactive"]),
   /** The role restored on reactivation; only present while inactive. */
   previousRole: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type MemberView = typeof MemberView.Type;
 
@@ -744,8 +744,8 @@ export const InvitationView = Schema.Struct({
   role: Schema.String,
   status: Schema.Literals(["pending", "accepted", "rejected", "canceled"]),
   inviterId: Schema.String,
-  expiresAt: Schema.Number,
-  createdAt: Schema.Number,
+  expiresAt: Schema.Finite,
+  createdAt: Schema.Finite,
 });
 export type InvitationView = typeof InvitationView.Type;
 
@@ -814,8 +814,8 @@ export const TeamView = Schema.Struct({
   id: Schema.String,
   organizationId: Schema.String,
   name: Schema.String,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 });
 export type TeamView = typeof TeamView.Type;
 
@@ -824,7 +824,7 @@ export const TeamMemberView = Schema.Struct({
   id: Schema.String,
   teamId: Schema.String,
   userId: Schema.String,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
 });
 export type TeamMemberView = typeof TeamMemberView.Type;
 
@@ -860,8 +860,8 @@ export const OrgRoleView = Schema.Struct({
   organizationId: Schema.String,
   role: Schema.String,
   permissions: Schema.Array(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 });
 export type OrgRoleView = typeof OrgRoleView.Type;
 
@@ -894,8 +894,8 @@ export const OrganizationDomainView = Schema.Struct({
   verificationState: Schema.Literals(["pending", "verified", "failed"]),
   verificationStrategy: Schema.Literals(["dns", "manual"]),
   verificationToken: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  verifiedAt: Schema.optional(Schema.Number),
+  createdAt: Schema.Finite,
+  verifiedAt: Schema.optional(Schema.Finite),
   /**
    * Who attested a `manual` claim (the platform admin's user id). Only the
    * platform-admin endpoints answer it; a tenant's read never carries it.
@@ -942,14 +942,14 @@ export type SetActiveOrganizationPayload = typeof SetActiveOrganizationPayload.T
 /** Paginated user listing (admin). */
 export const AdminUserListView = Schema.Struct({
   users: Schema.Array(UserView),
-  total: Schema.Number,
+  total: Schema.Finite,
 });
 export type AdminUserListView = typeof AdminUserListView.Type;
 
 /** Request body for listing users (admin). */
 export const AdminListUsersPayload = Schema.Struct({
-  limit: Schema.optional(Schema.Number),
-  offset: Schema.optional(Schema.Number),
+  limit: Schema.optional(Schema.Finite),
+  offset: Schema.optional(Schema.Finite),
   searchEmail: Schema.optional(IdentifierInput),
 });
 export type AdminListUsersPayload = typeof AdminListUsersPayload.Type;
@@ -965,7 +965,7 @@ export type AdminSetRolePayload = typeof AdminSetRolePayload.Type;
 export const AdminBanUserPayload = Schema.Struct({
   userId: TokenInput,
   reason: Schema.optional(TokenInput),
-  expiresIn: Schema.optional(Schema.Number),
+  expiresIn: Schema.optional(Schema.Finite),
 });
 export type AdminBanUserPayload = typeof AdminBanUserPayload.Type;
 
@@ -981,8 +981,8 @@ export type AdminUserActionPayload = typeof AdminUserActionPayload.Type;
 
 /** Per-key rate-limit configuration. */
 export const ApiKeyRateLimit = Schema.Struct({
-  maxRequests: Schema.Number,
-  windowMs: Schema.Number,
+  maxRequests: Schema.Finite,
+  windowMs: Schema.Finite,
 });
 export type ApiKeyRateLimit = typeof ApiKeyRateLimit.Type;
 
@@ -994,14 +994,14 @@ export const ApiKeyView = Schema.Struct({
   start: Schema.String,
   userId: Schema.String,
   enabled: Schema.Boolean,
-  expiresAt: Schema.optional(Schema.Number),
-  lastUsedAt: Schema.optional(Schema.Number),
+  expiresAt: Schema.optional(Schema.Finite),
+  lastUsedAt: Schema.optional(Schema.Finite),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Attributes,
-  remaining: Schema.optional(Schema.Number),
+  remaining: Schema.optional(Schema.Finite),
   rateLimit: Schema.optional(ApiKeyRateLimit),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 });
 export type ApiKeyView = typeof ApiKeyView.Type;
 
@@ -1020,10 +1020,10 @@ export type ApiKeyListView = typeof ApiKeyListView.Type;
 export const ApiKeyCreatePayload = Schema.Struct({
   name: Schema.optional(NameInput),
   prefix: Schema.optional(NameInput),
-  expiresIn: Schema.optional(Schema.Number),
+  expiresIn: Schema.optional(Schema.Finite),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Schema.optional(AttributesInput),
-  remaining: Schema.optional(Schema.Number),
+  remaining: Schema.optional(Schema.Finite),
   rateLimit: Schema.optional(ApiKeyRateLimit),
 });
 export type ApiKeyCreatePayload = typeof ApiKeyCreatePayload.Type;
@@ -1032,10 +1032,10 @@ export type ApiKeyCreatePayload = typeof ApiKeyCreatePayload.Type;
 export const ApiKeyUpdatePayload = Schema.Struct({
   name: Schema.optional(NameInput),
   enabled: Schema.optional(Schema.Boolean),
-  expiresAt: Schema.optional(Schema.Number),
+  expiresAt: Schema.optional(Schema.Finite),
   permissions: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   metadata: Schema.optional(AttributesInput),
-  remaining: Schema.optional(Schema.Number),
+  remaining: Schema.optional(Schema.Finite),
   rateLimit: Schema.optional(ApiKeyRateLimit),
 });
 export type ApiKeyUpdatePayload = typeof ApiKeyUpdatePayload.Type;
@@ -1076,8 +1076,8 @@ export const OidcClientView = Schema.Struct({
   skipConsent: Schema.Boolean,
   disabled: Schema.Boolean,
   metadata: Attributes,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 });
 export type OidcClientView = typeof OidcClientView.Type;
 
@@ -1146,7 +1146,7 @@ export type OidcTokenPayload = typeof OidcTokenPayload.Type;
 export const OidcTokenView = Schema.Struct({
   access_token: Schema.String,
   token_type: Schema.String,
-  expires_in: Schema.Number,
+  expires_in: Schema.Finite,
   refresh_token: Schema.optional(Schema.String),
   id_token: Schema.optional(Schema.String),
   scope: Schema.String,
@@ -1181,10 +1181,10 @@ export type OidcRegistrationPayload = typeof OidcRegistrationPayload.Type;
 export const OidcRegistrationView = Schema.Struct({
   client_id: Schema.String,
   /** Seconds since the epoch. */
-  client_id_issued_at: Schema.Number,
+  client_id_issued_at: Schema.Finite,
   client_secret: Schema.optional(Schema.String),
   /** `0` = the secret does not expire (RFC 7591 §3.2.1). */
-  client_secret_expires_at: Schema.optional(Schema.Number),
+  client_secret_expires_at: Schema.optional(Schema.Finite),
   client_name: Schema.String,
   redirect_uris: Schema.Array(Schema.String),
   grant_types: Schema.Array(Schema.String),
@@ -1207,7 +1207,7 @@ export type ClaimsView = typeof ClaimsView.Type;
 /** A minted JWT plus its expiry (epoch millis). */
 export const JwtTokenView = Schema.Struct({
   token: Schema.String,
-  expiresAt: Schema.Number,
+  expiresAt: Schema.Finite,
 });
 export type JwtTokenView = typeof JwtTokenView.Type;
 
@@ -1292,9 +1292,9 @@ export type ScimGroupView = typeof ScimGroupView.Type;
 /** The `ListResponse` envelope around a page of `User` resources. */
 export const ScimUserListView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
-  totalResults: Schema.Number,
-  startIndex: Schema.Number,
-  itemsPerPage: Schema.Number,
+  totalResults: Schema.Finite,
+  startIndex: Schema.Finite,
+  itemsPerPage: Schema.Finite,
   Resources: Schema.Array(ScimUserView),
 });
 export type ScimUserListView = typeof ScimUserListView.Type;
@@ -1302,9 +1302,9 @@ export type ScimUserListView = typeof ScimUserListView.Type;
 /** The `ListResponse` envelope around a page of `Group` resources. */
 export const ScimGroupListView = Schema.Struct({
   schemas: Schema.Array(Schema.String),
-  totalResults: Schema.Number,
-  startIndex: Schema.Number,
-  itemsPerPage: Schema.Number,
+  totalResults: Schema.Finite,
+  startIndex: Schema.Finite,
+  itemsPerPage: Schema.Finite,
   Resources: Schema.Array(ScimGroupView),
 });
 export type ScimGroupListView = typeof ScimGroupListView.Type;

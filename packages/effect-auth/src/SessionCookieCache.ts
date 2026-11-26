@@ -102,9 +102,9 @@ const timingSafeEqualStr = (a: string, b: string): boolean =>
 const SerializedSession = Schema.Struct({
   id: Schema.String,
   userId: Schema.String,
-  expiresAt: Schema.Number,
-  createdAt: Schema.Number,
-  lastActivityAt: Schema.Number,
+  expiresAt: Schema.Finite,
+  createdAt: Schema.Finite,
+  lastActivityAt: Schema.Finite,
   attributes: Types.Attributes,
 });
 
@@ -112,8 +112,8 @@ const SerializedUser = Schema.Struct({
   id: Schema.String,
   name: Schema.optional(Schema.String),
   image: Schema.optional(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
   attributes: Types.Attributes,
 });
 
@@ -121,7 +121,7 @@ const SerializedPayload = Schema.Struct({
   v: Schema.Literal(PAYLOAD_VERSION),
   /** The cache epoch; absent on cookies issued before it existed. */
   e: Schema.optional(Schema.String),
-  exp: Schema.Number,
+  exp: Schema.Finite,
   sid: Schema.String,
   session: SerializedSession,
   user: SerializedUser,

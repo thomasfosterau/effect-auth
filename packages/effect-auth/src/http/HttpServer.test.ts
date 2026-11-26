@@ -1612,7 +1612,7 @@ describe("identifier endpoints", () => {
           kind: Schema.String,
           value: Schema.String,
           verified: Schema.Boolean,
-          createdAt: Schema.Number,
+          createdAt: Schema.Finite,
         }),
       ),
     );
@@ -2475,7 +2475,7 @@ describe("multi-factor", () => {
       Schema.Struct({
         user: Schema.optional(Schema.Unknown),
         secondFactor: Schema.optional(
-          Schema.Struct({ token: Schema.String, expiresAt: Schema.Number }),
+          Schema.Struct({ token: Schema.String, expiresAt: Schema.Finite }),
         ),
       }),
     );

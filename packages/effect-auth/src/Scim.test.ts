@@ -1255,9 +1255,9 @@ const ScimUserBody = Schema.Struct({
 const ScimListBody = <S extends Schema.Constraint>(resource: S) =>
   Schema.Struct({
     schemas: Schema.Array(Schema.String),
-    totalResults: Schema.Number,
-    startIndex: Schema.Number,
-    itemsPerPage: Schema.Number,
+    totalResults: Schema.Finite,
+    startIndex: Schema.Finite,
+    itemsPerPage: Schema.Finite,
     Resources: Schema.Array(resource),
   });
 

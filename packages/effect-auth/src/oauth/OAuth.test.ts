@@ -949,8 +949,8 @@ describe("OAuth.appleClientSecret", () => {
           iss: Schema.String,
           sub: Schema.String,
           aud: Schema.String,
-          iat: Schema.Number,
-          exp: Schema.Number,
+          iat: Schema.Finite,
+          exp: Schema.Finite,
         }),
       ),
     )(Buffer.from(payloadSeg, "base64url").toString("utf8"));
