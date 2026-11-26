@@ -168,6 +168,17 @@ export default defineConfig({
         rules: { "effect/avoid-ts-ignore": "off", "import/namespace": "off" },
       },
       {
+        // The alchemy engine suites run deploys outside alchemy's CLI: the
+        // engine's types require services a schema deploy never reaches
+        // (`Terminal` for plan approval, `ChildProcessSpawner`, `Interaction`),
+        // which have no stand-in short of reimplementing them.
+        files: [
+          "packages/alchemy-cloudflare/src/AuthSchema.test.ts",
+          "packages/alchemy-postgres/src/AuthSchema.test.ts",
+        ],
+        rules: { "effecttsgo/unsafe-effect-type-assertion": "off" },
+      },
+      {
         // The store conformance suites name each test from the typed case
         // record they run (`it(testCase.name, …)`), which is a string the
         // rule cannot see statically.

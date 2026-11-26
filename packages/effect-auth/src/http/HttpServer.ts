@@ -1212,7 +1212,7 @@ const registrationAddressError = (
  */
 const rateLimiterError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): RateLimiterConfigError | undefined => {
   if (Option.isSome(Context.getOption(services, RateLimiter))) return undefined;
   const oidc = Context.getOption(services, OidcProviderService);
@@ -1247,7 +1247,7 @@ const rateLimiterError = (
  */
 const servicesConfigError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   (options.trustedProxy === undefined
     ? (keyedPluginAddressError(services) ?? registrationAddressError(services))
@@ -1260,7 +1260,7 @@ const servicesConfigError = (
  * it. When the services build synchronously, `make` has already thrown, and
  * `makeAsync` waits for the build, so it never needs this layer.
  */
-const requireServicesConfig = (options: AuthWebHandlerOptions) =>
+const requireServicesConfig = (options: AuthWebHandlerOptions<unknown>) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const error = servicesConfigError(yield* Effect.context(), options);
@@ -5696,7 +5696,7 @@ export { SignUpAttributesConfigError } from "../Errors.ts";
  * the keys and starts.
  */
 const checkSignUpAttributes = (
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): Effect.Effect<void, SignUpAttributesConfigError> => {
   const named = Arr.filter(options.signUpAttributes ?? [], (key) =>
     SIGN_UP_PROTECTED_ATTRIBUTES.includes(key),
@@ -5714,9 +5714,12 @@ const checkSignUpAttributes = (
 /**
  * Options for the mountable auth Web handler.
  */
-export interface AuthWebHandlerOptions {
-  /** Your service layer (SessionService, AuthLifecycle, stores, ...). */
-  readonly services: Layer.Layer<AuthServices>;
+export interface AuthWebHandlerOptions<E = never> {
+  /**
+   * Your service layer (SessionService, AuthLifecycle, stores, ...). A build
+   * that fails makes `make` throw, or `makeAsync` reject, with its failure.
+   */
+  readonly services: Layer.Layer<AuthServices, E>;
   /** Cookie configuration. */
   readonly cookie?: CookieConfig;
   /**
@@ -6044,7 +6047,7 @@ export interface AuthWebHandler {
  * be one it can key on.
  */
 const ipRateLimitAddressError = (
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   trustedProxyError(options) ??
   ipv6PrefixError(options) ??
@@ -6058,7 +6061,9 @@ const ipRateLimitAddressError = (
     : undefined);
 
 /** An `ipRateLimit.ipv6PrefixLength` that is not an integer from 1 to 128. */
-const ipv6PrefixError = (options: AuthWebHandlerOptions): RateLimiterConfigError | undefined => {
+const ipv6PrefixError = (
+  options: AuthWebHandlerOptions<unknown>,
+): RateLimiterConfigError | undefined => {
   const length = ipv6PrefixLength(options.ipRateLimit);
   return isIpv6RateLimitPrefix(length)
     ? undefined
@@ -6074,7 +6079,7 @@ const ipv6PrefixError = (options: AuthWebHandlerOptions): RateLimiterConfigError
  * refuses to start instead.
  */
 const trustedProxyError = (
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): ClientAddressConfigError | undefined => {
   const hopCount = options.trustedProxy?.hopCount;
   return hopCount === undefined || (Number.isSafeInteger(hopCount) && hopCount >= 0)
@@ -6095,7 +6100,7 @@ const trustedProxyError = (
  */
 const refusedBuild = (
   built: Exit.Exit<Context.Context<AuthServices>, unknown>,
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<unknown>,
 ): { readonly error: unknown } | undefined => {
   if (Exit.isFailure(built)) return { error: Cause.squash(built.cause) };
   const error = servicesConfigError(built.value, options);
@@ -6155,9 +6160,9 @@ const logPendingBuildFailure = (fiber: Fiber.Fiber<unknown, unknown>): Effect.Ef
  * build they ran. `release` runs on `dispose`, after the handler's own scope
  * closes, and releases that build.
  */
-const serve = (
-  options: AuthWebHandlerOptions,
-  services: Layer.Layer<AuthServices, ClientAddressConfigError | RateLimiterConfigError>,
+const serve = <E>(
+  options: AuthWebHandlerOptions<E>,
+  services: Layer.Layer<AuthServices, E | ClientAddressConfigError | RateLimiterConfigError>,
   release: Effect.Effect<void>,
 ): AuthWebHandler => {
   // The IP limit is router middleware on every auth route, so it sees the
@@ -6307,10 +6312,10 @@ const readBodyWithin = (
  * refused, after releasing what it acquired. Returns when the build passed the
  * check, or is still running without `strict`.
  */
-const refuseUnservableBuild = (
-  build: SynchronousRun<Context.Context<AuthServices>, never>,
+const refuseUnservableBuild = <E>(
+  build: SynchronousRun<Context.Context<AuthServices>, E>,
   servicesScope: Scope.Closeable,
-  options: AuthWebHandlerOptions,
+  options: AuthWebHandlerOptions<E>,
 ): void => {
   const servicesFiber = build.fiber;
   let pending = false;
@@ -6455,7 +6460,7 @@ const tooManyRequests = (
  * stops on `dispose`. A fiber forked with `Effect.forkDetach` keeps running
  * after `make` returns, and `dispose` does not stop it.
  */
-export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
+export const make = <E = never>(options: AuthWebHandlerOptions<E>): AuthWebHandler => {
   const addressError = ipRateLimitAddressError(options);
   if (addressError !== undefined) throw addressError;
   const signUpCheck = Effect.runSyncExit(checkSignUpAttributes(options));
@@ -6528,7 +6533,7 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  * the promise resolves, and stops on `dispose`. One forked with
  * `Effect.forkDetach` keeps running, and `dispose` does not stop it.
  */
-export const makeAsync = (options: AuthWebHandlerOptions): Promise<AuthWebHandler> =>
+export const makeAsync = <E = never>(options: AuthWebHandlerOptions<E>): Promise<AuthWebHandler> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const addressError = ipRateLimitAddressError(options);

@@ -1,5 +1,5 @@
 import { assert, describe, it, expect, onTestFinished } from "vite-plus/test";
-import { Cause, Effect, Exit, FileSystem, Layer, Path, Struct, Types } from "effect";
+import { Cause, Data, Effect, Exit, FileSystem, Layer, Path, Struct, Types } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -84,6 +84,23 @@ const makeWebRequest = (headers: Record<string, string> = {}) =>
   HttpServerRequest.fromWeb(new Request("http://localhost/docs", { headers }));
 
 /**
+ * The no-principal case's stand-in: every read of it is a defect, as reading
+ * an unprovided `CurrentPrincipal` is, so the gate must fail closed on it.
+ */
+/** Anything a guard's result fails with besides its own `Forbidden`. */
+const isUnhandled = <E>(error: E | S.Forbidden): error is E => !Schema.is(S.Forbidden)(error);
+
+class PrincipalNotProvided extends Data.TaggedError("PrincipalNotProvided") {}
+const unreadablePrincipal: Entity.EntityRef = {
+  get type(): string {
+    throw new PrincipalNotProvided();
+  },
+  get id(): string {
+    throw new PrincipalNotProvided();
+  },
+};
+
+/**
  * Run one `makeAuthorizationMiddleware(...)` instance's handler against a fixture
  * request, optionally with a `CurrentPrincipal` already resolved (as
  * `AuthMiddleware` would have provided it) and a custom `Authorizer.layer`.
@@ -107,21 +124,24 @@ const runGate = <Id extends string>(
       Types.unhandled | S.Forbidden,
       Authorizer | CurrentPrincipal | HttpRouter.Provided
     > = svc(Effect.succeed(ok), standIn);
-    return yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+    // Outside a router, the request and stand-ins for the rest of
+    // `HttpRouter.Provided` are provided here. The handler cannot fail, so
+    // anything but the guard's own `Forbidden` would be a defect.
+    return yield* applied.pipe(
+      Effect.catchIf(isUnhandled, Effect.die),
+      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      Effect.provideService(HttpServerRequest.ParsedSearchParams, {}),
+      Effect.provideService(HttpRouter.RouteContext, {
+        params: {},
+        route: HttpRouter.route("GET", "/docs", ok),
+      }),
+      Effect.scoped,
+    );
   }).pipe(
     Effect.provide(Layer.mergeAll(Guard.layer, options.overrideAuthorizerLayer ?? authorizerLayer)),
   );
 
-  // SAFETY: the no-principal case leaves `CurrentPrincipal` deliberately unprovided to
-  // prove the gate fails closed rather than silently allowing; that is a
-  // runtime defect, so the requirement is erased here — in one documented
-  // place — rather than with a cast at every call site. Only the context is
-  // erased; the error channel stays honest.
-  return (
-    options.principal !== undefined
-      ? program.pipe(CurrentPrincipal.provide(options.principal))
-      : program
-  ) as Effect.Effect<typeof ok, S.Forbidden | Errors.AuthError>;
+  return program.pipe(CurrentPrincipal.provide(options.principal ?? unreadablePrincipal));
 };
 
 // ---------------------------------------------------------------------------
@@ -183,14 +203,12 @@ describe("makeAuthorizationMiddleware – deny path", () => {
 describe("makeAuthorizationMiddleware – composition with AuthMiddleware", () => {
   it("without CurrentPrincipal in context (not composed after AuthMiddleware), the gate fails rather than silently allowing", async () => {
     const Guard = makeAuthorizationMiddleware("Guard", { action: readDoc, resource: doc1 });
-    // No `CurrentPrincipal.provide(...)` anywhere in the pipeline — simulating
-    // a route that attached this middleware without first resolving a
-    // principal (e.g. forgot `AuthMiddleware`, or ran outside its scope).
-    // `CurrentPrincipal` is a required `Context.Service` with no default, so
-    // accessing it unprovided is a defect, not a typed `Forbidden` — either
-    // way the request must not reach the handler.
+    // No principal resolved (e.g. a route that forgot `AuthMiddleware`): the
+    // stand-in's reads are defects, as reading an unprovided `CurrentPrincipal`
+    // is, and the request must not reach the handler.
     const exit = await Effect.runPromiseExit(runGate(Guard));
-    expect(Exit.isFailure(exit)).toBe(true);
+    assert(Exit.isFailure(exit), "the gate did not let the request through");
+    expect(Cause.hasDies(exit.cause)).toBe(true);
   });
 });
 

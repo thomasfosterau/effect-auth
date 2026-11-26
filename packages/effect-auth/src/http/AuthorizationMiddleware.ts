@@ -416,15 +416,13 @@ export const makeAuthorizationMiddleware = <const Id extends string, R = never>(
       Effect.fn("AuthorizationMiddleware")(function* (handler, _opts) {
         const authorizer = yield* Authorizer;
         const request = yield* HttpServerRequest.HttpServerRequest;
-        // SAFETY: `R` may name a service the router provides per request (see
-        // `AuthorizationRequires`). Widening the requirement back to
-        // `AuthorizationRequires<R>` is sound: `R` is covered by that union
-        // plus the router's `Provided`, and TypeScript can't split a generic `R`.
-        const authInput = yield* resolveAuthorizeInput(input, request) as Effect.Effect<
-          AuthorizeInput,
-          never,
-          AuthorizationRequires<R>
-        >;
+        // `R` may name a service the router provides per request (see
+        // `AuthorizationRequires`); providing those from the request's own
+        // context leaves only the rest of `R` required.
+        const routerServices = yield* Effect.context<HttpRouter.Provided>();
+        const authInput = yield* resolveAuthorizeInput(input, request).pipe(
+          Effect.provide(routerServices),
+        );
 
         yield* authorizer.authorize(authInput).pipe(
           Effect.catchTags({
