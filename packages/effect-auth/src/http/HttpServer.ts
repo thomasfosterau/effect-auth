@@ -71,7 +71,13 @@ import { MultiFactorService } from "../multifactor/MultiFactor.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import { EmailVerificationService } from "../email/EmailVerification.ts";
 import { PasswordResetService } from "../password/PasswordReset.ts";
-import { onlyAttributes, SIGN_UP_PROTECTED_ATTRIBUTES, UserService } from "../User.ts";
+import {
+  BAN_ATTRIBUTES,
+  onlyAttributes,
+  SIGN_UP_PROTECTED_ATTRIBUTES,
+  UserService,
+  withoutAttributes,
+} from "../User.ts";
 import {
   missingPermission,
   notAMember,
@@ -1404,7 +1410,53 @@ const setResponseCookie = (
     ),
   );
 
-/** The `users` resource of a user, its `email` fields derived from `identifiers`. */
+/**
+ * The attribute keys a user's `users` resource leaves out by default: the ban
+ * state (`banned`, `banReason`, `banExpires`) and the SCIM provisioning keys
+ * (`scimUserName`, `scimExternalId`, `scimDeactivated`). Server-side state the
+ * account holder has no use for, which an admin reads through `/admin/users`
+ * and `/user-bans`. `isAnonymous` and `role` stay visible: the client and the
+ * browser `Ladder` read them.
+ *
+ * @since 0.9.0
+ * @category constants
+ */
+export const CLIENT_HIDDEN_ATTRIBUTES: ReadonlyArray<string> = [
+  ...BAN_ATTRIBUTES,
+  "scimUserName",
+  "scimExternalId",
+  "scimDeactivated",
+];
+
+/**
+ * The attribute keys every `users` resource and user view this tier answers
+ * with leaves out, except on the admin endpoints. `Http.make` provides
+ * {@link AuthWebHandlerOptions.clientHiddenAttributes} here per request; the
+ * exported group layers, served some other way, read the default,
+ * {@link CLIENT_HIDDEN_ATTRIBUTES}.
+ *
+ * @since 0.9.0
+ * @category services
+ */
+export const ClientHiddenAttributes: Context.Reference<ReadonlyArray<string>> = Context.Reference<
+  ReadonlyArray<string>
+>("@effect-auth/http/ClientHiddenAttributes", { defaultValue: () => CLIENT_HIDDEN_ATTRIBUTES });
+
+/** `user` without the attribute keys `hidden` names. */
+const withoutHiddenAttributes = (user: Types.User, hidden: ReadonlyArray<string>): Types.User =>
+  Arr.isReadonlyArrayEmpty(hidden)
+    ? user
+    : { ...user, attributes: withoutAttributes(user.attributes, hidden) };
+
+/** `user` as a client may see it: without the {@link ClientHiddenAttributes}. */
+const clientUser = (user: Types.User): Effect.Effect<Types.User> =>
+  Effect.map(ClientHiddenAttributes, (hidden) => withoutHiddenAttributes(user, hidden));
+
+/**
+ * The `users` resource of a user, its `email` fields derived from
+ * `identifiers`. The whole attribute bag: callers pass a {@link clientUser}
+ * unless the reader is an admin.
+ */
 const userResource = (user: Types.User, identifiers?: ReadonlyArray<Identifier>): R.User => {
   const view = S.encodeUser(user, identifiers);
   return R.User.make({
@@ -1422,10 +1474,19 @@ const userResource = (user: Types.User, identifiers?: ReadonlyArray<Identifier>)
 };
 
 /**
- * {@link userResource} with the user's identifiers read from the store. As in
- * {@link encodeUserView}, a failed lookup only leaves the `email` fields out.
+ * {@link userResource} of the {@link clientUser}, with the user's identifiers
+ * read from the store. As in {@link encodeUserView}, a failed lookup only
+ * leaves the `email` fields out.
  */
 const loadUserResource = (user: Types.User): Effect.Effect<R.User, never, IdentifierStore> =>
+  Effect.flatMap(clientUser(user), loadAdminUserResource);
+
+/**
+ * {@link userResource} with the whole attribute bag, for the admin endpoints
+ * (`/admin/users`, `/user-bans`), with the identifiers read as in
+ * {@link loadUserResource}.
+ */
+const loadAdminUserResource = (user: Types.User): Effect.Effect<R.User, never, IdentifierStore> =>
   Effect.map(userIdentifiers(user), (list) => userResource(user, list));
 
 /**
@@ -1578,7 +1639,7 @@ export const sessionsGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
           // A cache-served answer deliberately skips the store round-trip, so
           // the derived email fields are omitted there.
           const user = cacheHit
-            ? userResource(resolved.user)
+            ? userResource(yield* clientUser(resolved.user))
             : yield* loadUserResource(resolved.user);
           return withUser
             ? Handlers.data(sessionResource(resolved.session), { included: [user] })
@@ -2106,7 +2167,7 @@ const signUpWith = (payload: S.SignUpPayload, allowedAttributes: ReadonlyArray<s
       ...result,
       method: "email-password",
       ...(result.identifier?.type === "email" && {
-        userResource: signUpUserResource(result.user, result.identifier.value),
+        userResource: signUpUserResource(yield* clientUser(result.user), result.identifier.value),
       }),
     } satisfies SignInOutcome;
   });
@@ -3463,7 +3524,9 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
         Effect.gen(function* () {
           const { admin, actor } = yield* adminActor(request, cfg);
           const result = yield* asAdmin(admin.listUsers(actor, listUsersQuery(query)));
-          const users = yield* Effect.forEach(result.users, loadUserResource, { concurrency: 1 });
+          const users = yield* Effect.forEach(result.users, loadAdminUserResource, {
+            concurrency: 1,
+          });
           return Handlers.collection(users, { meta: { total: result.total } });
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -3473,7 +3536,7 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
           const user = yield* asAdmin(
             admin.setRole(actor, params.id, payload.data.attributes.role),
           );
-          return Handlers.data(yield* loadUserResource(user));
+          return Handlers.data(yield* loadAdminUserResource(user));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle(
@@ -3521,7 +3584,7 @@ export const userBansGroupLayer = (config?: CookieConfig, multiSession?: MultiSe
             ),
           );
           return Handlers.data(userBanResource(banned), {
-            included: [yield* loadUserResource(banned)],
+            included: [yield* loadAdminUserResource(banned)],
           });
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
@@ -4862,7 +4925,9 @@ export const scimGroupLayer = () =>
  * (with a warning) rather than failing a flow that already succeeded.
  */
 const encodeUserView = (user: Types.User): Effect.Effect<S.UserView, never, IdentifierStore> =>
-  Effect.map(userIdentifiers(user), (list) => S.encodeUser(user, list));
+  Effect.flatMap(clientUser(user), (visible) =>
+    Effect.map(userIdentifiers(visible), (list) => S.encodeUser(visible, list)),
+  );
 
 /**
  * A `validateSession` failure as the HTTP tier answers it. A refusal
@@ -5411,6 +5476,20 @@ export interface AuthWebHandlerOptions {
    */
   readonly signUpAttributes?: ReadonlyArray<string> | undefined;
   /**
+   * The keys of a user's `attributes` left out of every `users` resource and
+   * user view the handler answers with, except on the admin endpoints
+   * (`/admin/users`, `/user-bans`), which show the whole bag. Default
+   * {@link CLIENT_HIDDEN_ATTRIBUTES}: the ban and SCIM keys. Hiding a key only
+   * hides it; it does not refuse writes (`UserServiceConfig.serverOnlyAttributes`
+   * does that). Add server-side keys of your own with
+   * `[...CLIENT_HIDDEN_ATTRIBUTES, "internalNote"]`.
+   *
+   * `RemoteSession` reads users through `/sessions/current` and
+   * `/api-keys/current`, so an app that authorizes on a hidden key over it
+   * needs that key left visible here.
+   */
+  readonly clientHiddenAttributes?: ReadonlyArray<string> | undefined;
+  /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
@@ -5806,6 +5885,7 @@ const serve = (
   // leftover context (HR), yielding a plain `(request) => Promise<Response>`.
   const appLayer = apiLayer.pipe(Layer.provideMerge(services));
 
+  const clientHiddenAttributes = options.clientHiddenAttributes ?? CLIENT_HIDDEN_ATTRIBUTES;
   const web = HttpRouter.toWebHandler(appLayer, {
     // Cast to `Effect<..., never, never>` so TypeScript infers HR = never, keeping the
     // `context` parameter of `web.handler` optional.
@@ -5817,7 +5897,10 @@ const serve = (
         const ip = resolveClientIP(req, options.trustedProxy);
         // Provide the resolved ClientIP to all downstream effects (the IP
         // limit, hooks, handlers).
-        return yield* effect.pipe(Effect.provideService(ClientIP, { ip }));
+        return yield* effect.pipe(
+          Effect.provideService(ClientIP, { ip }),
+          Effect.provideService(ClientHiddenAttributes, clientHiddenAttributes),
+        );
       }) as Effect.Effect<HttpServerResponse.HttpServerResponse>,
   });
 

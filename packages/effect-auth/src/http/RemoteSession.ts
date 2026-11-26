@@ -75,6 +75,13 @@
  * cookie. Each resolution consumes one use of the key (`remaining`
  * decrements, `lastUsedAt` moves).
  *
+ * ### The user is the client's view
+ *
+ * Both reads answer the user as any client sees it, so its `attributes` lack
+ * the auth service's `clientHiddenAttributes` (by default the ban and SCIM
+ * keys; a banned or deactivated user resolves to no session or key anyway).
+ * An app that authorizes on a hidden key leaves it visible in that option.
+ *
  * @module remote-session
  */
 import { Data, Effect, Layer } from "effect";
