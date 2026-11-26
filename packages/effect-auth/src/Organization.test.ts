@@ -2524,11 +2524,7 @@ const alive = (issued: ReadonlyArray<IssuedSession>) =>
     const sessions = yield* SessionService;
     return yield* Effect.forEach(
       issued,
-      ({ token }) =>
-        Effect.match(sessions.validateSession(token), {
-          onFailure: () => false,
-          onSuccess: () => true,
-        }),
+      ({ token }) => Effect.isSuccess(sessions.validateSession(token)),
       { concurrency: 1 },
     );
   });
