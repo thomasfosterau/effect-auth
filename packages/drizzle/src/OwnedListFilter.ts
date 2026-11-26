@@ -58,17 +58,17 @@ export interface OwnedColumns {
   /** The four-state visibility (`public | followers | group | private`). */
   readonly visibility: SQLWrapper;
   /** The draft flag, for a table that has one. Omit it for a table that does not. */
-  readonly draft?: SQLWrapper | undefined;
+  readonly draft?: SQLWrapper;
   /**
    * Whether the row awaits (or failed) moderation: `true` for anything but the
    * approved state. Omit it for a table with no moderation axis.
    */
-  readonly unapproved?: SQLWrapper | undefined;
+  readonly unapproved?: SQLWrapper;
   /**
    * The group a `group` row is shared with, read against the scope's group
    * set. Omit it and `group` rows list only for their owner.
    */
-  readonly group?: SQLWrapper | undefined;
+  readonly group?: SQLWrapper;
 }
 
 const isSqlWrapper = (value: unknown): value is SQLWrapper =>

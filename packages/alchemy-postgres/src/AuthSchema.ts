@@ -168,7 +168,7 @@ export type AuthSchemaProviderOptions =
 
 // alchemy types the lifecycle props as required, but they arrive `undefined`
 // on a first deploy (no `olds` yet), so widen before defaulting.
-const propsOrEmpty = (props: AuthSchemaProps | undefined): AuthSchemaProps => props ?? {};
+const propsOrEmpty = (props?: AuthSchemaProps): AuthSchemaProps => props ?? {};
 
 /**
  * The provider that drives the {@link AuthSchema} lifecycle, as a `Layer`.

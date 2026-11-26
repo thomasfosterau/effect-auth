@@ -212,7 +212,7 @@ export const purgeExpired = (
   });
 
 /** Refuse a purge `limit` that is not a positive integer; omitted is fine. */
-const checkLimit = (limit: number | undefined): Effect.Effect<void, Auth.AuthError> =>
+const checkLimit = (limit?: number): Effect.Effect<void, Auth.AuthError> =>
   limit === undefined || (Number.isSafeInteger(limit) && limit > 0)
     ? Effect.void
     : Effect.fail(
@@ -227,5 +227,5 @@ export interface PurgeExpiredOptions {
    * The most rows one call deletes, a positive integer; omitted, every
    * spent row goes in one `DELETE`.
    */
-  readonly limit?: number | undefined;
+  readonly limit?: number;
 }

@@ -193,7 +193,7 @@ const makeConnection = (
 export const make = (options: {
   readonly db: QueryDatabaseClient;
   /** Extra attributes to attach to every `sql.*` span. */
-  readonly spanAttributes?: ReadonlyArray<readonly [string, unknown]> | undefined;
+  readonly spanAttributes?: ReadonlyArray<readonly [string, unknown]>;
 }): Effect.Effect<SqlClient.SqlClient, never, Reactivity.Reactivity | RuntimeContext> =>
   Effect.gen(function* () {
     const runtime = yield* RuntimeContext;
@@ -228,6 +228,6 @@ export const make = (options: {
  */
 export const layer = (options: {
   readonly db: QueryDatabaseClient;
-  readonly spanAttributes?: ReadonlyArray<readonly [string, unknown]> | undefined;
+  readonly spanAttributes?: ReadonlyArray<readonly [string, unknown]>;
 }): Layer.Layer<SqlClient.SqlClient, never, RuntimeContext> =>
   Layer.effect(SqlClient.SqlClient, make(options)).pipe(Layer.provide(Reactivity.layer));

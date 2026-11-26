@@ -158,20 +158,28 @@ export default defineConfig({
         rules: { "effect/prefer-option-over-null": "off" },
       },
       {
+        // The adapters' third-party shapes: SvelteKit serializes load and
+        // action data with devalue, which cannot carry an `Option`, and its
+        // event API answers `undefined`; Drizzle column and row types; Better
+        // Auth's API objects; the D1 and `effect/sql` driver API; Node's
+        // child-process API in the workerd suite.
+        files: [
+          "packages/sveltekit/src/**",
+          "packages/drizzle/src/**",
+          "packages/better-auth/src/**",
+          "packages/alchemy-cloudflare/src/D1Client.ts",
+          "packages/argon2/src/Workerd.test.ts",
+        ],
+        rules: { "effect/prefer-option-over-null": "off" },
+      },
+      {
         // Adoption allowance for `prefer-option-over-null`, the same contract
         // as the rule allowances above: these files still answer "nothing"
         // with `null` or `undefined` and report it as a warning, a new site is
         // a defect, and a file leaves the list once its count reaches zero.
-        // The client, ladder, Svelte, SvelteKit and adapter packages follow as
-        // whole surfaces.
+        // The client, ladder and Svelte follow as whole surfaces.
         files: [
           "packages/svelte/src/**",
-          "packages/sveltekit/src/**",
-          "packages/drizzle/src/**",
-          "packages/better-auth/src/**",
-          "packages/argon2/src/**",
-          "packages/alchemy-cloudflare/src/**",
-          "packages/alchemy-postgres/src/**",
           "packages/effect-auth/src/client/**",
           "packages/effect-auth/src/Ladder.ts",
           "packages/effect-auth/src/Ladder.test.ts",

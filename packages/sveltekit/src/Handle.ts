@@ -105,7 +105,7 @@ export type FailurePolicy =
  */
 export interface HandleOptions {
   /** The session cookie's naming, as the auth handler was configured. */
-  readonly cookies?: SessionCookies.SessionCookieNaming | undefined;
+  readonly cookies?: SessionCookies.SessionCookieNaming;
   /**
    * Look the session up for this request: `Option.none()` when nobody is
    * signed in, or a {@link SessionLookup} carrying `Set-Cookie` lines to
