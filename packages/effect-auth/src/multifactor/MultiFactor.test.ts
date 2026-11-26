@@ -267,7 +267,7 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-1", "totp@example.com", "correct-password");
 
-    const { enableResult, enabledBeforeConfirm, enabledAfterConfirm } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({ issuer: "TestApp" });
@@ -280,35 +280,35 @@ describe("MultiFactorService", () => {
 
           const enabledAfterConfirm = yield* service.isEnabled("user-2fa-1");
 
-          return { enableResult, enabledBeforeConfirm, enabledAfterConfirm };
+          expect(enableResult.secret.length).toBeGreaterThan(0);
+          expect(enableResult.totpUri).toContain("otpauth://totp/");
+          expect(enableResult.totpUri).toContain("TestApp");
+          expect(enableResult.totpUri).toContain(encodeURIComponent("totp@example.com"));
+          expect(enableResult.backupCodes).toHaveLength(10);
+          Arr.forEach(enableResult.backupCodes, (backupCode) => {
+            expect(backupCode).toMatch(/^[0-9a-f]{5}-[0-9a-f]{5}$/);
+          });
+
+          // Backup codes are stored hashed, never in plaintext
+          const record = Option.getOrUndefined(
+            MutableHashMap.get(multiFactorRecords, "user-2fa-1"),
+          );
+          expect(record?.verified).toBe(true);
+          Arr.forEach(enableResult.backupCodes, (plaintext) => {
+            expect(record?.backupCodes).not.toContain(plaintext);
+          });
+          // Each is peppered under the root secret, and the TOTP secret is sealed.
+          expect(record?.backupCodes).toEqual(
+            enableResult.backupCodes.map((backupCode) => testPepper(backupCode.replace("-", ""))),
+          );
+          expect(record?.secret.startsWith(Cipher.SEALED_PREFIX)).toBe(true);
+
+          expect(enabledBeforeConfirm).toBe(false);
+          expect(enabledAfterConfirm).toBe(true);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(enableResult.secret.length).toBeGreaterThan(0);
-    expect(enableResult.totpUri).toContain("otpauth://totp/");
-    expect(enableResult.totpUri).toContain("TestApp");
-    expect(enableResult.totpUri).toContain(encodeURIComponent("totp@example.com"));
-    expect(enableResult.backupCodes).toHaveLength(10);
-    Arr.forEach(enableResult.backupCodes, (code) => {
-      expect(code).toMatch(/^[0-9a-f]{5}-[0-9a-f]{5}$/);
-    });
-
-    // Backup codes are stored hashed, never in plaintext
-    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-1"));
-    expect(record?.verified).toBe(true);
-    Arr.forEach(enableResult.backupCodes, (plaintext) => {
-      expect(record?.backupCodes).not.toContain(plaintext);
-    });
-    // Each is peppered under the root secret, and the TOTP secret is sealed.
-    expect(record?.backupCodes).toEqual(
-      enableResult.backupCodes.map((code) => testPepper(code.replace("-", ""))),
-    );
-    expect(record?.secret.startsWith(Cipher.SEALED_PREFIX)).toBe(true);
-
-    expect(enabledBeforeConfirm).toBe(false);
-    expect(enabledAfterConfirm).toBe(true);
   });
 
   it("should reject confirmEnable with an invalid code", async () => {
@@ -338,7 +338,7 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-reenrol", "reenrol@example.com", "correct-password");
 
-    const { sealedBefore, result, enabledAfter } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({ issuer: "TestApp" });
@@ -351,28 +351,27 @@ describe("MultiFactorService", () => {
             service.enable("user-2fa-reenrol", "correct-password"),
           );
           const enabledAfter = yield* service.isEnabled("user-2fa-reenrol");
-          return { sealedBefore, result, enabledAfter };
+
+          assert(Result.isFailure(result));
+          expect(result.failure._tag).toBe("MultiFactorAlreadyEnabledError");
+          expect(enabledAfter).toBe(true);
+          const record = Option.getOrUndefined(
+            MutableHashMap.get(multiFactorRecords, "user-2fa-reenrol"),
+          );
+          expect(record?.verified).toBe(true);
+          expect(sealedBefore).toBeDefined();
+          expect(record?.secret).toBe(sealedBefore);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    assert(Result.isFailure(result));
-    expect(result.failure._tag).toBe("MultiFactorAlreadyEnabledError");
-    expect(enabledAfter).toBe(true);
-    const record = Option.getOrUndefined(
-      MutableHashMap.get(multiFactorRecords, "user-2fa-reenrol"),
-    );
-    expect(record?.verified).toBe(true);
-    expect(sealedBefore).toBeDefined();
-    expect(record?.secret).toBe(sealedBefore);
   });
 
   it("replaces an enrolment that was never confirmed", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-restart", "restart@example.com", "correct-password");
 
-    const { first, firstSealed, second, stale } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({ issuer: "TestApp" });
@@ -385,20 +384,19 @@ describe("MultiFactorService", () => {
             service.confirmEnable("user-2fa-restart", yield* generateTotp(first.secret)),
           );
           yield* service.confirmEnable("user-2fa-restart", yield* generateTotp(second.secret));
-          return { first, firstSealed, second, stale };
+
+          expect(second.secret).not.toBe(first.secret);
+          const record = Option.getOrUndefined(
+            MutableHashMap.get(multiFactorRecords, "user-2fa-restart"),
+          );
+          expect(Result.isFailure(stale)).toBe(true);
+          expect(record?.verified).toBe(true);
+          expect(record?.secret).toBeDefined();
+          expect(record?.secret).not.toBe(firstSealed);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(second.secret).not.toBe(first.secret);
-    const record = Option.getOrUndefined(
-      MutableHashMap.get(multiFactorRecords, "user-2fa-restart"),
-    );
-    expect(Result.isFailure(stale)).toBe(true);
-    expect(record?.verified).toBe(true);
-    expect(record?.secret).toBeDefined();
-    expect(record?.secret).not.toBe(firstSealed);
   });
 
   it("should fail to enable with a wrong password", async () => {
@@ -433,7 +431,7 @@ describe("MultiFactorService", () => {
     const testContext = Context.add(await makeTestContext(), TrustedDeviceStore, devices);
     await seedUser("user-2fa-4", "disable@example.com", "correct-password");
 
-    const { wrongPassword, stillEnabled, enabledAfterDisable } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({
@@ -451,19 +449,17 @@ describe("MultiFactorService", () => {
           yield* service.disable("user-2fa-4", "correct-password");
           const enabledAfterDisable = yield* service.isEnabled("user-2fa-4");
 
-          return { wrongPassword, stillEnabled, enabledAfterDisable };
+          expect(wrongPassword._tag).toBe("Failure");
+          assert(Result.isFailure(wrongPassword));
+          expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
+          expect(stillEnabled).toBe(true);
+          expect(enabledAfterDisable).toBe(false);
+          expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
+          expect(revokedDevices).toEqual(["user-2fa-4"]);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(wrongPassword._tag).toBe("Failure");
-    assert(Result.isFailure(wrongPassword));
-    expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
-    expect(stillEnabled).toBe(true);
-    expect(enabledAfterDisable).toBe(false);
-    expect(MutableHashMap.size(multiFactorRecords)).toBe(0);
-    expect(revokedDevices).toEqual(["user-2fa-4"]);
   });
 
   it("verifies a password hashed by a previous hasher through MultiAlgorithmVerifier", async () => {
@@ -747,7 +743,7 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-8", "backup@example.com", "correct-password");
 
-    const { firstUse, reuse, secondUse } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({
@@ -768,21 +764,20 @@ describe("MultiFactorService", () => {
           // A failed attempt does not consume the pending token; another code works
           const secondUse = yield* service.verifyBackupCode(secondChallenge.token, backupCodes[1]);
 
-          return { firstUse, reuse, secondUse };
+          expect(firstUse.userId).toBe("user-2fa-8");
+          expect(reuse._tag).toBe("Failure");
+          assert(Result.isFailure(reuse));
+          expect(reuse.failure._tag).toBe("MultiFactorError");
+          expect(secondUse.userId).toBe("user-2fa-8");
+          expect(MutableHashMap.size(sessions)).toBe(2);
+          expect(
+            Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-8"))
+              ?.backupCodes,
+          ).toHaveLength(8);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(firstUse.userId).toBe("user-2fa-8");
-    expect(reuse._tag).toBe("Failure");
-    assert(Result.isFailure(reuse));
-    expect(reuse.failure._tag).toBe("MultiFactorError");
-    expect(secondUse.userId).toBe("user-2fa-8");
-    expect(MutableHashMap.size(sessions)).toBe(2);
-    expect(
-      Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-2fa-8"))?.backupCodes,
-    ).toHaveLength(8);
   });
 
   it("still redeems a backup code stored under its unpeppered digest", async () => {
@@ -872,53 +867,47 @@ describe("MultiFactorService", () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-9", "regen@example.com", "correct-password");
 
-    const { wrongPassword, oldCodes, newCodes, oldCodeResult, newCodeResult } =
-      await Effect.runPromise(
-        Effect.provide(
-          Effect.gen(function* () {
-            const service = yield* MultiFactor.make({
-              issuer: "TestApp",
-              skipVerificationOnEnable: true,
-              backupCodeCount: 4,
-            });
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* MultiFactor.make({
+            issuer: "TestApp",
+            skipVerificationOnEnable: true,
+            backupCodeCount: 4,
+          });
 
-            const { backupCodes: oldCodes } = yield* service.enable(
-              "user-2fa-9",
-              "correct-password",
-            );
+          const { backupCodes: oldCodes } = yield* service.enable("user-2fa-9", "correct-password");
 
-            const wrongPassword = yield* Effect.result(
-              service.regenerateBackupCodes("user-2fa-9", "wrong-password"),
-            );
+          const wrongPassword = yield* Effect.result(
+            service.regenerateBackupCodes("user-2fa-9", "wrong-password"),
+          );
 
-            const newCodes = yield* service.regenerateBackupCodes("user-2fa-9", "correct-password");
+          const newCodes = yield* service.regenerateBackupCodes("user-2fa-9", "correct-password");
 
-            const challenge = yield* service.beginChallenge("user-2fa-9");
-            const oldCodeResult = yield* Effect.result(
-              service.verifyBackupCode(challenge.token, oldCodes[0]),
-            );
-            const newCodeResult = yield* service.verifyBackupCode(challenge.token, newCodes[0]);
+          const challenge = yield* service.beginChallenge("user-2fa-9");
+          const oldCodeResult = yield* Effect.result(
+            service.verifyBackupCode(challenge.token, oldCodes[0]),
+          );
+          const newCodeResult = yield* service.verifyBackupCode(challenge.token, newCodes[0]);
 
-            return { wrongPassword, oldCodes, newCodes, oldCodeResult, newCodeResult };
-          }),
-          testContext,
-        ).pipe(Effect.provide(Hooks.Default)),
-      );
-
-    expect(wrongPassword._tag).toBe("Failure");
-    assert(Result.isFailure(wrongPassword));
-    expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
-    expect(newCodes).toHaveLength(4);
-    expect(newCodes).not.toEqual(oldCodes);
-    expect(oldCodeResult._tag).toBe("Failure");
-    expect(newCodeResult.userId).toBe("user-2fa-9");
+          expect(wrongPassword._tag).toBe("Failure");
+          assert(Result.isFailure(wrongPassword));
+          expect(wrongPassword.failure._tag).toBe("InvalidCredentialsError");
+          expect(newCodes).toHaveLength(4);
+          expect(newCodes).not.toEqual(oldCodes);
+          expect(oldCodeResult._tag).toBe("Failure");
+          expect(newCodeResult.userId).toBe("user-2fa-9");
+        }),
+        testContext,
+      ).pipe(Effect.provide(Hooks.Default)),
+    );
   });
 
   it("should not begin a challenge for a user without verified multi-factor", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-2fa-10", "nochallenge@example.com", "correct-password");
 
-    const { withoutRecord, unverified } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({ issuer: "TestApp" });
@@ -929,19 +918,17 @@ describe("MultiFactorService", () => {
           yield* service.enable("user-2fa-10", "correct-password");
           const unverified = yield* Effect.result(service.beginChallenge("user-2fa-10"));
 
-          return { withoutRecord, unverified };
+          expect(withoutRecord._tag).toBe("Failure");
+          assert(Result.isFailure(withoutRecord));
+          expect(withoutRecord.failure._tag).toBe("MultiFactorError");
+          expect(unverified._tag).toBe("Failure");
+          assert(Result.isFailure(unverified));
+          expect(unverified.failure._tag).toBe("MultiFactorError");
+          expect(MutableHashMap.size(pendingChallenges)).toBe(0);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(withoutRecord._tag).toBe("Failure");
-    assert(Result.isFailure(withoutRecord));
-    expect(withoutRecord.failure._tag).toBe("MultiFactorError");
-    expect(unverified._tag).toBe("Failure");
-    assert(Result.isFailure(unverified));
-    expect(unverified.failure._tag).toBe("MultiFactorError");
-    expect(MutableHashMap.size(pendingChallenges)).toBe(0);
   });
 });
 
@@ -960,7 +947,7 @@ describe("MultiFactorService with TOTP secret encryption", () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-1", "enc-totp@example.com", "correct-password");
 
-    const { enableResult, enabled, verifyResult } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* MultiFactor.make({
@@ -984,28 +971,28 @@ describe("MultiFactorService with TOTP secret encryption", () => {
           const verifyCode = yield* generateTotp(enableResult.secret);
           const verifyResult = yield* service.verifyTotp(challenge.token, verifyCode);
 
-          return { enableResult, enabled, verifyResult };
+          expect(enabled).toBe(true);
+          expect(verifyResult.userId).toBe("user-enc-1");
+          expect(MutableHashMap.size(sessions)).toBe(1);
+
+          // The stored secret must be ciphertext, not the plaintext base32 secret
+          const record = Option.getOrUndefined(
+            MutableHashMap.get(multiFactorRecords, "user-enc-1"),
+          );
+          expect(record?.secret).toBeDefined();
+          expect(record?.secret).not.toBe(enableResult.secret);
+          expect(record?.secret).not.toMatch(/^[A-Z2-7]+=*$/);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(enabled).toBe(true);
-    expect(verifyResult.userId).toBe("user-enc-1");
-    expect(MutableHashMap.size(sessions)).toBe(1);
-
-    // The stored secret must be ciphertext, not the plaintext base32 secret
-    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-enc-1"));
-    expect(record?.secret).toBeDefined();
-    expect(record?.secret).not.toBe(enableResult.secret);
-    expect(record?.secret).not.toMatch(/^[A-Z2-7]+=*$/);
   });
 
   it("should enroll and verify TOTP with a custom { cipher }", async () => {
     const testContext = await makeTestContext();
     await seedUser("user-enc-2", "enc-cipher@example.com", "correct-password");
 
-    const { enableResult, verifyResult } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const cipher = yield* Effect.orDie(Cipher.aes256GcmCipher("custom-cipher-secret"));
@@ -1021,17 +1008,17 @@ describe("MultiFactorService with TOTP secret encryption", () => {
           const code = yield* generateTotp(enableResult.secret);
           const verifyResult = yield* service.verifyTotp(challenge.token, code);
 
-          return { enableResult, verifyResult };
+          expect(verifyResult.userId).toBe("user-enc-2");
+
+          // Stored secret is ciphertext
+          const record = Option.getOrUndefined(
+            MutableHashMap.get(multiFactorRecords, "user-enc-2"),
+          );
+          expect(record?.secret).not.toBe(enableResult.secret);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(verifyResult.userId).toBe("user-enc-2");
-
-    // Stored secret is ciphertext
-    const record = Option.getOrUndefined(MutableHashMap.get(multiFactorRecords, "user-enc-2"));
-    expect(record?.secret).not.toBe(enableResult.secret);
   });
 
   it("should return plaintext secret and valid totpUri from enable even with encryption", async () => {

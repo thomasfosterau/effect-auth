@@ -555,8 +555,8 @@ export const resolveUserByIdentifier = <E>(
     const found = yield* lookupIdentifier(store, type, value);
     if (Option.isNone(found)) return Option.none();
     const identifier = found.value;
-    const user = yield* getUser(identifier.userId);
-    return Option.map(user, (user) => ({ user, identifier }));
+    const owner = yield* getUser(identifier.userId);
+    return Option.map(owner, (user) => ({ user, identifier }));
   });
 
 /**

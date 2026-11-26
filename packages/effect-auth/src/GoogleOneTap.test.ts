@@ -223,15 +223,15 @@ describe("GoogleOneTapService", () => {
     const { first, second } = await withJwks(() =>
       Effect.runPromise(
         Effect.gen(function* () {
-          const first = yield* service.signIn(
+          const firstSignIn = yield* service.signIn(
             signCredential(validClaims({ nonce: hashNonce(nonce1) })),
             nonce1,
           );
-          const second = yield* service.signIn(
+          const secondSignIn = yield* service.signIn(
             signCredential(validClaims({ nonce: hashNonce(nonce2) })),
             nonce2,
           );
-          return { first, second };
+          return { first: firstSignIn, second: secondSignIn };
         }).pipe(Effect.provide(layer)),
       ),
     );

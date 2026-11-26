@@ -269,9 +269,9 @@ describe("promoted attributes", () => {
   });
 
   it("is backed by the column's own CHECK: a rung off the ladder cannot be stored", async () => {
-    await withDatabase(async (client) => {
+    await withDatabase(async (pg) => {
       await expect(
-        client.query(
+        pg.query(
           "insert into users (id, role, created_at, updated_at) values ($1, 'superadmin', now(), now())",
           [ids.plain],
         ),

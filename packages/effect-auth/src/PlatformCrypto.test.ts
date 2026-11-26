@@ -6,20 +6,19 @@ import { layer } from "./PlatformCrypto.ts";
 
 describe("PlatformCrypto", () => {
   it("generates non-deterministic random bytes of the requested length", async () => {
-    const { a, b } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const crypto = yield* SecureRandom.SecureRandom;
           const a = yield* crypto.randomBytes(32);
           const b = yield* crypto.randomBytes(32);
-          return { a, b };
+          expect(a.length).toBe(32);
+          expect(b.length).toBe(32);
+          expect(Hex.encode(a)).not.toBe(Hex.encode(b));
         }),
         layer,
       ),
     );
-    expect(a.length).toBe(32);
-    expect(b.length).toBe(32);
-    expect(Hex.encode(a)).not.toBe(Hex.encode(b));
   });
 
   it("computes a correct SHA-256 digest", async () => {

@@ -1363,8 +1363,8 @@ describe("OrganizationService", () => {
           service.addTeamMember("owner-1", "no-such-team", "member-1"),
         );
 
-        const members = yield* service.listTeamMembers("owner-1", team.id);
-        return { other, outsider, otherOrgMember, duplicate, missingTeam, members };
+        const listedMembers = yield* service.listTeamMembers("owner-1", team.id);
+        return { other, outsider, otherOrgMember, duplicate, missingTeam, members: listedMembers };
       }),
     );
 
@@ -3246,9 +3246,9 @@ describe("OrganizationService - JIT provisioning", () => {
         const provisioned = yield* service.provisionJitMembership("user-1", "NEW@Acme.test");
         const second = yield* service.provisionJitMembership("user-1", "new@acme.test");
         const unrelatedDomain = yield* service.provisionJitMembership("user-2", "x@other.test");
-        const members = yield* service.getFullOrganization("owner-1", organization.id);
+        const full = yield* service.getFullOrganization("owner-1", organization.id);
 
-        return { optedOut, provisioned, second, unrelatedDomain, members };
+        return { optedOut, provisioned, second, unrelatedDomain, members: full };
       }),
     );
 
@@ -3273,8 +3273,8 @@ describe("OrganizationService - JIT provisioning", () => {
         yield* service.updateOrganization("owner-1", organization.id, { jitProvisioning: true });
 
         const pending = yield* service.provisionJitMembership("user-1", "new@acme.test");
-        const members = yield* service.getFullOrganization("owner-1", organization.id);
-        return { pending, members };
+        const full = yield* service.getFullOrganization("owner-1", organization.id);
+        return { pending, members: full };
       }),
     );
 
@@ -3320,10 +3320,10 @@ const pagedStore = (
 ): typeof OrganizationStore.Service => ({
   ...organizationStore,
   listMembersByOrganizationPage: (organizationId, { offset, limit }) =>
-    Effect.map(organizationStore.listMembersByOrganization(organizationId), (members) =>
+    Effect.map(organizationStore.listMembersByOrganization(organizationId), (listed) =>
       slice(
         Arr.sort(
-          members,
+          listed,
           Order.mapInput(Order.Number, (member: Member) => member.createdAt),
         ),
         offset,
@@ -3349,7 +3349,7 @@ describe("OrganizationStore conformance", () => {
 
   it("passes a store whose listMembersByOrganizationPage pages oldest first", async () => {
     assert(pagedCase !== undefined, "the suite has a paging case");
-    const store = pagedStore((members, offset, limit) => members.slice(offset, offset + limit));
+    const store = pagedStore((all, offset, limit) => all.slice(offset, offset + limit));
     await expect(
       Effect.runPromise(pagedCase.run.pipe(Effect.provideService(OrganizationStore, store))),
     ).resolves.toBeUndefined();
@@ -3357,7 +3357,7 @@ describe("OrganizationStore conformance", () => {
 
   it("fails a store whose listMembersByOrganizationPage ignores the offset", async () => {
     assert(pagedCase !== undefined, "the suite has a paging case");
-    const store = pagedStore((members, _offset, limit) => members.slice(0, limit));
+    const store = pagedStore((all, _offset, limit) => all.slice(0, limit));
     await expect(
       Effect.runPromise(pagedCase.run.pipe(Effect.provideService(OrganizationStore, store))),
     ).rejects.toThrow(/listMembersByOrganizationPage/);
@@ -3473,7 +3473,7 @@ describe("OrganizationService membership and invitation limits", () => {
     MutableHashMap.set(managedBy, "foreign-1", "other-org");
     MutableHashSet.add(unmanagedUsers, "foreign-1");
     seedEmail("domain-user", "dana@acme.test", true);
-    const refusal =
+    const unmanagedRefusal =
       "Only a user this organization manages can be added directly; invite anyone else";
 
     const result = await runService({}, (service) =>
@@ -3501,7 +3501,7 @@ describe("OrganizationService membership and invitation limits", () => {
     );
 
     expect(result.refused.map(errorSummary)).toEqual(
-      result.refused.map(() => ({ tag: "OrganizationError", message: refusal })),
+      result.refused.map(() => ({ tag: "OrganizationError", message: unmanagedRefusal })),
     );
     expect(result.byDomain.userId).toBe("domain-user");
     expect(result.stamped.userId).toBe("managed-1");

@@ -210,7 +210,7 @@ describe("OidcProviderService", () => {
     const { layer } = setup();
     const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
 
-    const { web, native } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const web = yield* service.registerClient({
           name: "Web App",
@@ -221,15 +221,14 @@ describe("OidcProviderService", () => {
           redirectUris: ["http://127.0.0.1:8123/callback"],
           type: "native",
         });
-        return { web, native };
+
+        assert(web.clientSecret !== undefined, "a web client gets a secret");
+        expect(web.client.type).toBe("web");
+        expect(web.client.clientSecretHash).toBe(sha256Hex(web.clientSecret));
+        expect(native.clientSecret).toBeUndefined();
+        expect(native.client.type).toBe("native");
       }).pipe(Effect.provide(layer)),
     );
-
-    assert(web.clientSecret !== undefined, "a web client gets a secret");
-    expect(web.client.type).toBe("web");
-    expect(web.client.clientSecretHash).toBe(sha256Hex(web.clientSecret));
-    expect(native.clientSecret).toBeUndefined();
-    expect(native.client.type).toBe("native");
   });
 
   it("rejects registration without redirect URIs", async () => {
@@ -248,7 +247,7 @@ describe("OidcProviderService", () => {
     const service = await Effect.runPromise(OidcProvider.make(config).pipe(Effect.provide(layer)));
     const user = makeUser("u1");
 
-    const { unknownClient, badRedirect } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { client } = yield* service.registerClient({
           name: "App",
@@ -270,12 +269,11 @@ describe("OidcProviderService", () => {
             scope: "openid",
           }),
         );
-        return { unknownClient, badRedirect };
+
+        expect(unknownClient).toBeInstanceOf(OidcProviderError);
+        expect(badRedirect).toBeInstanceOf(OidcProviderError);
       }).pipe(Effect.provide(layer)),
     );
-
-    expect(unknownClient).toBeInstanceOf(OidcProviderError);
-    expect(badRedirect).toBeInstanceOf(OidcProviderError);
   });
 
   it("redirects spec-level errors back to the client", async () => {
@@ -574,14 +572,14 @@ describe("OidcProviderService", () => {
             name: "App",
             redirectUris: ["https://rp.test/callback"],
           });
-          const updated = yield* service.updateClient(client.clientId, {
+          const updatedClient = yield* service.updateClient(client.clientId, {
             name: "Renamed",
             redirectUris: ["https://rp.test/other"],
             skipConsent: true,
             disabled: true,
             metadata: { team: "core" },
           });
-          return { before: client, updated };
+          return { before: client, updated: updatedClient };
         }).pipe(Effect.provide(layer)),
       );
 
@@ -609,8 +607,8 @@ describe("OidcProviderService", () => {
             name: "App",
             redirectUris: ["https://rp.test/callback"],
           });
-          const updated = yield* service.updateClient(client.clientId, {});
-          return { before: client, updated };
+          const updatedClient = yield* service.updateClient(client.clientId, {});
+          return { before: client, updated: updatedClient };
         }).pipe(Effect.provide(layer)),
       );
 

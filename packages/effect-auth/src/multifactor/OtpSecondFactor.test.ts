@@ -262,7 +262,7 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const { r1, r2, r3 } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* OtpSecondFactor.make({
@@ -278,20 +278,18 @@ describe("OtpSecondFactorService", () => {
           const r2 = yield* Effect.result(service.verify(challenge.token, "000002"));
           const r3 = yield* Effect.result(service.verify(challenge.token, "000003"));
 
-          return { r1, r2, r3 };
+          expect(r1._tag).toBe("Failure");
+          expect(r2._tag).toBe("Failure");
+          // Third attempt exhausts limit and deletes the record
+          expect(r3._tag).toBe("Failure");
+          assert(Result.isFailure(r3));
+          expect(r3.failure._tag).toBe("OtpSecondFactorError");
+          expect(r3.failure.message).toContain("attempts");
+          expect(MutableHashMap.size(otpRecords)).toBe(0);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(r1._tag).toBe("Failure");
-    expect(r2._tag).toBe("Failure");
-    // Third attempt exhausts limit and deletes the record
-    expect(r3._tag).toBe("Failure");
-    assert(Result.isFailure(r3));
-    expect(r3.failure._tag).toBe("OtpSecondFactorError");
-    expect(r3.failure.message).toContain("attempts");
-    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 
   it("compares at most maxAttempts of a concurrent burst of guesses", async () => {
@@ -416,7 +414,7 @@ describe("OtpSecondFactorService", () => {
     const sentOtps: Array<{ user: User; otp: string }> = [];
     const testContext = await makeTestContext();
 
-    const result = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* OtpSecondFactor.make({
@@ -436,15 +434,13 @@ describe("OtpSecondFactorService", () => {
             sessionAttributes: { device: "mobile" },
           });
 
-          return result;
+          expect(result.userId).toBe(testUser.id);
+          expect(result.session.userId).toBe(testUser.id);
+          expect(result.session.attributes).toMatchObject({ device: "mobile" });
+          expect(MutableHashMap.size(otpRecords)).toBe(0);
         }),
         testContext,
       ).pipe(Effect.provide(Hooks.Default)),
     );
-
-    expect(result.userId).toBe(testUser.id);
-    expect(result.session.userId).toBe(testUser.id);
-    expect(result.session.attributes).toMatchObject({ device: "mobile" });
-    expect(MutableHashMap.size(otpRecords)).toBe(0);
   });
 });

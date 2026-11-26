@@ -590,16 +590,15 @@ describe("clientIPLayer with a trusted header", () => {
         headers: { "cf-connecting-ip": "203.0.113.7", "x-forwarded-for": "6.6.6.6" },
       }),
     );
-    const ip = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { ip } = yield* ClientIP;
-        return ip;
+        expect(ip).toBe("203.0.113.7");
       }).pipe(
         Effect.provide(clientIPLayer(ClientIP.cloudflare)),
         Effect.provideService(HttpServerRequest.HttpServerRequest, request),
       ),
     );
-    expect(ip).toBe("203.0.113.7");
   });
 });
 

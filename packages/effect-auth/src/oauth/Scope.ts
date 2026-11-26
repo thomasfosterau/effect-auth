@@ -107,11 +107,11 @@ export const requireAllScopes = (
   const missing = Arr.filter(requiredArr, (scope) => !Arr.contains(set, scope));
   return Arr.match(missing, {
     onEmpty: () => Effect.void,
-    onNonEmpty: (missing) =>
+    onNonEmpty: (absent) =>
       Effect.fail(
         new Errors.InsufficientScopeError({
-          message: `Insufficient scope: missing [${missing.join(", ")}]`,
-          requiredScope: missing.join(" "),
+          message: `Insufficient scope: missing [${absent.join(", ")}]`,
+          requiredScope: absent.join(" "),
           grantedScopes: [...set],
         }),
       ),

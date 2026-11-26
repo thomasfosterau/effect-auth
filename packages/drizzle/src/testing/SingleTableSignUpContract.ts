@@ -196,9 +196,9 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
       const { signedUp, signedIn } = await harness.run(() =>
         writer.withService((service) =>
           Effect.gen(function* () {
-            const signedUp = yield* service.signUp({ email: ADA, password: PASSWORD });
-            const signedIn = yield* service.signIn({ email: ADA, password: PASSWORD });
-            return { signedUp, signedIn };
+            const signUpResult = yield* service.signUp({ email: ADA, password: PASSWORD });
+            const signInResult = yield* service.signIn({ email: ADA, password: PASSWORD });
+            return { signedUp: signUpResult, signedIn: signInResult };
           }),
         ),
       );
@@ -350,9 +350,9 @@ export const signUpContract = (label: string, nullable: boolean, harness: SignUp
         const { signedUp, signedIn } = await harness.run(() =>
           writer.withService((service) =>
             Effect.gen(function* () {
-              const signedUp = yield* service.signUp({ email: ADA, password: PASSWORD });
-              const signedIn = yield* service.signIn({ email: ADA, password: PASSWORD });
-              return { signedUp, signedIn };
+              const signUpResult = yield* service.signUp({ email: ADA, password: PASSWORD });
+              const signInResult = yield* service.signIn({ email: ADA, password: PASSWORD });
+              return { signedUp: signUpResult, signedIn: signInResult };
             }),
           ),
         );

@@ -565,7 +565,7 @@ export const make = (
     // and anonymous-user keys.
     const serverOnly = Option.match(yield* Effect.serviceOption(UserService), {
       onNone: () => DEFAULT_SERVER_ONLY_ATTRIBUTES,
-      onSome: (users) => users.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES,
+      onSome: (service) => service.serverOnlyAttributes ?? DEFAULT_SERVER_ONLY_ATTRIBUTES,
     });
 
     // Cached decoy hash — computed on first signIn call so that unknown-user

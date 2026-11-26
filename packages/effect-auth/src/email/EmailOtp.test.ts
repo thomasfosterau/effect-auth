@@ -729,7 +729,7 @@ describe("EmailOtpService", () => {
   it("should increment attempts on a wrong OTP and delete the record when the limit is hit", async () => {
     const testContext = await makeTestContext();
 
-    const { first, second, third, real } = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.provide(
         Effect.gen(function* () {
           const service = yield* EmailOtp.make({
@@ -746,21 +746,19 @@ describe("EmailOtpService", () => {
             service.signIn("guess@example.com", recorded(sentOtps).otp),
           );
 
-          return { first, second, third, real };
+          expect(first._tag).toBe("Failure");
+          expect(second._tag).toBe("Failure");
+          expect(third._tag).toBe("Failure");
+          expect(real._tag).toBe("Failure");
+          assert(Result.isFailure(real));
+          expect(real.failure._tag).toBe("EmailOtpError");
+          expect(MutableHashMap.size(otpRecords)).toBe(0);
+          expect(MutableHashMap.size(sessions)).toBe(0);
+          expect(MutableHashMap.size(users)).toBe(0);
         }),
         testContext,
       ).pipe(Effect.provide(TestHooks)),
     );
-
-    expect(first._tag).toBe("Failure");
-    expect(second._tag).toBe("Failure");
-    expect(third._tag).toBe("Failure");
-    expect(real._tag).toBe("Failure");
-    assert(Result.isFailure(real));
-    expect(real.failure._tag).toBe("EmailOtpError");
-    expect(MutableHashMap.size(otpRecords)).toBe(0);
-    expect(MutableHashMap.size(sessions)).toBe(0);
-    expect(MutableHashMap.size(users)).toBe(0);
   });
 
   it("should allow the correct OTP after fewer than maxAttempts failures", async () => {
@@ -1120,7 +1118,7 @@ describe("EmailOtpService", () => {
       const otpLength = 6;
       const guess = "0".repeat(otpLength);
 
-      const { marker, error } = await Effect.runPromise(
+      await Effect.runPromise(
         Effect.provide(
           Effect.gen(function* () {
             const service = yield* EmailOtp.make({
@@ -1139,19 +1137,21 @@ describe("EmailOtpService", () => {
                 ? Effect.asVoid(service.signIn("missing@example.com", guess))
                 : Effect.asVoid(service.check("missing@example.com", guess, purpose)),
             );
-            return { marker, error };
+
+            // The stub draws only the all-zero code, as the account holder's shows.
+            expect(sentOtps).toEqual([{ email: "member@example.com", otp: guess, purpose }]);
+            expect(marker).toBeDefined();
+            expect(marker?.otpHash).not.toBe(testPepper(guess));
+            expect(error).toMatchObject({
+              _tag: "EmailOtpError",
+              message: "Invalid or expired OTP",
+            });
+            expect(MutableHashMap.size(users)).toBe(1);
+            expect(createdWith).toEqual([]);
           }),
           testContext,
         ).pipe(Effect.provide(TestHooks)),
       );
-
-      // The stub draws only the all-zero code, as the account holder's shows.
-      expect(sentOtps).toEqual([{ email: "member@example.com", otp: guess, purpose }]);
-      expect(marker).toBeDefined();
-      expect(marker?.otpHash).not.toBe(testPepper(guess));
-      expect(error).toMatchObject({ _tag: "EmailOtpError", message: "Invalid or expired OTP" });
-      expect(MutableHashMap.size(users)).toBe(1);
-      expect(createdWith).toEqual([]);
     },
   );
 });
@@ -1324,9 +1324,9 @@ describe("EmailOtpService verification where send hides the account", () => {
             sendVerificationOtp: recordingSend,
           });
           yield* service.send("member@example.com", purpose);
-          const knownOps = storeOps.splice(0);
+          const knownAddressOps = storeOps.splice(0);
           yield* service.send("missing@example.com", purpose);
-          return { knownOps, unknownOps: storeOps.splice(0) };
+          return { knownOps: knownAddressOps, unknownOps: storeOps.splice(0) };
         }),
       );
 

@@ -199,12 +199,12 @@ const authorize = (
   action: string,
   resource: Entity.EntityRef,
   resolved: ReadonlyArray<Entity.Entity>,
-  follows: boolean,
+  viewerFollows: boolean,
 ): Promise<boolean> =>
   Effect.runPromise(
     Effect.gen(function* () {
       const authorizer = yield* Authorizer.Authorizer;
-      return yield* authorizer.check({ action, resource, context: { follows } });
+      return yield* authorizer.check({ action, resource, context: { follows: viewerFollows } });
     }).pipe(
       Authorizer.CurrentPrincipal.provide(principal),
       Effect.provide(Authorizer.Authorizer.layer({ policies: owned.policies })),
@@ -246,13 +246,17 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
           await authorize(principal.ref, "read", publicRow.ref, resolved, false),
           `${principal.ref.id} reads`,
         ).toBe(true);
-        await Arr.reduce(["update", "delete"], Promise.resolve(), async (previous, action) => {
-          await previous;
-          expect(
-            await authorize(principal.ref, action, publicRow.ref, resolved, false),
-            `${principal.ref.id} ${action}`,
-          ).toBe(false);
-        });
+        await Arr.reduce(
+          ["update", "delete"],
+          Promise.resolve(),
+          async (previousAction, action) => {
+            await previousAction;
+            expect(
+              await authorize(principal.ref, action, publicRow.ref, resolved, false),
+              `${principal.ref.id} ${action}`,
+            ).toBe(false);
+          },
+        );
       },
     );
   });
@@ -288,12 +292,12 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
     const cases = Arr.flatMap(["public", "followers", "private"] as const, (visibility) =>
       Arr.flatMap([false, true], (draft) =>
         Arr.flatMap(viewers, (viewer) =>
-          Arr.flatMap([false, true], (follows) =>
+          Arr.flatMap([false, true], (viewerFollows) =>
             Arr.map(["update", "delete"], (action) => ({
               visibility,
               draft,
               viewer,
-              follows,
+              follows: viewerFollows,
               action,
             })),
           ),
@@ -303,7 +307,7 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
     await Arr.reduce(
       cases,
       Promise.resolve(),
-      async (previous, { visibility, draft, viewer, follows, action }) => {
+      async (previous, { visibility, draft, viewer, follows: viewerFollows, action }) => {
         await previous;
         const resource = ownedByMember(`write-${visibility}-${draft}`, visibility, draft);
         const principal =
@@ -316,8 +320,8 @@ describe("handed to an Authorizer, the policies decide reads and nothing else", 
             : [Entity.entity(principal, { attributes: { role: viewer.role } })]),
         ];
         expect(
-          await authorize(principal, action, resource.ref, resolved, follows),
-          `${viewer?.id ?? "anonymous"} ${action}, ${visibility}, draft=${draft}, follows=${follows}`,
+          await authorize(principal, action, resource.ref, resolved, viewerFollows),
+          `${viewer?.id ?? "anonymous"} ${action}, ${visibility}, draft=${draft}, follows=${viewerFollows}`,
         ).toBe(false);
       },
     );

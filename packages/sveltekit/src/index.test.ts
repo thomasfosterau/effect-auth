@@ -176,9 +176,9 @@ describe("handle replays the lookup's Set-Cookie", () => {
   it("hands the lookup the event, for the client address", async () => {
     const seen: Array<string> = [];
     const hook = handle({
-      lookup: (_request, event) =>
+      lookup: (_request, requestEvent) =>
         Effect.sync(() => {
-          seen.push(event.getClientAddress());
+          seen.push(requestEvent.getClientAddress());
           return Option.none();
         }),
       failure: { mode: "closed" },
@@ -219,9 +219,9 @@ const spoofing = (getClientAddress: () => string = () => "203.0.113.9"): ActionE
   cookies: { set: () => undefined },
 });
 
-const sent = async (event: ActionEvent, extra?: AddressOptions): Promise<Headers> => {
+const sent = async (actionEvent: ActionEvent, extra?: AddressOptions): Promise<Headers> => {
   const seen: Array<Request> = [];
-  await submitCredential(event, undefined, {
+  await submitCredential(actionEvent, undefined, {
     ...handleOptions(extra),
     fetch: async (request: Request) => {
       seen.push(request);
@@ -717,8 +717,8 @@ describe("against the real auth handler", () => {
     });
     const hook = handle({
       cookies: { secure: false },
-      lookup: (request, event) =>
-        remoteSession.read(request, { clientAddress: event.getClientAddress() }),
+      lookup: (request, requestEvent) =>
+        remoteSession.read(request, { clientAddress: requestEvent.getClientAddress() }),
       failure: { mode: "closed" },
     });
     const locals: Locals = {};

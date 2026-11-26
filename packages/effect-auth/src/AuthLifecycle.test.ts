@@ -1040,7 +1040,7 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
     addEmailIdentifier(user.id, VICTIM, true);
     MutableHashMap.set(passwordHashes, user.id, "owner-hash");
 
-    const result = await Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const manager = yield* SessionService;
         yield* manager.createSession(user.id);
@@ -1048,14 +1048,15 @@ describe("AuthLifecycleService.verifyEmail on an address's first proof", () => {
         const { token } = yield* verification.createVerification(user.id, VICTIM);
         const service = yield* AuthLifecycle.make();
         const result = yield* service.verifyEmail({ token });
-        return result;
+
+        expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id))).toBe(
+          "owner-hash",
+        );
+        // The session held before and the one the verification issued.
+        expect(MutableHashMap.size(sessions)).toBe(2);
+        expect(result.session).toBeDefined();
       }).pipe(Effect.provide(context), Effect.provide(TestHooks)),
     );
-
-    expect(Option.getOrUndefined(MutableHashMap.get(passwordHashes, user.id))).toBe("owner-hash");
-    // The session held before and the one the verification issued.
-    expect(MutableHashMap.size(sessions)).toBe(2);
-    expect(result.session).toBeDefined();
   });
 });
 

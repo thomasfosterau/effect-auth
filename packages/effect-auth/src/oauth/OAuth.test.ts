@@ -766,14 +766,14 @@ describe("verifyIdToken", () => {
     };
     const calls = await withFetch(
       () => json(key.jwks),
-      async (calls) => {
+      async (recorded) => {
         await runPromiseHttp(
           Effect.gen(function* () {
             yield* verifyIdToken(token, params);
             yield* verifyIdToken(token, params);
           }).pipe(Effect.provideServiceEffect(RemoteJwks.KeySets, RemoteJwks.makeKeySets())),
         );
-        return calls.length;
+        return recorded.length;
       },
     );
     expect(calls).toBe(1);
@@ -1430,8 +1430,8 @@ const makeTestProvider = (name: string) =>
     false,
   );
 
-const makeState = (provider: string, stateKey = "state-123"): OAuthState => ({
-  state: stateKey,
+const makeState = (provider: string, stateValue = "state-123"): OAuthState => ({
+  state: stateValue,
   provider,
   expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 60_000,
   createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),

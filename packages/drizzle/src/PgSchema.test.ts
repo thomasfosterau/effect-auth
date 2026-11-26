@@ -118,7 +118,7 @@ const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier =
 
 /** Insert a user row directly — `UserStore` is read-only by contract. */
 const seedUser = (
-  db: PgliteDatabase,
+  database: PgliteDatabase,
   tables: Tables,
   row: Partial<Tables["users"]["$inferInsert"]> = {},
 ): Effect.Effect<string> =>
@@ -126,7 +126,7 @@ const seedUser = (
     Effect.tryPromise({
       try: async () => {
         const id = row.id ?? "user-1";
-        await db
+        await database
           .insert(tables.users)
           .values({
             id,
@@ -147,9 +147,9 @@ const seedUser = (
 
 describe("Schema", () => {
   it("drives every store from custom table names", async () => {
-    const result = await runWithCustomNames((db, tables) =>
+    const result = await runWithCustomNames((database, tables) =>
       Effect.gen(function* () {
-        yield* seedUser(db, tables, { id: "user-1" });
+        yield* seedUser(database, tables, { id: "user-1" });
 
         const sessions = yield* Auth.SessionStore;
         const users = yield* Auth.UserStore;
@@ -161,7 +161,7 @@ describe("Schema", () => {
         const rows = yield* Effect.orDie(
           Effect.tryPromise({
             try: () =>
-              db.execute(
+              database.execute(
                 `SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'public' ORDER BY table_name`,
               ),
