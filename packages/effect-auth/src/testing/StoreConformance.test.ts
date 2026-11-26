@@ -188,7 +188,7 @@ describe("a broken store fails its suite", () => {
         Effect.map(Effect.service(IdentifierStore), (inner) => ({
           ...inner,
           create: (identifier: Identifier) =>
-            inner.create(identifier).pipe(Effect.catch(() => Effect.succeed(identifier))),
+            inner.create(identifier).pipe(Effect.orElseSucceed(() => identifier)),
         })),
       ).pipe(Layer.provide(IdentifierStoreKV), Layer.provide(KeyValueStore.layerMemory)),
     );

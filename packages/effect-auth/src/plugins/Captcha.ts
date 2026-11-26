@@ -224,7 +224,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
             // An answer that does not decode fails, like any other failure.
             Effect.flatMap(decodeAnswer),
             Effect.map((answer) => accepts(config, endpoint, answer)),
-            Effect.catch(() => Effect.succeed(false)),
+            Effect.orElseSucceed(() => false),
           );
           if (!passed) {
             return yield* new CaptchaError({ message: "Captcha verification failed" });
