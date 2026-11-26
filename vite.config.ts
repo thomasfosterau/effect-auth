@@ -48,12 +48,12 @@ export default defineConfig({
       // re-report all ~560 call sites as warnings.
       "effecttsgo/unstable-api-usage": "off",
       // oxlint's `categories` below also cover the `effecttsgo` plugin's own
-      // rules. These three are outside the preset's `recommended`, so they stay
-      // at the level they report at without the categories: `strict` only
-      // (500 `Effect.provide` sites), and two awareness warnings.
+      // rules. These are outside the preset's `recommended`, so they stay at
+      // the level they report at without the categories: `strict` only (500
+      // `Effect.provide` sites), and an awareness warning.
       "effecttsgo/strict-effect-provide": "off",
       "effecttsgo/any-unknown-in-error-context": "warn",
-      "effecttsgo/unsafe-effect-type-assertion": "warn",
+      "effecttsgo/unsafe-effect-type-assertion": "error",
 
       // ---- oxlint plugins (`correctness` / `suspicious` / `perf`) ----------
       // `_tag` is the discriminant of every Effect tagged union and error
