@@ -83,7 +83,7 @@ describe("AccountLockoutPlugin", () => {
       { maxAttempts: 3, lockoutDurationMs: 60_000 },
       {
         ...inner,
-        get: (key) => Effect.flatMap(inner.get(key), (r) => Effect.as(Effect.yieldNow, r)),
+        get: (key) => Effect.tap(inner.get(key), () => Effect.yieldNow),
       },
     );
     const results = await Promise.all(
