@@ -13,6 +13,24 @@ import type * as Types from "./Types.ts";
 const decodePublicJwk = Schema.decodeUnknownEffect(Jwk.PublicJwk);
 
 /**
+ * Whether `jwk` is a key for `algorithm`: `kty` `RSA` for RS256, `EC` on
+ * `P-256` for ES256, `OKP` on `Ed25519` for EdDSA, and a declared `alg`, when
+ * present, equal to it. A key of another type must never verify a token
+ * whose header names this algorithm; callers that take a key from a set check
+ * this first.
+ */
+export const jwkSuitsAlgorithm = (
+  algorithm: "RS256" | "ES256" | "EdDSA",
+  jwk: Types.JsonObject,
+): boolean => {
+  const declared = jwk["alg"];
+  if (declared !== undefined && declared !== algorithm) return false;
+  if (algorithm === "RS256") return jwk["kty"] === "RSA";
+  if (algorithm === "ES256") return jwk["kty"] === "EC" && jwk["crv"] === "P-256";
+  return jwk["kty"] === "OKP" && jwk["crv"] === "Ed25519";
+};
+
+/**
  * Whether `token`'s signature verifies under the public JWK `jwk` for
  * `algorithm`. A signature that does not verify, or a header naming another
  * algorithm, is `false`; a JWK that is not a usable public key, or a token

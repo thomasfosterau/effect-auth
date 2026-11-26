@@ -21,7 +21,8 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Digest } from "effect/crypto";
 import { Hex } from "effect/encoding";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpClientRequest } from "effect/http";
+import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import {
   type ChangePasswordArgs,
@@ -59,7 +60,7 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
 
   return makePlugin(
     Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
+      const outbound = yield* OutboundHttp.resolve();
       const digest = yield* Digest.Digest;
 
       const sha1Upper = (password: string): Effect.Effect<string> =>
@@ -75,11 +76,11 @@ export const HaveIBeenPwnedPlugin = (config: HibpConfig = {}) => {
           const request = HttpClientRequest.get(`${RANGE_URL}/${prefix}`).pipe(
             HttpClientRequest.setHeader("Add-Padding", "true"),
           );
-          return yield* client.execute(request).pipe(
+          return yield* OutboundHttp.send(outbound.client, request, outbound.limits).pipe(
             // A 429, a 5xx or a challenge page has no suffix lines: read as
             // a count of 0 it would allow every password.
-            Effect.flatMap(HttpClientResponse.filterStatusOk),
-            Effect.flatMap((response) => response.text),
+            Effect.filterOrFail(OutboundHttp.isOk),
+            Effect.map((response) => response.body),
             Effect.timeout(timeout),
             Effect.map((body) =>
               Arr.findFirst(body.split("\n"), (line) => {

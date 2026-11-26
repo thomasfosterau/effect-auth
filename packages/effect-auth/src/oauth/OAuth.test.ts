@@ -1,7 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { createHash } from "node:crypto";
 import { testCryptoLayer, type TestCryptoServices } from "../testing/TestCrypto.ts";
-import { Cause, DateTime, Effect, Exit, Layer, MutableHashMap, Redacted } from "effect";
+import { Cause, DateTime, Effect, Exit, Layer, Logger, MutableHashMap, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -17,6 +17,7 @@ import {
   EmailInUseError,
   OAuthLastCredentialError,
   OAuthEmailMismatchError,
+  OAuthMissingEmailError,
 } from "../Errors.ts";
 import * as Cipher from "../Cipher.ts";
 import { testJwsKeyPair, testVerifyJws } from "../testing/TestJws.ts";
@@ -82,6 +83,7 @@ import * as RootSecret from "../RootSecret.ts";
 import * as OAuth from "./OAuth.ts";
 import type { HttpClient } from "effect/http";
 import { runPromiseExitHttp, runPromiseHttp } from "../testing/HttpClient.ts";
+import * as RemoteJwks from "../RemoteJwks.ts";
 
 /** The key the service stores a state under: its SHA-256 digest. */
 const stateKey = (state: string): string => createHash("sha256").update(state).digest("hex");
@@ -393,6 +395,25 @@ describe("OAuth provider bodies", () => {
       ),
     );
     expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+  });
+
+  it("logs an upstream error body and keeps it out of the error", async () => {
+    const lines: Array<string> = [];
+    const collector = Logger.make((options) => void lines.push(Logger.formatJson.log(options)));
+    const error = await withFetch(
+      () =>
+        new Response('{"error":"invalid_grant","internal":"db-7 stack trace"}', { status: 400 }),
+      () =>
+        runPromiseHttp(
+          Effect.flip(GitLabProvider(CLIENT).exchangeCode("the-code")).pipe(
+            Effect.provide(Logger.layer([collector])),
+          ),
+        ),
+    );
+    expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "gitlab" });
+    expect(error.message).toContain("400");
+    expect(error.message).not.toContain("db-7");
+    expect(lines.some((line) => line.includes("db-7"))).toBe(true);
   });
 
   it("reads a token response as providers send it", () =>
@@ -708,6 +729,31 @@ describe("verifyIdToken", () => {
       expect(claims["sub"]).toBe("user-1");
       expect(claims["email"]).toBe("u@idp.com");
     });
+  });
+
+  it("fetches the JWKS once per endpoint where a service caches key sets", async () => {
+    const key = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", key.privateKey, baseClaims(now));
+    const params = {
+      provider: "idp",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      audience: "client-123",
+      now,
+    };
+    const calls = await withFetch(
+      () => json(key.jwks),
+      async (calls) => {
+        await runPromiseHttp(
+          Effect.gen(function* () {
+            yield* verifyIdToken(token, params);
+            yield* verifyIdToken(token, params);
+          }).pipe(Effect.provideServiceEffect(RemoteJwks.KeySets, RemoteJwks.makeKeySets())),
+        );
+        return calls.length;
+      },
+    );
+    expect(calls).toBe(1);
   });
 
   const expectFailure = async (
@@ -1590,6 +1636,45 @@ describe("OAuthService linking controls", () => {
     );
 
     expect(account.userId).toBe("u1");
+  });
+
+  it("a provider without email is link-only: it links, then signs that user in, but never signs up", async () => {
+    const user = makeUser();
+    const identifiers = makeIdentifiers({ userId: user.id, email: "user@example.com" });
+    const stored = MutableHashMap.empty<string, OAuthAccount>();
+    const minted: Array<string> = [];
+    const layer = Layer.mergeAll(
+      makeStateLayer(makeState("reddit")),
+      makeAccountLayer(undefined, stored),
+      makeUserLayer(user),
+      identifiers.layer,
+      makeCoreUserLayer(user),
+      makeSessionLayer(user.id, minted),
+      noPasswordsLayer,
+      testCryptoLayer,
+    );
+    const service = await runPromiseHttp(
+      OAuth.make({ reddit: makeTestProvider("reddit") }).pipe(Effect.provide(layer)),
+    );
+    const noEmail = (providerId: string) => (url: string) =>
+      url.includes("/token") ? json(mockTokenResponse) : json({ id: providerId, name: "Snoo" });
+
+    const strangerError = await withFetch(noEmail("someone-else"), () =>
+      Effect.runPromise(Effect.flip(service.signInWithCallback("state-123", "code"))),
+    );
+    expect(strangerError).toBeInstanceOf(OAuthMissingEmailError);
+    expect(minted).toEqual([]);
+
+    const linked = await withFetch(noEmail("snoo-1"), () =>
+      Effect.runPromise(service.linkAccount(user.id, "reddit", "code", "state-123")),
+    );
+    expect(linked.userId).toBe(user.id);
+
+    const signedIn = await withFetch(noEmail("snoo-1"), () =>
+      Effect.runPromise(service.signInWithCallback("state-123", "code")),
+    );
+    expect(signedIn.user.id).toBe(user.id);
+    expect(signedIn.isNewUser).toBe(false);
   });
 
   it("allowDifferentEmails: false succeeds when emails match", async () => {
@@ -2680,5 +2765,188 @@ describe("OAuthService first proof over the real services", () => {
     expect(outcome.apiKeys).toEqual([]);
     expect(outcome.multiFactor).toBeNull();
     expect(outcome.trustedDevice).toBeNull();
+  });
+});
+
+describe("OAuth presets that read the address", () => {
+  const profileFrom = (
+    oauthProvider: OAuthProvider,
+    handler: (url: string, init: RequestInit | undefined) => Response,
+  ) =>
+    withFetch(handler, () =>
+      runPromiseHttp(oauthProvider.getProfile({ access_token: "at", token_type: "bearer" })),
+    );
+
+  it("google: reads verified_email as email_verified", async () => {
+    const info = await profileFrom(OAuth.GoogleProvider(CLIENT), () =>
+      json({ id: "g-1", email: "g@gmail.com", verified_email: true, name: "G" }),
+    );
+    expect(info).toMatchObject({ id: "g-1", email: "g@gmail.com", email_verified: true });
+  });
+
+  it("microsoft: takes mail, else an address-shaped userPrincipalName, never verified", async () => {
+    const withMail = await profileFrom(OAuth.MicrosoftProvider(CLIENT), () =>
+      json({ id: "m-1", mail: "m@contoso.com", userPrincipalName: "m@contoso.onmicrosoft.com" }),
+    );
+    expect(withMail).toMatchObject({ id: "m-1", email: "m@contoso.com" });
+    expect(withMail.email_verified).toBeUndefined();
+
+    const upnOnly = await profileFrom(OAuth.MicrosoftProvider(CLIENT), () =>
+      json({ id: "m-2", mail: null, userPrincipalName: "n@contoso.com", displayName: "N" }),
+    );
+    expect(upnOnly).toMatchObject({ id: "m-2", email: "n@contoso.com", name: "N" });
+
+    const guest = await profileFrom(OAuth.MicrosoftProvider(CLIENT), () =>
+      json({ id: "m-3", userPrincipalName: "g_example.com#EXT#@contoso.onmicrosoft.com" }),
+    );
+    expect(guest.email).toBeUndefined();
+  });
+
+  it("github: takes the primary address from /user/emails with its verification", async () => {
+    const info = await profileFrom(OAuth.GitHubProvider(CLIENT), (url) =>
+      url.endsWith("/user/emails")
+        ? new Response(
+            encodeJson([
+              { email: "old@e.com", primary: false, verified: true },
+              { email: "private@users.noreply.github.com", primary: true, verified: true },
+            ]),
+            { headers: { "content-type": "application/json" } },
+          )
+        : json({ id: 42, login: "octo", email: null }),
+    );
+    expect(info).toMatchObject({
+      id: "42",
+      name: "octo",
+      email: "private@users.noreply.github.com",
+      email_verified: true,
+    });
+  });
+
+  it("github: keeps the public address, unverified, when the lookup fails", async () => {
+    const info = await profileFrom(OAuth.GitHubProvider(CLIENT), (url) =>
+      url.endsWith("/user/emails")
+        ? new Response("forbidden", { status: 403 })
+        : json({ id: 42, login: "octo", email: "public@e.com" }),
+    );
+    expect(info).toMatchObject({ id: "42", email: "public@e.com" });
+    expect(info.email_verified).toBeUndefined();
+  });
+
+  it("reads a string email_verified (Apple's) as a boolean", async () => {
+    const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+    const key = await makeSigningKey("ES256");
+    const idToken = await signIdToken("ES256", key.privateKey, {
+      ...baseClaims(now),
+      email_verified: "true",
+    });
+    const idTokenProvider = OAuth.provider("apple-like", {
+      ...CLIENT,
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      jwksEndpoint: JWKS_URL,
+      issuer: "https://idp",
+      getUserInfoFromIdToken: true,
+      scopes: [],
+    });
+    const info = await withFetch(
+      () => json(key.jwks),
+      () =>
+        runPromiseHttp(
+          idTokenProvider.getProfile({
+            access_token: "at",
+            token_type: "bearer",
+            id_token: idToken,
+          }),
+        ),
+    );
+    expect(info.email_verified).toBe(true);
+  });
+});
+
+describe("OAuth profile and id_token refusals", () => {
+  const now = 1_700_000_000_000;
+
+  it("refuses a profile without an account id", async () => {
+    const error = await withFetch(
+      () => json({ error: "invalid_token" }),
+      () =>
+        runPromiseHttp(
+          Effect.flip(
+            FacebookProvider(CLIENT).getProfile({ access_token: "at", token_type: "bearer" }),
+          ),
+        ),
+    );
+    expect(error).toMatchObject({ _tag: "OAuthProviderError", provider: "facebook" });
+    expect(error.message).toContain("account id");
+  });
+
+  it("refuses an id_token without exp", async () => {
+    const key = await makeSigningKey("ES256");
+    const { exp: _exp, ...claims } = baseClaims(now);
+    const token = await signIdToken("ES256", key.privateKey, claims);
+    const error = await withFetch(
+      () => json(key.jwks),
+      () =>
+        runPromiseHttp(
+          Effect.flip(
+            verifyIdToken(token, {
+              provider: "idp",
+              jwksEndpoint: JWKS_URL,
+              issuer: "https://idp",
+              now,
+            }),
+          ),
+        ),
+    );
+    expect(error.message).toBe("id_token has no exp");
+  });
+
+  it("refuses an id_token whose key is not of the header's algorithm", async () => {
+    const rsa = await makeSigningKey("RS256");
+    const ec = await makeSigningKey("ES256");
+    const token = await signIdToken("ES256", ec.privateKey, baseClaims(now));
+    // The set holds only an RSA key under the token's kid.
+    const error = await withFetch(
+      () => json(rsa.jwks),
+      () =>
+        runPromiseHttp(
+          Effect.flip(
+            verifyIdToken(token, {
+              provider: "idp",
+              jwksEndpoint: JWKS_URL,
+              issuer: "https://idp",
+              now,
+            }),
+          ),
+        ),
+    );
+    expect(error.message).toBe("id_token key is not a ES256 key");
+  });
+
+  it("refuses to read an id_token profile without an issuer to check", async () => {
+    const key = await makeSigningKey("ES256");
+    const idToken = await signIdToken(
+      "ES256",
+      key.privateKey,
+      baseClaims(DateTime.toEpochMillis(DateTime.nowUnsafe())),
+    );
+    const noIssuer = OAuth.provider("no-issuer", {
+      ...CLIENT,
+      authorizationEndpoint: "https://idp/authorize",
+      tokenEndpoint: "https://idp/token",
+      jwksEndpoint: JWKS_URL,
+      getUserInfoFromIdToken: true,
+      scopes: [],
+    });
+    const error = await withFetch(
+      () => json(key.jwks),
+      () =>
+        runPromiseHttp(
+          Effect.flip(
+            noIssuer.getProfile({ access_token: "at", token_type: "bearer", id_token: idToken }),
+          ),
+        ),
+    );
+    expect(error.message).toContain("issuer");
   });
 });

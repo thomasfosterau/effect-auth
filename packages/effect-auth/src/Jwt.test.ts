@@ -2,9 +2,10 @@ import { assert, describe, it, expect, beforeEach, beforeAll } from "vite-plus/t
 import { testCryptoContext, type TestCryptoServices } from "./testing/TestCrypto.ts";
 import { Clock, Context, DateTime, Effect, Layer, Redacted, Result, type Scope } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http";
 import { Jwk, Jwt as JoseJwt } from "effect/jose";
 import {
   generateKeyPair,
@@ -858,6 +859,57 @@ describe("RemoteJwksVerifier", () => {
     assert(Result.isFailure(result));
     expect(result.failure._tag).toBe("JwtError");
     expect(result.failure.message).toContain("kid");
+  });
+
+  it("fetches once for a burst of forged kids, and keeps verifying real ones", async () => {
+    const [hdr, pay, sig] = jwsSegments(signedToken.split("."));
+    const parsedHeader = decodeJsonObject(Buffer.from(hdr, "base64url").toString("utf8"));
+    const forged = (kid: string) =>
+      `${Buffer.from(encodeJson({ ...parsedHeader, kid })).toString("base64url")}.${pay}.${sig}`;
+    requested.splice(0, requested.length);
+
+    const subject = await runVerifier(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: jwksUrl,
+          issuer: baseConfig.issuer,
+        });
+        yield* Effect.forEach(
+          Arr.makeBy(20, (i) => forged(`forged-${i}`)),
+          (token) => Effect.flip(verifier.verify(token)),
+          { concurrency: 1 },
+        );
+        return (yield* verifier.verify(signedToken))["sub"];
+      }),
+    );
+
+    expect(subject).toBe("user-1");
+    expect(requested).toEqual([jwksUrl]);
+  });
+
+  it("asks fetch not to follow a redirect from the JWKS URL", async () => {
+    const redirectModes: Array<string | undefined> = [];
+    const recordingClient = HttpClient.make((request, _url, _signal, fiber) => {
+      const init = Context.getOption(fiber.context, FetchHttpClient.RequestInit);
+      redirectModes.push(Option.isSome(init) ? init.value.redirect : undefined);
+      return issuerClient.execute(request);
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const verifier = yield* Jwt.remoteJwksVerifier({
+          jwksUri: rsaJwksUrl,
+          issuer: baseConfig.issuer,
+        });
+        return yield* verifier.verify(rsaSigned(rsaClaims()));
+      }).pipe(
+        Effect.scoped,
+        Effect.provideService(HttpClient.HttpClient, recordingClient),
+        Effect.provide(testCryptoContext()),
+      ),
+    );
+
+    expect(redirectModes).toEqual(["manual"]);
   });
 
   it("should reject a token with a future nbf via the remote verifier", async () => {

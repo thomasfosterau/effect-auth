@@ -40,8 +40,9 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpClientRequest } from "effect/http";
 import { ClientIP } from "../ClientIP.ts";
+import * as OutboundHttp from "../OutboundHttp.ts";
 import type { SignUpInput } from "../email/EmailPassword.ts";
 import {
   type AuthenticateAttempt,
@@ -196,7 +197,7 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
       if (problem !== undefined) {
         return yield* Effect.die(new CaptchaConfigError({ message: problem }));
       }
-      const client = yield* HttpClient.HttpClient;
+      const outbound = yield* OutboundHttp.resolve();
 
       const verify = (
         endpoint: CaptchaEndpoint,
@@ -208,23 +209,23 @@ export const CaptchaPlugin = (config: CaptchaConfig) => {
           }
           const clientIp = yield* Effect.serviceOption(ClientIP);
           const remoteip = Option.isSome(clientIp) ? clientIp.value.ip : undefined;
-          const passed = yield* client
-            .execute(
-              HttpClientRequest.post(url).pipe(
-                HttpClientRequest.bodyUrlParams({
-                  secret: Redacted.value(config.secretKey),
-                  response: token,
-                  ...(remoteip !== undefined && { remoteip }),
-                }),
-              ),
-            )
-            .pipe(
-              Effect.flatMap((response) => response.json),
-              // An answer that does not decode fails, like any other failure.
-              Effect.flatMap(decodeAnswer),
-              Effect.map((answer) => accepts(config, endpoint, answer)),
-              Effect.catch(() => Effect.succeed(false)),
-            );
+          const passed = yield* OutboundHttp.send(
+            outbound.client,
+            HttpClientRequest.post(url).pipe(
+              HttpClientRequest.bodyUrlParams({
+                secret: Redacted.value(config.secretKey),
+                response: token,
+                ...(remoteip !== undefined && { remoteip }),
+              }),
+            ),
+            outbound.limits,
+          ).pipe(
+            Effect.flatMap((response) => OutboundHttp.parseJson(response.body)),
+            // An answer that does not decode fails, like any other failure.
+            Effect.flatMap(decodeAnswer),
+            Effect.map((answer) => accepts(config, endpoint, answer)),
+            Effect.catch(() => Effect.succeed(false)),
+          );
           if (!passed) {
             return yield* new CaptchaError({ message: "Captcha verification failed" });
           }

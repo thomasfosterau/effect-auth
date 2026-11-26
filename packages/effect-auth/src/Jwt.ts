@@ -34,11 +34,12 @@ import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { Aead, Digest, Kdf, SecureRandom, Signature } from "effect/crypto";
 import { Base64Url } from "effect/encoding";
-import { FetchHttpClient, type HttpClient } from "effect/http";
+import { FetchHttpClient, HttpClient } from "effect/http";
 import { JoseError, Jwe, Jwk, Jwks as JoseJwks, Jwt as JoseJwt } from "effect/jose";
 import { optionalSecret } from "./OptionalSecretConfig.ts";
 import type { TokenCipher } from "./Cipher.ts";
 import type * as Errors from "./Errors.ts";
+import * as OutboundHttp from "./OutboundHttp.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as RootSecret from "./RootSecret.ts";
 import * as Types from "./Types.ts";
@@ -660,10 +661,14 @@ export const remoteJwksVerifier = (
   HttpClient.HttpClient | Scope.Scope | Signature.Signature
 > =>
   Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
     const keySet = yield* JoseJwks.makeRemote({
       url: config.jwksUri,
       timeToLive: Duration.millis(config.cacheTtlMs ?? 5 * 60 * 1000),
-    }).pipe(Effect.mapError(toJwtError));
+    }).pipe(
+      Effect.mapError(toJwtError),
+      Effect.provideService(HttpClient.HttpClient, OutboundHttp.withoutRedirects(client)),
+    );
     const signature = yield* Signature.Signature;
     const options: JoseJwt.VerifyWithKeySetOptions = {
       typ: config.tokenType ?? ACCESS_TOKEN_TYPE,

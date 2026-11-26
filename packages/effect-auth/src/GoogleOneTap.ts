@@ -29,7 +29,8 @@
 import { Clock, Context, Data, DateTime, Effect, Layer } from "effect";
 import * as P from "effect/Predicate";
 import { Digest, SecureRandom } from "effect/crypto";
-import { HttpClient } from "effect/http";
+import type { HttpClient } from "effect/http";
+import * as OutboundHttp from "./OutboundHttp.ts";
 import type { AuthError } from "./Errors.ts";
 import type { HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -176,7 +177,7 @@ export const make = (
   | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
+    const outbound = yield* OutboundHttp.resolve();
     const jwksEndpoint = config.jwksEndpoint ?? GOOGLE_JWKS_ENDPOINT;
     const issuers = config.issuers ?? GOOGLE_ISSUERS;
     const nonceTtlMs = config.nonceTtlMs ?? 600_000;
@@ -236,7 +237,7 @@ export const make = (
           audience: config.clientId,
           nonce: yield* hashNonce(nonce),
         }).pipe(
-          Effect.provideService(HttpClient.HttpClient, httpClient),
+          OutboundHttp.provide(outbound),
           Effect.mapError((e) => new GoogleOneTapError({ message: e.message, cause: e })),
         );
 

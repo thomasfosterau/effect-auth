@@ -39,8 +39,11 @@
 import { Clock, Context, Data, DateTime, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
-import { HttpClient } from "effect/http";
+import type { HttpClient } from "effect/http";
+import { idpUrlPolicy } from "./IdpUrlPolicy.ts";
+import * as OutboundHttp from "./OutboundHttp.ts";
 import { AuthError } from "./Errors.ts";
 import { constantTimeHashEqual } from "./TokenHash.ts";
 import { IdentifierStore, findIdentifierOwner } from "./Identifier.ts";
@@ -429,6 +432,16 @@ export interface SsoConfig {
    * IdP whose users start from its portal and accept that risk.
    */
   readonly allowIdpInitiated?: boolean;
+  /**
+   * Let OIDC connections name an IdP on a private network. Off by default:
+   * the discovery, token, userinfo and JWKS URLs must be `https` and must not
+   * name a private, loopback, link-local or internal host, checked when a
+   * connection is registered and again before every request. Hosts are
+   * checked as written, not resolved, so a public name pointing at a
+   * private address is the egress network's to stop. On, any `http` or
+   * `https` URL without credentials is accepted.
+   */
+  readonly allowPrivateIdpUrls?: boolean;
 }
 
 /** Options for {@link SsoService}'s `handleSamlCallback`. */
@@ -490,7 +503,8 @@ export const make = (
   | HttpClient.HttpClient
 > =>
   Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
+    const urlPolicy = idpUrlPolicy(config.allowPrivateIdpUrls ?? false);
+    const outbound = yield* OutboundHttp.resolve(urlPolicy);
     const defaultScopes = config.defaultScopes ?? ["openid", "email", "profile"];
     const samlRequestTtl = config.samlRequestTtl ?? 10 * 60 * 1000;
     const samlClockSkewMs = config.samlClockSkewMs ?? defaultClockSkewMs;
@@ -813,7 +827,7 @@ export const make = (
       ) {
         const discovered = input.discover
           ? yield* discoverOAuthEndpoints(input.issuer).pipe(
-              Effect.provideService(HttpClient.HttpClient, httpClient),
+              OutboundHttp.provide(outbound),
               Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
             )
           : undefined;
@@ -829,6 +843,15 @@ export const make = (
         }
         const userInfoEndpoint = input.userInfoEndpoint ?? discovered?.userInfoEndpoint;
         const jwksEndpoint = input.jwksEndpoint ?? discovered?.jwksEndpoint;
+        // The endpoints this service fetches from; each request checks its
+        // URL again, so a record written another way is held to it too.
+        const refusal = Arr.findFirst(
+          [tokenEndpoint, userInfoEndpoint, jwksEndpoint].filter(P.isNotUndefined),
+          (url) => Option.fromUndefinedOr(urlPolicy(url)),
+        );
+        if (Option.isSome(refusal)) {
+          return yield* new SsoError({ message: refusal.value });
+        }
 
         const provider: OidcSsoProvider = {
           id: yield* randomId(),
@@ -981,9 +1004,12 @@ export const make = (
         // Spend the state before anything else: `consume` is an atomic
         // get-and-delete, so a replayed or concurrent callback carrying the
         // same state is refused, and a failed exchange leaves nothing to retry.
-        const stateEntry = yield* stateStore
-          .consume(state)
-          .pipe(Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })));
+        const stateEntry = yield* stateStore.consume(state).pipe(
+          Effect.tapError((cause) =>
+            Effect.logError("SSO state store failed while spending a callback state", cause),
+          ),
+          Effect.mapError(() => new SsoError({ message: "SSO state not found or expired" })),
+        );
         if (stateEntry === null) {
           return yield* new SsoError({
             message: "SSO state not found, expired or already used",
@@ -1017,7 +1043,7 @@ export const make = (
         const codeVerifier =
           stateEntry.codeVerifier ?? (provider.usePKCE ? yield* deriveVerifier(state) : undefined);
         const tokens = yield* oauth.exchangeCode(code, codeVerifier).pipe(
-          Effect.provideService(HttpClient.HttpClient, httpClient),
+          OutboundHttp.provide(outbound),
           Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
         );
         const profile = yield* oauth
@@ -1025,7 +1051,7 @@ export const make = (
             ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
           })
           .pipe(
-            Effect.provideService(HttpClient.HttpClient, httpClient),
+            OutboundHttp.provide(outbound),
             Effect.mapError((e) => new SsoError({ message: e.message, cause: e })),
           );
 

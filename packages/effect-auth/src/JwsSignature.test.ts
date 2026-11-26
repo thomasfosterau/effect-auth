@@ -7,7 +7,7 @@ import { Effect, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { Base64Url } from "effect/encoding";
-import { signWithPkcs8, verifiesWithJwk } from "./JwsSignature.ts";
+import { jwkSuitsAlgorithm, signWithPkcs8, verifiesWithJwk } from "./JwsSignature.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import * as Rfc7515 from "./testing/Rfc7515.ts";
 import {
@@ -130,5 +130,30 @@ describe("signWithPkcs8", () => {
       ),
     );
     expect(Buffer.from(token.split(".")[2] ?? "", "base64url")).toHaveLength(64);
+  });
+});
+
+describe("jwkSuitsAlgorithm", () => {
+  const ec = publicJwk("ES256");
+  const ed = publicJwk("EdDSA");
+  const rsa = publicJwk("RS256");
+
+  it("accepts each algorithm's own key type", () => {
+    expect(jwkSuitsAlgorithm("ES256", ec)).toBe(true);
+    expect(jwkSuitsAlgorithm("EdDSA", ed)).toBe(true);
+    expect(jwkSuitsAlgorithm("RS256", rsa)).toBe(true);
+  });
+
+  it.each([
+    ["RS256", ec],
+    ["RS256", ed],
+    ["ES256", rsa],
+    ["ES256", ed],
+    ["ES256", { ...ec, crv: "P-384" }],
+    ["EdDSA", ec],
+    ["EdDSA", { ...ed, crv: "X25519" }],
+    ["ES256", { ...ec, alg: "RS256" }],
+  ] as const)("refuses %s with a mismatched key", (algorithm, jwk) => {
+    expect(jwkSuitsAlgorithm(algorithm, jwk)).toBe(false);
   });
 });

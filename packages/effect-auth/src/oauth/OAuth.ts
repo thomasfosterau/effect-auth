@@ -7,16 +7,18 @@
 
 import { Clock, Config, Context, DateTime, Effect, Formatter, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
-import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
-import { signWithPkcs8, verifiesWithJwk } from "../JwsSignature.ts";
+import { jwkSuitsAlgorithm, signWithPkcs8, verifiesWithJwk } from "../JwsSignature.ts";
 import * as Obs from "../Observability.ts";
 import * as OutboundHttp from "../OutboundHttp.ts";
+import * as RemoteJwks from "../RemoteJwks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import * as RootSecret from "../RootSecret.ts";
 import { tokenHasher } from "../TokenHash.ts";
@@ -72,7 +74,8 @@ export interface OAuthProviderConfig {
    * Resolve the user profile from the OIDC `id_token` returned by the token
    * endpoint instead of calling {@link userInfoEndpoint}. Required for
    * providers that only expose identity via the id_token (e.g. Apple).
-   * Needs {@link jwksEndpoint} and {@link issuer} for verification.
+   * Needs {@link jwksEndpoint} and {@link issuer} for verification; without
+   * either, every sign-in fails.
    */
   readonly getUserInfoFromIdToken?: boolean;
   /** JWKS URL used to verify the OIDC `id_token` signature. */
@@ -414,29 +417,17 @@ const invalidBody = (provider: string, what: string, cause?: unknown) =>
     ...(cause !== undefined && { cause }),
   });
 
-/** A response body as text. A failed read is an `OAuthProviderError`. */
-const readText = (
-  provider: string,
-  response: HttpClientResponse.HttpClientResponse,
-  what = "response body",
-): Effect.Effect<string, OAuthProviderError> =>
-  response.text.pipe(Effect.mapError((cause) => invalidBody(provider, what, cause)));
-
-const decodeJsonString = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
-
 /**
- * A response body parsed as JSON. A failed read or a body that is not JSON is
- * an `OAuthProviderError`, never a defect: the body is outside input.
+ * A response body parsed as JSON. A body that is not JSON is an
+ * `OAuthProviderError`, never a defect: the body is outside input.
  */
 const readJson = (
   provider: string,
-  response: HttpClientResponse.HttpClientResponse,
+  response: OutboundHttp.Response,
   what = "response body",
 ): Effect.Effect<Schema.Json, OAuthProviderError> =>
-  readText(provider, response, what).pipe(
-    Effect.flatMap((text) =>
-      decodeJsonString(text).pipe(Effect.mapError((cause) => invalidBody(provider, what, cause))),
-    ),
+  OutboundHttp.parseJson(response.body).pipe(
+    Effect.mapError((cause) => invalidBody(provider, what, cause)),
   );
 
 /** An optional member a provider may also send as `null`, which reads as absent. */
@@ -462,7 +453,7 @@ const decodeTokenResponseBody = Schema.decodeUnknownEffect(TokenResponseBody);
 /** A 2xx token endpoint's body, decoded. Anything else is an `OAuthProviderError`. */
 const readTokenResponse = (
   provider: string,
-  response: HttpClientResponse.HttpClientResponse,
+  response: OutboundHttp.Response,
 ): Effect.Effect<OAuthTokenResponse, OAuthProviderError> =>
   readJson(provider, response, "token response").pipe(
     Effect.flatMap((json) =>
@@ -516,49 +507,65 @@ const splitIdToken = (idToken: string): readonly [string, string, string] | unde
     : [headerSeg, payloadSeg, signatureSeg];
 };
 
+/** Fetch a provider's JWKS document and read its keys. */
+const fetchProviderJwks = (
+  provider: string,
+  jwksEndpoint: string,
+): Effect.Effect<ReadonlyArray<Types.JsonObject>, OAuthProviderError, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const response = yield* OutboundHttp.sendWith(OutboundHttp.getJson(jwksEndpoint)).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Failed to fetch JWKS for ${provider}`,
+            provider,
+            cause,
+          }),
+      ),
+    );
+    if (!OutboundHttp.isOk(response)) {
+      yield* OutboundHttp.logUpstreamFailure("JWKS request failed", response, { provider });
+      return yield* new OAuthProviderError({
+        message: `JWKS request failed with status ${response.status}`,
+        provider,
+      });
+    }
+    const jwks = yield* readJson(provider, response, "JWKS document").pipe(
+      Effect.flatMap((json) => decodeProviderJwks(json)),
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: `Invalid JWKS document for ${provider}`,
+            provider,
+            cause,
+          }),
+      ),
+    );
+    return jwks.keys ?? [];
+  });
+
 /**
- * Fetch the provider's JWKS and pick the key for the header's `kid` (or the
- * only key when the document holds just one).
+ * The provider's key for the header's `kid` (or the only key when the
+ * document holds just one). Under a service's {@link RemoteJwks.KeySets} the
+ * JWKS is cached per URL, refetched for an unknown `kid` at most once per
+ * refetch interval and kept when a refetch fails; without one (a direct
+ * {@link verifyIdToken} call) it is fetched each time.
  */
 const fetchIdTokenJwk = (
   params: IdTokenParams,
   header: Types.JsonObject,
 ): Effect.Effect<Types.JsonObject, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(
-      client,
-      OutboundHttp.getJson(params.jwksEndpoint),
-    ).pipe(
-      Effect.mapError(
-        (cause) =>
-          new OAuthProviderError({
-            message: `Failed to fetch JWKS for ${params.provider}`,
-            provider: params.provider,
-            cause,
-          }),
-      ),
-    );
-    if (!OutboundHttp.isOk(response)) {
-      return yield* new OAuthProviderError({
-        message: `JWKS request failed with status ${response.status}`,
-        provider: params.provider,
-      });
-    }
-    const jwks = yield* readJson(params.provider, response, "JWKS document").pipe(
-      Effect.flatMap((json) => decodeProviderJwks(json)),
-      Effect.mapError(
-        (cause) =>
-          new OAuthProviderError({
-            message: `Invalid JWKS document for ${params.provider}`,
-            provider: params.provider,
-            cause,
-          }),
-      ),
-    );
-    const keys = jwks.keys ?? [];
     const kid = header["kid"];
-    const jwk = keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    const pick: RemoteJwks.Pick = (keys) =>
+      keys.find((k) => k["kid"] === kid) ?? (keys.length === 1 ? keys[0] : undefined);
+    const fetch = fetchProviderJwks(params.provider, params.jwksEndpoint);
+    const keySets = yield* Effect.serviceOption(RemoteJwks.KeySets);
+    const jwk = Option.isSome(keySets)
+      ? yield* Effect.flatMap(OutboundHttp.provideCurrent(fetch), (cached) =>
+          Effect.flatMap(keySets.value.forUrl(params.jwksEndpoint, cached), (set) => set.key(pick)),
+        )
+      : pick(yield* fetch);
     if (!jwk) {
       return yield* new OAuthProviderError({
         message: "No matching JWKS key for id_token",
@@ -584,9 +591,8 @@ const idTokenClaimFailure = (
   }
   const nowSec = now / 1000;
   const exp = payload["exp"];
-  if (P.isNumber(exp) && nowSec > exp) {
-    return "id_token expired";
-  }
+  if (!P.isNumber(exp)) return "id_token has no exp";
+  if (nowSec > exp) return "id_token expired";
   if (params.nonce !== undefined && payload["nonce"] !== params.nonce) {
     return "id_token nonce mismatch";
   }
@@ -627,6 +633,9 @@ const verifyIdTokenClaims = (
     }
 
     const jwk = yield* fetchIdTokenJwk(params, header);
+    if (!jwkSuitsAlgorithm(alg, jwk)) {
+      return yield* fail(`id_token key is not a ${alg} key`);
+    }
 
     const verified = yield* verifiesWithJwk(idToken, jwk, alg).pipe(
       Effect.mapError(
@@ -656,10 +665,39 @@ const verifyIdTokenClaims = (
 
 /**
  * A provider's account id as a string: a string as is, a number (GitHub's,
- * Facebook's) in decimal, and anything else, a missing id included, as `""`.
+ * Facebook's) in decimal, and anything else, a missing id included, as `""`,
+ * which {@link provider} refuses.
  */
 const idString = (id: unknown): string =>
   P.isString(id) ? id : P.isNumber(id) || P.isBigInt(id) ? `${id}` : "";
+
+/**
+ * `email_verified` as a boolean: providers send it as one, or (Apple) as the
+ * string `"true"` / `"false"`. Anything else is left out, so unverified.
+ */
+const emailVerifiedClaim = (value: unknown): { readonly email_verified?: boolean } =>
+  P.isBoolean(value)
+    ? { email_verified: value }
+    : value === "true" || value === "false"
+      ? { email_verified: value === "true" }
+      : {};
+
+/**
+ * Refuse a profile without an account id: `(provider, "")` would be one
+ * account shared by every error-shaped profile the provider answers.
+ */
+const requireAccountId = (
+  provider: string,
+  info: OAuthUserInfo,
+): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
+  info.id === ""
+    ? Effect.fail(
+        new OAuthProviderError({
+          message: `${provider} returned a profile without an account id`,
+          provider,
+        }),
+      )
+    : Effect.succeed(info);
 
 /** Map OIDC id_token / userinfo claims to {@link OAuthUserInfo}. */
 const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
@@ -669,7 +707,7 @@ const claimsToUserInfo = (claims: Types.JsonObject): OAuthUserInfo => {
     claims,
     { id: idString(claims["sub"] ?? claims["id"]) },
     P.isString(email) ? { email } : {},
-    P.isBoolean(email_verified) ? { email_verified } : {},
+    emailVerifiedClaim(email_verified),
     P.isString(name) ? { name } : {},
     P.isString(picture) ? { picture } : {},
   );
@@ -727,21 +765,18 @@ const tokenRequest = (
 
 /**
  * Send a request to a provider endpoint, failing with `fetchFailure` when the
- * request cannot be sent and with `statusFailure` plus the response text on a
- * non-2xx answer.
+ * request cannot be sent and with `statusFailure` on a non-2xx answer. The
+ * answer's body goes to the log, never into the error: an IdP's error page
+ * is not for the end user, and a tenant-registered URL must not read back
+ * whatever it points at.
  */
 const fetchProviderOk = (
   provider: string,
   request: HttpClientRequest.HttpClientRequest,
   failures: { readonly fetchFailure: string; readonly statusFailure: string },
-): Effect.Effect<
-  HttpClientResponse.HttpClientResponse,
-  OAuthProviderError,
-  HttpClient.HttpClient
-> =>
+): Effect.Effect<OutboundHttp.Response, OAuthProviderError, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(client, request).pipe(
+    const response = yield* OutboundHttp.sendWith(request).pipe(
       Effect.mapError(
         (cause) =>
           new OAuthProviderError({
@@ -753,9 +788,9 @@ const fetchProviderOk = (
     );
 
     if (!OutboundHttp.isOk(response)) {
-      const errorText = yield* readText(provider, response);
+      yield* OutboundHttp.logUpstreamFailure(failures.statusFailure, response, { provider });
       return yield* new OAuthProviderError({
-        message: `${failures.statusFailure}: ${errorText}`,
+        message: `${failures.statusFailure} with status ${response.status}`,
         provider,
       });
     }
@@ -770,7 +805,8 @@ export const provider = (
   config: OAuthProviderConfig,
   usePKCE = true,
 ): OAuthProvider => {
-  const mapProfile = config.mapProfile ?? claimsToUserInfo;
+  const mapProfile = (claims: Types.JsonObject): Effect.Effect<OAuthUserInfo, OAuthProviderError> =>
+    requireAccountId(name, (config.mapProfile ?? claimsToUserInfo)(claims));
 
   const getUserInfo = (
     accessToken: string,
@@ -807,7 +843,7 @@ export const provider = (
         });
       }
 
-      return mapProfile(data);
+      return yield* mapProfile(data);
     });
 
   return {
@@ -903,20 +939,20 @@ export const provider = (
               provider: name,
             });
           }
-          if (!config.jwksEndpoint) {
+          if (!config.jwksEndpoint || config.issuer === undefined) {
             return yield* new OAuthProviderError({
-              message: `Provider ${name} is missing a jwksEndpoint for id_token verification`,
+              message: `Provider ${name} needs a jwksEndpoint and an issuer for id_token verification`,
               provider: name,
             });
           }
           const claims = yield* verifyIdTokenClaims(tokens.id_token, {
             provider: name,
             jwksEndpoint: config.jwksEndpoint,
-            ...(config.issuer !== undefined && { issuer: config.issuer }),
+            issuer: config.issuer,
             audience: config.clientId,
             ...(options?.expectedNonce !== undefined && { nonce: options.expectedNonce }),
           });
-          return mapProfile(claims);
+          return yield* mapProfile(claims);
         }
 
         return yield* getUserInfo(tokens.access_token);
@@ -1142,7 +1178,7 @@ export const make = (
   | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
+    const outbound = yield* OutboundHttp.resolve();
     const autoLinkByVerifiedEmail = options.autoLinkByVerifiedEmail ?? true;
     const trustedProviders = options.trustedProviders ?? [];
     const allowDifferentEmails = options.allowDifferentEmails ?? false;
@@ -1255,11 +1291,13 @@ export const make = (
           code,
           yield* callbackVerifier(providerInstance, state, stateEntry),
         );
-        const userInfo = yield* providerInstance.getProfile(tokens, {
+        const profile = yield* providerInstance.getProfile(tokens, {
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
+        // A hand-written provider is held to the account-id rule too.
+        const userInfo = yield* requireAccountId(providerInstance.name, profile);
         return { tokens, userInfo };
-      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+      }).pipe(OutboundHttp.provide(outbound));
 
     /**
      * Shared callback plumbing: consume the state, exchange the code and
@@ -1748,7 +1786,7 @@ export const make = (
             const response = yield* fetchProviderOk(provider, tokenRequest(rConfig, params), {
               fetchFailure: `Failed to refresh token for ${provider}`,
               statusFailure: "Token refresh failed",
-            }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+            }).pipe(OutboundHttp.provide(outbound));
 
             const data = yield* readTokenResponse(provider, response);
 
@@ -1779,6 +1817,11 @@ export const make = (
  * Pre-built OAuth providers
  */
 
+/**
+ * Google provider preset. Its `oauth2/v2/userinfo` endpoint reports the
+ * address's verification as `verified_email`, read here as `email_verified`,
+ * so a Google-verified address can auto-link.
+ */
 export const GoogleProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted;
@@ -1792,17 +1835,58 @@ export const GoogleProvider = (config: {
       tokenEndpoint: "https://oauth2.googleapis.com/token",
       userInfoEndpoint: "https://www.googleapis.com/oauth2/v2/userinfo",
       scopes: ["openid", "email", "profile"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"] ?? raw["sub"],
+          email: str(raw["email"]),
+          name: str(raw["name"]),
+          picture: str(raw["picture"]),
+          ...emailVerifiedClaim(raw["verified_email"] ?? raw["email_verified"]),
+        }),
     },
     true, // Use PKCE
   );
 
-/** GitHub OAuth 2.0 provider preset. */
+/** The address GitHub's `/user/emails` lists as primary, with its verification. */
+const githubPrimaryEmail = (
+  accessToken: string,
+): Effect.Effect<
+  { readonly email: string; readonly verified: boolean } | undefined,
+  OAuthProviderError,
+  HttpClient.HttpClient
+> =>
+  fetchProviderOk(
+    "github",
+    HttpClientRequest.get("https://api.github.com/user/emails", {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+    }),
+    { fetchFailure: "Failed to list GitHub emails", statusFailure: "GitHub email lookup failed" },
+  ).pipe(
+    Effect.flatMap((response) => readJson("github", response, "email list")),
+    Effect.map((body) => {
+      const primary = Array.isArray(body)
+        ? body.find((entry) => isJsonObject(entry) && entry["primary"] === true)
+        : undefined;
+      const email = isJsonObject(primary) ? str(primary["email"]) : undefined;
+      return email === undefined || !isJsonObject(primary)
+        ? undefined
+        : { email, verified: primary["verified"] === true };
+    }),
+  );
+
+/**
+ * GitHub OAuth 2.0 provider preset. `/user` shows only a public address, so
+ * the profile takes the primary address from `/user/emails` (the
+ * `user:email` scope), with GitHub's verification, which lets a private or
+ * verified address sign in and auto-link. When that lookup fails, the public
+ * address is used, unverified.
+ */
 export const GitHubProvider = (config: {
   clientId: string;
   clientSecret: Redacted.Redacted;
   redirectUri: string;
-}): OAuthProvider =>
-  provider(
+}): OAuthProvider => {
+  const base = provider(
     "github",
     {
       ...config,
@@ -1810,9 +1894,36 @@ export const GitHubProvider = (config: {
       tokenEndpoint: "https://github.com/login/oauth/access_token",
       userInfoEndpoint: "https://api.github.com/user",
       scopes: ["user:email"],
+      mapProfile: (raw) =>
+        profile(raw, {
+          id: raw["id"],
+          email: str(raw["email"]),
+          name: str(raw["name"]) ?? str(raw["login"]),
+          picture: str(raw["avatar_url"]),
+        }),
     },
     false, // GitHub doesn't support PKCE yet
   );
+  const getUserInfo = (accessToken: string) =>
+    Effect.gen(function* () {
+      const info = yield* base.getUserInfo(accessToken);
+      const primary = yield* githubPrimaryEmail(accessToken).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("GitHub email lookup failed; using the public address").pipe(
+            Effect.annotateLogs({ error: error.message }),
+            Effect.as(undefined),
+          ),
+        ),
+      );
+      if (primary === undefined) return info;
+      return { ...info, email: primary.email, email_verified: primary.verified };
+    });
+  return {
+    ...base,
+    getUserInfo,
+    getProfile: (tokens) => getUserInfo(tokens.access_token),
+  };
+};
 
 /** Discord OAuth 2.0 provider preset. */
 export const DiscordProvider = (config: {
@@ -1847,6 +1958,19 @@ export const MicrosoftProvider = (config: {
       tokenEndpoint: `https://login.microsoftonline.com/${config.tenant ?? "common"}/oauth2/v2.0/token`,
       userInfoEndpoint: "https://graph.microsoft.com/v1.0/me",
       scopes: ["openid", "email", "profile"],
+      // Graph's `/me` has no `email`: the address is `mail`, else the sign-in
+      // name when it is one (a guest's `#EXT#` name is not). Graph does not
+      // say the address is verified, so it is not, and never auto-links.
+      mapProfile: (raw) => {
+        const upn = str(raw["userPrincipalName"]);
+        return profile(raw, {
+          id: raw["id"],
+          email:
+            str(raw["mail"]) ??
+            (upn !== undefined && upn.includes("@") && !upn.includes("#EXT#") ? upn : undefined),
+          name: str(raw["displayName"]),
+        });
+      },
     },
     true, // Use PKCE
   );
@@ -2011,7 +2135,14 @@ export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>
     false,
   );
 
-/** X/Twitter OAuth2 (PKCE + Basic auth required; email needs elevated access). */
+/**
+ * X/Twitter OAuth2 (PKCE + Basic auth required).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const TwitterProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "twitter",
@@ -2116,7 +2247,14 @@ export const GitLabProvider = (
   );
 };
 
-/** Reddit (Basic auth; `identity` scope; no email; `duration=permanent`). */
+/**
+ * Reddit (Basic auth; `identity` scope; `duration=permanent`).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const RedditProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "reddit",
@@ -2227,7 +2365,14 @@ export const ZoomProvider = (config: OAuthClientConfig): OAuthProvider =>
     true,
   );
 
-/** TikTok (uses `client_key`; PKCE; profile under `data.user`). */
+/**
+ * TikTok (uses `client_key`; PKCE; profile under `data.user`).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "tiktok",
@@ -2253,7 +2398,14 @@ export const TikTokProvider = (config: OAuthClientConfig): OAuthProvider =>
     true,
   );
 
-/** Roblox (OpenID Connect; PKCE required). */
+/**
+ * Roblox (OpenID Connect; PKCE required).
+ *
+ * **Link-only.** The provider returns no email address, so it cannot create
+ * an account or sign in someone new (`signInWithCallback` fails with
+ * `OAuthMissingEmailError`). Link it to the signed-in user's account with
+ * `OAuthService.linkAccount`; from then on it signs that user in.
+ */
 export const RobloxProvider = (config: OAuthClientConfig): OAuthProvider =>
   provider(
     "roblox",
@@ -2330,8 +2482,7 @@ export const discoverOAuthEndpoints = (
   Effect.gen(function* () {
     const base = issuerUrl.replace(/\/$/, "");
     const url = `${base}/.well-known/openid-configuration`;
-    const client = yield* HttpClient.HttpClient;
-    const response = yield* OutboundHttp.send(client, OutboundHttp.getJson(url)).pipe(
+    const response = yield* OutboundHttp.sendWith(OutboundHttp.getJson(url)).pipe(
       Effect.mapError(
         (cause) =>
           new OAuthProviderError({
@@ -2342,6 +2493,9 @@ export const discoverOAuthEndpoints = (
       ),
     );
     if (!OutboundHttp.isOk(response)) {
+      yield* OutboundHttp.logUpstreamFailure("OIDC discovery request failed", response, {
+        issuer: issuerUrl,
+      });
       return yield* new OAuthProviderError({
         message: `OIDC discovery request failed with status ${response.status}`,
         provider: issuerUrl,

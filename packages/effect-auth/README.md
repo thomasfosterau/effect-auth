@@ -21,6 +21,10 @@ The core runs on Node.js 22 or later and on Cloudflare Workers; `/saml` is Node-
 
 Outbound requests (the OAuth and OIDC provider endpoints, SSO discovery, Cloudflare Access's key set, Google One Tap's JWKS) go through `effect/http`'s `HttpClient`, so the layers that make them require one: provide `FetchHttpClient.layer`, which works on Workers, Node and in browsers, or a stub in tests. `RemoteJwksVerifier.layer` provides fetch itself; `layerHttpClient` takes yours.
 
+Every outbound request is bounded: 10 seconds for the whole exchange, body included, and a 1 MiB response body (`OutboundHttp.defaultLimits`). Provide `OutboundHttp.OutboundLimits` where the layers are built to change both (Cloudflare Access keeps its own `fetchTimeoutMs`). Redirects are never followed. A provider's error body goes to the log as a warning excerpt, never into an error a client could be shown. A remote key set (Cloudflare Access, `verifyIdToken` inside the OAuth, SSO and One Tap services) is cached per URL; a token naming a `kid` it lacks refetches at most once per 30 seconds, and a failed refetch keeps the keys it had. `RemoteJwksVerifier` uses `effect/jose`'s remote key set, which has its own limits (5 seconds, 128 KiB, a 30-second cooldown) and refuses a redirect too.
+
+SSO connections are held to a strict URL policy by default: the discovery, token, userinfo and JWKS URLs must be `https`, carry no credentials, and name no private, loopback, link-local or internal host (`localhost`, `.local`, `.internal`, single-label names). It is checked when a connection is registered and again before each request. Hosts are checked as written, not resolved, since Workers have no DNS lookup: a public name pointing at a private address passes, so restrict egress at the network too. `SsoConfig.allowPrivateIdpUrls: true` turns the check off for an IdP on a private network.
+
 Argon2id (`Password.argon2idHasherLayer`) is the exception: it derives through Effect's `Kdf` service, which only `NodeCrypto.layerKdf` (`@effect/platform-node` or `-bun`, on Node.js 24.7+ or Bun 1.4+) provides with Argon2id. On Workers use `@thomasfosterau/effect-auth-argon2`.
 
 Password hashing is the costly step on Workers. PBKDF2 at its default 600,000 iterations takes about 75 ms of CPU per hash or verify in workerd, so a sign-in that verifies a password fits a paid plan's CPU limit but not the Free plan's 10 ms; lowering `iterations` trades away resistance to offline cracking. Keep the scrypt verifier (`./scrypt`) off Workers: at its default cost (N = 2^17, r = 8) it needs about 128 MiB, the whole memory of an isolate.
@@ -633,6 +637,22 @@ const refresh = (userId: string) =>
 export { OAuthLive, begin, callback, link, refresh };
 ```
 
+**What the presets read.**
+
+- Google's verification arrives as `verified_email` and is read as `email_verified`.
+- Microsoft's address is Graph's `mail`, or else the sign-in name when that is an address. Graph doesn't say whether it is verified, so a Microsoft sign-in never auto-links.
+- GitHub takes the primary address from `/user/emails`, private ones included, with GitHub's verification.
+- Apple's `email_verified` may arrive as the string `"true"`, which is read as `true`.
+
+A profile with no account id fails with `OAuthProviderError`; it never becomes an account under an empty id.
+
+An `id_token` must:
+
+- carry a numeric `exp`;
+- match the configured `issuer`, which a provider with `getUserInfoFromIdToken` must set;
+- be verified with a key of the header's algorithm (an `RSA` key for RS256, `EC` P-256 for ES256, `OKP` Ed25519 for EdDSA).
+
+**Link-only providers.** `TwitterProvider`, `RedditProvider`, `TikTokProvider` and `RobloxProvider` return no email address, so they can't create an account or sign in someone new: `signInWithCallback` fails with `OAuthMissingEmailError`. Link one to the signed-in user with `linkAccount`. After that, it signs that user in.
 **Bind the `state` to the browser.** `OAuthService` has no HTTP endpoints, so `begin` and `callback` above are yours to serve: set the `state` in a short-lived `HttpOnly` cookie when you redirect to the provider, and refuse a callback whose `state` is not the one in the cookie. Without it, an attacker can start a sign-in, finish the provider's leg as themselves and have a victim's browser complete the callback, signing the victim in to the attacker's account (login CSRF). The SSO endpoints do this for you: `POST /sso-authorizations` sets a pre-login cookie (`<name>_sso_state`, `SameSite=None; Secure`, ten minutes) that `POST /sso/callback` and the SAML ACS require.
 
 **The callback `state` is single-use**. `handleCallback`, `signInWithCallback`, `linkAccount` and the OIDC SSO callback (`SsoService.handleCallback`, `POST /sso/callback`) spend it with `OAuthStateStore.consume`, an atomic get-and-delete, before they exchange the code. A replayed callback fails with `OAuthStateNotFoundError` (an `SsoError` for SSO, `400` over HTTP), whether the first use succeeded or failed, and of two concurrent callbacks carrying the same state only one gets past it. A store you write yourself must implement `consume` as one atomic operation (`DELETE … RETURNING`, a compare-and-swap, Redis `GETDEL`); `/sql`'s store is one `DELETE … RETURNING`. `OAuthStateStoreKV` serializes `consume` within its process only, since a `KeyValueStore` has no get-and-delete: behind several instances sharing one backend, provide a `KeyValueStoreTake` ([`KeyValueStore` stores](#keyvaluestore-stores)) or use `/sql`. The SAML `RelayState` is single-use the same way: it lives only on its `AuthnRequest` record, which `SamlReplayStore.consume` spends.

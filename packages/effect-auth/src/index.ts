@@ -191,6 +191,8 @@ export * as ManagedUser from "./ManagedUser.ts";
 // Cloudflare Access: `make`, `findUser` and friends are too generic for the
 // root, so the module is reached through its namespace only.
 export * as CloudflareAccess from "./CloudflareAccess.ts";
+// The bounds on every outbound request (timeout, body cap) and their override.
+export * as OutboundHttp from "./OutboundHttp.ts";
 export {
   AnonymousUserStore,
   type AnonymousConfig,

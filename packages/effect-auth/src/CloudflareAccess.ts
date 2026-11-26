@@ -74,7 +74,7 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/http";
+import type { HttpClient } from "effect/http";
 import type { CredentialClass, CurrentCredential, CurrentPrincipal } from "./Authorizer.ts";
 import { verifiesWithJwk } from "./JwsSignature.ts";
 import type { AuthError } from "./Errors.ts";
@@ -409,29 +409,39 @@ export const make = (
       attemptedAt: Number.NEGATIVE_INFINITY,
     });
 
-    const client = yield* HttpClient.HttpClient;
-    const fetchKeys = OutboundHttp.send(client, OutboundHttp.getJson(certsUrl)).pipe(
-      Effect.mapError((cause) => fail("jwks", "Failed to fetch the Cloudflare Access keys", cause)),
-      Effect.flatMap((response) =>
-        OutboundHttp.isOk(response)
-          ? response.json.pipe(
-              Effect.mapError((cause) => fail("jwks", "Invalid Cloudflare Access key set", cause)),
-            )
-          : Effect.fail(
-              fail(
-                "jwks",
-                `Cloudflare Access key set request failed with status ${response.status}`,
-              ),
-            ),
-      ),
-      Effect.flatMap((body) =>
-        decodeJwks(body).pipe(
-          Effect.mapError((cause) => fail("jwks", "Invalid Cloudflare Access key set", cause)),
+    const outbound = yield* OutboundHttp.resolve();
+    const fetchKeys = OutboundHttp.send(outbound.client, OutboundHttp.getJson(certsUrl), {
+      ...outbound.limits,
+      timeoutMs: fetchTimeoutMs,
+    }).pipe(
+      Effect.mapError((cause) =>
+        fail(
+          "jwks",
+          cause.reason === "timeout"
+            ? "Timed out fetching the Cloudflare Access keys"
+            : "Failed to fetch the Cloudflare Access keys",
+          cause,
         ),
       ),
-      Effect.timeout(fetchTimeoutMs),
-      Effect.catchTag("TimeoutError", (cause) =>
-        Effect.fail(fail("jwks", "Timed out fetching the Cloudflare Access keys", cause)),
+      Effect.flatMap((response) =>
+        OutboundHttp.isOk(response)
+          ? OutboundHttp.parseJson(response.body).pipe(
+              Effect.flatMap((body) => decodeJwks(body)),
+              Effect.mapError((cause) => fail("jwks", "Invalid Cloudflare Access key set", cause)),
+            )
+          : OutboundHttp.logUpstreamFailure(
+              "Cloudflare Access key set request failed",
+              response,
+            ).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  fail(
+                    "jwks",
+                    `Cloudflare Access key set request failed with status ${response.status}`,
+                  ),
+                ),
+              ),
+            ),
       ),
       Effect.map((jwks) => jwks.keys),
     );
