@@ -600,10 +600,9 @@ export class RateLimitError extends Data.TaggedError("RateLimitError")<{
  *   `false`) has no `trustedProxy`, when the `Hooks` in
  *   `services` include `IPRateLimitPlugin` with no `trustedProxy`, and
  *   when the `services` include an `OidcProviderService` with dynamic client
- *   registration enabled and there is no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for a `trustedProxy`: with
- *   no proxy no request has an address, so every limited request would be
- *   refused with `429`, and the handler refuses to start instead.
+ *   registration enabled and there is no `trustedProxy`. With no proxy no
+ *   request has an address, so every limited request would be refused with
+ *   `429`, and the handler refuses to start instead.
  *
  * `Http.makeAsync` rejects with the same errors `Http.make` throws, so the app
  * fails to start either way.
@@ -632,7 +631,7 @@ export class SessionConfigError extends Data.TaggedError("SessionConfigError")<{
  * run. The limits are `Http.make`'s `ipRateLimit` (on unless it is
  * `false`), the dynamic client
  * registration limit (`POST /register`) and the device user-code limit on
- * approve/deny, which counts as configured whenever a
+ * lookups and decisions, which counts as configured whenever a
  * `DeviceAuthorizationService` is in `services` unless it was built with
  * `allowMissingRateLimiter: true`.
  *

@@ -117,9 +117,12 @@ where nobody happens to be signed in.
 
 ### The credential class travels with the session
 
-`credentialClass` says _how_ the caller got in — `"machine"` for an API key or bearer token,
-`"interactive"` for a cookie. Pass it to `SessionContext.authenticatedLayer` so the policy
-kernel sees the same value the HTTP middleware would have provided.
+`credentialClass` says _how_ the caller got in: `"machine"` for an API key, and for a session
+the class it was issued with (`sessionCredentialClass`), whichever cookie or header carried its
+token. A browser session sent as a bearer token stays `"interactive"`; a device-grant session
+is `"machine"` even in a cookie. Pass it to `SessionContext.authenticatedLayer` (which
+defaults to the session's own class) so the policy kernel sees the same value the HTTP
+middleware would have provided.
 
 It matters because a key and a cookie can resolve to the _same user_: a credential changes who
 the request is, never what it may do. Without it, a key-bearing request reads as an interactive

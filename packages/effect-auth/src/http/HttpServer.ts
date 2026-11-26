@@ -70,9 +70,9 @@ import { AnonymousService } from "../Anonymous.ts";
 import { PhoneOtpService } from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
 import {
+  type DeviceAuthorizationRequest,
   type DeviceCodeError,
   DeviceAuthorizationService,
-  normalizeUserCode,
 } from "../DeviceAuthorization.ts";
 import { EmailOtpService } from "../email/EmailOtp.ts";
 import { MultiFactorService } from "../multifactor/MultiFactor.ts";
@@ -113,7 +113,6 @@ import {
   type ApiKeyError,
   type ApiKeyUpdate,
 } from "../ApiKey.ts";
-import { type CredentialClass } from "../Authorizer.ts";
 import { extractApiKey, fromHeaders } from "../SessionResolution.ts";
 import { JwtService } from "../Jwt.ts";
 import {
@@ -150,7 +149,7 @@ import {
   SignUpAttributesConfigError,
 } from "../Errors.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { hashToken } from "../TokenHash.ts";
+import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
 import { GoogleOneTapService } from "../GoogleOneTap.ts";
 import {
   decodeSessionCacheCookie,
@@ -161,6 +160,7 @@ import {
   type SessionCacheConfig,
 } from "../SessionCookieCache.ts";
 import * as Types from "../Types.ts";
+import { normalizeEmail } from "../utils.ts";
 
 /**
  * The services the auth handlers require. Your `services` layer must provide
@@ -423,6 +423,58 @@ const sessionOnlyCookieOptions = (cfg: ResolvedCookieConfig) =>
     path: cfg.path,
   }) as const;
 
+/**
+ * Name of the pre-login cookie that binds an SSO sign-in to the browser that
+ * started it (`<name>_sso_state`).
+ */
+const ssoStateCookieName = (cfg: ResolvedCookieConfig): string => `${cfg.name}_sso_state`;
+
+/** How long the pre-login cookie lives: as long as the SAML request and OAuth state do. */
+const SSO_STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
+
+/**
+ * Options for the pre-login cookie. The IdP posts the SAML response to the
+ * ACS from its own site, a cross-site request, so the cookie is
+ * `SameSite=None`, which browsers accept only on a `Secure` cookie: it is
+ * `Secure` whatever `cfg.secure` says (browsers treat `http://localhost` as
+ * secure).
+ */
+const ssoStateCookieOptions = (cfg: ResolvedCookieConfig, maxAge: number) =>
+  ({
+    httpOnly: true,
+    sameSite: "none",
+    secure: true,
+    path: cfg.path,
+    maxAge,
+  }) as const;
+
+/** The pre-login cookie the request carries, if any. */
+const readSsoStateCookie = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+): string | undefined => {
+  const value = request.cookies[ssoStateCookieName(cfg)];
+  return value === undefined || value === "" ? undefined : value;
+};
+
+/** Whether the pre-login cookie names exactly `state`, compared in constant time. */
+const ssoStateMatches = (cookie: string | undefined, state: string): Effect.Effect<boolean> =>
+  cookie === undefined
+    ? Effect.succeed(false)
+    : Effect.zipWith(digestToken(cookie), digestToken(state), constantTimeHashEqual);
+
+/** `response` clearing the pre-login cookie: a finished sign-in leaves none behind. */
+const clearSsoStateCookie = (
+  response: HttpServerResponse.HttpServerResponse,
+  cfg: ResolvedCookieConfig,
+) =>
+  HttpServerResponse.setCookie(
+    response,
+    ssoStateCookieName(cfg),
+    "",
+    ssoStateCookieOptions(cfg, 0),
+  ).pipe(Effect.orDie);
+
 const clearCookieOptions = (cfg: ResolvedCookieConfig) =>
   ({
     httpOnly: true,
@@ -451,26 +503,6 @@ export const sessionIdFromRequest = (
     if ((scheme === "Token" || scheme === "Bearer") && value) return value;
   }
   return request.cookies[cfg.name];
-};
-
-/**
- * The {@link CredentialClass} implied by *how* the request carried its
- * credential: the session cookie only a browser sends automatically is
- * "interactive"; an `Authorization: Bearer/Token` header — copy-pasted into
- * a script, a CLI, or a machine caller, the same delivery mechanism a
- * consuming app's own API-key middleware uses — is "machine". Mirrors the
- * branch `sessionIdFromRequest` takes so the two never disagree about which
- * credential a request presented.
- */
-export const credentialClassFromRequest = (
-  request: HttpServerRequest.HttpServerRequest,
-): CredentialClass => {
-  const auth = request.headers["authorization"];
-  if (auth) {
-    const [scheme, value] = auth.split(" ");
-    if ((scheme === "Token" || scheme === "Bearer") && value) return "machine";
-  }
-  return "interactive";
 };
 
 // -----------------------------------------------------------------------------
@@ -1033,15 +1065,17 @@ const asRegistration = <A, R>(
   });
 
 /**
- * Per-user-code rate limit for device-authorization approve/deny endpoints
- * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
+ * Per-caller limit on device-authorization lookups and decisions (RFC 8628
+ * §5.2), through the `RateLimiter` in scope: one bucket per signed-in user,
+ * so guessing different codes spends the same bucket. `make` refuses to build
  * a handler whose `services` hold the device service and no `RateLimiter`.
- * Outside `make` (the exported group layers composed by hand), a
- * request with no `RateLimiter` in scope is refused with `429`, unless the
- * device service was built with `allowMissingRateLimiter: true`.
+ * Outside `make` (the exported group layers composed by hand), a request with
+ * no `RateLimiter` in scope is refused with `429`, unless the device service
+ * was built with `allowMissingRateLimiter: true`. The per-address endpoint
+ * rules count the same requests by client address.
  */
 const USER_CODE_RATE_LIMIT: RateLimitConfig = {
-  maxRequests: 5,
+  maxRequests: 10,
   windowMs: 15 * 60 * 1000,
   blockDurationMs: 30 * 60 * 1000,
 };
@@ -1072,7 +1106,7 @@ const consumeRateLimitToken = (
   );
 
 const applyUserCodeRateLimit = (
-  userCode: string,
+  callerId: string,
   device: typeof DeviceAuthorizationService.Service,
 ): Effect.Effect<void, S.TooManyRequests | S.InternalServerError> =>
   Effect.gen(function* () {
@@ -1082,7 +1116,7 @@ const applyUserCodeRateLimit = (
       if (device.allowMissingRateLimiter === true) return yield* Effect.void;
       return yield* refuseWithoutRateLimiter("the device user-code limit");
     }
-    const key = `device-user-code:${normalizeUserCode(userCode)}`;
+    const key = `device-user-code:user:${callerId}`;
     return yield* consumeRateLimitToken(rateLimiterOpt.value, key, USER_CODE_RATE_LIMIT);
   });
 
@@ -1136,25 +1170,12 @@ const applyRegistrationRateLimit = (
   });
 
 /**
- * What a `ClientAddressConfigError` adds when `allowMissingClientIp: true` is
- * set: the option is no address source. With no `trustedProxy`, a Web
- * `Request` under `Http.make` never has an address, so the limit would refuse
- * every request it covers with `429`; the handler refuses to start instead.
- */
-const allowMissingClientIpNote = (options: AuthWebHandlerOptions): string =>
-  options.allowMissingClientIp === true
-    ? " allowMissingClientIp: true does not stand in for trustedProxy: with no proxy no request has an address, " +
-      "so every request the limit covers would be refused with 429."
-    : "";
-
-/**
  * The `IPRateLimitPlugin` half of the client-address check: the `Hooks`
  * include a plugin that keys on the client address and there is no
  * `trustedProxy`.
  */
 const keyedPluginAddressError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined => {
   const hooks = Context.getOption(services, Hooks);
   const keyed = Option.isSome(hooks) ? clientAddressKeyedPlugins(hooks.value) : [];
@@ -1162,8 +1183,7 @@ const keyedPluginAddressError = (
   return new ClientAddressConfigError({
     message:
       `${keyed.join(", ")} keys its limits on the client address, and a Web Request has none under Http.make or Http.makeAsync. ` +
-      "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address." +
-      allowMissingClientIpNote(options),
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limits by the visitor's address.",
   });
 };
 
@@ -1174,15 +1194,13 @@ const keyedPluginAddressError = (
  */
 const registrationAddressError = (
   services: Context.Context<never>,
-  options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | undefined => {
   const oidc = Context.getOption(services, OidcProviderService);
   if (Option.isNone(oidc) || !oidc.value.dynamicRegistration.enabled) return undefined;
   return new ClientAddressConfigError({
     message:
       "Dynamic client registration (POST /register) is rate limited per client address, and a Web Request has none under Http.make or Http.makeAsync. " +
-      "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address." +
-      allowMissingClientIpNote(options),
+      "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address.",
   });
 };
 
@@ -1205,7 +1223,7 @@ const rateLimiterError = (
       ? ["the dynamic client registration limit (POST /register)"]
       : []),
     ...(Option.isSome(device) && device.value.allowMissingRateLimiter !== true
-      ? ["the device user-code limit (approve and deny)"]
+      ? ["the device user-code limit (lookups and decisions)"]
       : []),
   ];
   if (Arr.isReadonlyArrayEmpty(configured)) return undefined;
@@ -1224,8 +1242,7 @@ const rateLimiterError = (
  * - The `Hooks` include a plugin that keys on the client address
  *   (`IPRateLimitPlugin`), or the OIDC provider enables dynamic client
  *   registration, and there is no `trustedProxy`. A Web `Request` has no
- *   socket address, and `allowMissingClientIp: true` is no address source
- *  .
+ *   socket address.
  * - A limit is configured with no `RateLimiter` ({@link rateLimiterError}).
  */
 const servicesConfigError = (
@@ -1233,7 +1250,7 @@ const servicesConfigError = (
   options: AuthWebHandlerOptions,
 ): ClientAddressConfigError | RateLimiterConfigError | undefined =>
   (options.trustedProxy === undefined
-    ? (keyedPluginAddressError(services, options) ?? registrationAddressError(services, options))
+    ? (keyedPluginAddressError(services) ?? registrationAddressError(services))
     : undefined) ?? rateLimiterError(services, options);
 
 /**
@@ -2294,7 +2311,7 @@ export const emailVerificationsGroupLayer = (
         Effect.gen(function* () {
           const identifiers = yield* IdentifierStore;
           const verification = yield* EmailVerificationService;
-          const email = payload.data.attributes.email.trim().toLowerCase();
+          const email = normalizeEmail(payload.data.attributes.email);
           const identifier = yield* lookupIdentifier(identifiers, "email", email).pipe(
             Effect.catch(internalServerError),
           );
@@ -2351,7 +2368,9 @@ export const passwordResetsGroupLayer = () =>
       .handle("create", ({ payload }) =>
         Effect.gen(function* () {
           const passwordReset = yield* PasswordResetService;
-          yield* passwordReset.requestPasswordReset(payload.data.attributes.email).pipe(
+          const { email, captchaToken } = payload.data.attributes;
+          // The send gate (`beforeSendCode`, the captcha).
+          yield* passwordReset.requestPasswordReset(email, { captchaToken }).pipe(
             Effect.catchTags({
               AuthError: (e) => internalServerError(e),
               PasswordResetError: (e) => internalServerError(e),
@@ -3804,7 +3823,7 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
     Effect.gen(function* () {
       const resolved = yield* requireSession(request, cfg);
       const apiKey = yield* resolveApiKey;
-      return { apiKey: apiKey.service, userId: resolved.user.id };
+      return { apiKey: apiKey.service, userId: resolved.user.id, session: resolved.session };
     });
 
   return HttpApiBuilder.group(AuthApi, "api-keys", (handlers) =>
@@ -3822,9 +3841,8 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
       .handle("create", ({ payload, request }) =>
         Effect.gen(function* () {
           const resolved = yield* requireSession(request, cfg);
-          // A key is never minted from a machine credential (a bearer token,
-          // another key): only from the interactive session cookie.
-          yield* requireInteractiveCredential(request);
+          // A key is never minted from a machine-issued session.
+          yield* requireInteractiveCredential(resolved.session);
           const apiKey = yield* resolveApiKey;
           // The answer carries the raw key, shown this once.
           yield* noStore;
@@ -3837,7 +3855,10 @@ export const apiKeysGroupLayer = (config?: CookieConfig, multiSession?: MultiSes
       )
       .handle("update", ({ params, payload, request }) =>
         Effect.gen(function* () {
-          const { apiKey, userId } = yield* owner(request);
+          // Widening a key's permissions, expiry or uses is minting more of
+          // it, so it takes the same interactive session as create.
+          const { apiKey, userId, session } = yield* owner(request);
+          yield* requireInteractiveCredential(session);
           const updated = yield* asApiKeyOwner(
             apiKey.update(userId, params.id, apiKeyUpdate(payload.data.attributes ?? {})),
           );
@@ -3960,11 +3981,20 @@ export const ssoProvidersGroupLayer = (
 /**
  * Layer implementing the `sso-authorizations` group: start an SSO sign-in
  * (see `ssoAuthorizationsGroup` in `HttpApi.ts`).
+ *
+ * The answer sets the pre-login cookie (`<name>_sso_state`, `HttpOnly`,
+ * `SameSite=None; Secure`, ten minutes) holding the round-trip state, which
+ * `POST /sso/callback` and the SAML ACS require: a sign-in finishes only in
+ * the browser that started it. Pass the same `config` as `authGroupLayer`'s,
+ * so both name the same cookie.
  */
-export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
-  AuthApi,
-  "sso-authorizations",
-  (handlers) =>
+export const ssoAuthorizationsGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+) => {
+  const cfg = resolveCookieConfig(config, multiSession);
+
+  return HttpApiBuilder.group(AuthApi, "sso-authorizations", (handlers) =>
     handlers.handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const sso = yield* resolveSso;
@@ -3974,12 +4004,18 @@ export const ssoAuthorizationsGroupLayer = HttpApiBuilder.group(
         const result = yield* asSsoRequest(
           sso.service.signIn(ssoSelector(payload.data.attributes)),
         );
+        yield* setResponseCookie(
+          ssoStateCookieName(cfg),
+          result.state,
+          ssoStateCookieOptions(cfg, SSO_STATE_COOKIE_MAX_AGE_SECONDS),
+        );
         return Handlers.data(
           R.SsoAuthorization.make({ id: result.state, attributes: { url: result.url } }),
         );
       }).pipe(JsonApiErrors.mapHttpErrors),
     ),
-);
+  );
+};
 
 /**
  * Layer implementing the `tokens` group: sign a JWT for the signed-in user
@@ -4004,21 +4040,52 @@ export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSess
   );
 };
 
-/**
- * Settle a device authorization: done, or an unknown or settled code as
- * `400`, a store failure as `500`.
- */
-const deviceDecision = <R>(
-  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
-): Effect.Effect<void, S.BadRequest | S.InternalServerError, R> =>
-  Effect.catchTags(decision, {
-    DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-    AuthError: (e) => internalServerError(e),
+/** A device authorization request as its `device-authorizations` resource. */
+const deviceAuthorizationResource = (request: DeviceAuthorizationRequest): R.DeviceAuthorization =>
+  R.DeviceAuthorization.make({
+    id: request.id,
+    attributes: {
+      clientId: request.clientId,
+      clientName: request.clientName,
+      scopes: [...request.scopes],
+      status: request.status,
+      expiresAt: request.expiresAt,
+    },
   });
 
 /**
+ * Run a lookup or decision on a device's user code for the signed-in caller:
+ * the caller's per-user limit first, then the step, answering the request as
+ * its resource; an unknown, expired or decided code is `400`, a store failure
+ * `500`.
+ */
+const deviceStep = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+  step: (
+    device: typeof DeviceAuthorizationService.Service,
+    callerId: string,
+  ) => Effect.Effect<DeviceAuthorizationRequest, DeviceCodeError | AuthError>,
+) =>
+  Effect.gen(function* () {
+    // The verification page is signed in: approving grants the device a
+    // session for the caller, and denying or looking up a code without one
+    // would let anyone grief or probe pending requests.
+    const caller = (yield* requireSession(request, cfg)).user.id;
+    const device = yield* resolveDevice;
+    yield* applyUserCodeRateLimit(caller, device.service);
+    const answered = yield* step(device.service, caller).pipe(
+      Effect.catchTags({
+        DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+        AuthError: (e) => internalServerError(e),
+      }),
+    );
+    return Handlers.data(deviceAuthorizationResource(answered));
+  }).pipe(JsonApiErrors.mapHttpErrors);
+
+/**
  * Layer implementing the `device-authorizations` group: the verification
- * page's approval or denial of a device's user code (see
+ * page's lookup, approval or denial of a device's user code (see
  * `deviceAuthorizationsGroup` in `HttpApi.ts`).
  */
 export const deviceAuthorizationsGroupLayer = (
@@ -4028,25 +4095,18 @@ export const deviceAuthorizationsGroupLayer = (
   const cfg = resolveCookieConfig(config, multiSession);
 
   return HttpApiBuilder.group(AuthApi, "device-authorizations", (handlers) =>
-    handlers.handle("decide", ({ payload, request }) =>
-      Effect.gen(function* () {
+    handlers
+      .handle("lookup", ({ payload, request }) =>
+        deviceStep(request, cfg, (device) => device.lookup(payload.data.attributes.userCode)),
+      )
+      .handle("decide", ({ payload, request }) => {
         const { userCode, decision } = payload.data.attributes;
-        // Approving grants the device the caller's session, so it needs one;
-        // denying needs none.
-        const approver =
-          decision === "approved" ? (yield* requireSession(request, cfg)).user.id : undefined;
-        const device = yield* resolveDevice;
-        // Rate-limit user_code attempts per RFC 8628 §5.2: user codes are ~39
-        // bits, so without a per-code limit pending codes could be enumerated
-        // (approve) or griefed at scale (deny, which is unauthenticated).
-        yield* applyUserCodeRateLimit(userCode, device.service);
-        return yield* deviceDecision(
-          approver === undefined
-            ? device.service.deny(userCode)
-            : device.service.approve(userCode, approver),
+        return deviceStep(request, cfg, (device, callerId) =>
+          decision === "approved"
+            ? device.approve(userCode, callerId)
+            : device.deny(userCode, callerId),
         );
-      }).pipe(JsonApiErrors.mapHttpErrors),
-    ),
+      }),
   );
 };
 
@@ -4057,7 +4117,8 @@ export const deviceAuthorizationsGroupLayer = (
  * the contract from your own `HttpApiBuilder` (the SCIM group is always
  * mounted and answers `404` until `ScimService` is provided).
  * `signUpAttributes` is {@link AuthWebHandlerOptions.signUpAttributes}: the
- * attribute keys `POST /users` accepts (default none).
+ * attribute keys `POST /users` accepts (default none). `ssoRedirect` is
+ * {@link AuthWebHandlerOptions.sso}: where the SAML ACS sends the browser.
  *
  * @since 0.1.0
  * @category layers
@@ -4066,9 +4127,10 @@ export const groupLayers = (
   config?: CookieConfig,
   multiSession?: MultiSessionConfig,
   signUpAttributes?: ReadonlyArray<string>,
+  ssoRedirect?: SsoRedirectConfig,
 ) =>
   Layer.mergeAll(
-    authGroupLayer(config, multiSession),
+    authGroupLayer(config, multiSession, ssoRedirect),
     sessionsGroupLayer(config, multiSession),
     identifiersGroupLayer(config, multiSession),
     usersGroupLayer(config, multiSession, signUpAttributes),
@@ -4095,7 +4157,7 @@ export const groupLayers = (
     apiKeysGroupLayer(config, multiSession),
     oauthClientsGroupLayer(config, multiSession),
     ssoProvidersGroupLayer(config, multiSession),
-    ssoAuthorizationsGroupLayer,
+    ssoAuthorizationsGroupLayer(config, multiSession),
     tokensGroupLayer(config, multiSession),
     deviceAuthorizationsGroupLayer(config, multiSession),
     scimGroupLayer(),
@@ -4106,9 +4168,79 @@ export const groupLayers = (
     Layer.provideMerge(JsonApiMiddleware.layer),
   );
 
+/** RFC 8628 §3.4's `grant_type`. */
+const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
+
+/** An RFC 6749 §5.2 error response, status 400. */
+const oauthError = (error: string, description?: string): Effect.Effect<never, S.OAuthError> =>
+  Effect.fail(
+    new S.OAuthError({
+      error,
+      ...(description !== undefined && { error_description: description }),
+    }),
+  );
+
+/** RFC 6749 §3.3's space-delimited `scope`, as a list. */
+const scopeList = (scope: string | undefined): ReadonlyArray<string> =>
+  scope === undefined ? [] : Arr.filter(Str.split(scope, " "), Str.isNonEmpty);
+
+/**
+ * Where the SAML assertion consumer service sends the browser once it has
+ * judged the IdP's response. The ACS is a top-level form POST, so it answers
+ * with a `303` redirect, never a body.
+ */
+export interface SsoRedirectConfig {
+  /** Where a signed-in browser goes: an absolute URL or a root-relative path. Default `"/"`. */
+  readonly redirectTo?: string | undefined;
+  /**
+   * Where a refused response sends the browser, with an `error` query
+   * parameter: `access_denied` (the response was refused),
+   * `temporarily_unavailable` (rate limited) or `server_error`. Default
+   * {@link redirectTo}.
+   */
+  readonly errorRedirectTo?: string | undefined;
+  /**
+   * Where a sign-in that needs a second factor sends the browser, with no
+   * session cookie. The challenge rides in the URL fragment, which the browser
+   * never sends to a server or in a `Referer`: `#second_factor=<token>&expires_at=<ms>`.
+   * Redeem the token with a code at `POST /second-factor-challenges/verifications`
+   * (the client's second-factor continuation). Default {@link redirectTo}.
+   */
+  readonly secondFactorRedirectTo?: string | undefined;
+}
+
+/** `target` with a second-factor challenge in its fragment, replacing any fragment it had. */
+const withSecondFactorFragment = (
+  target: string,
+  challenge: { readonly token: string; readonly expiresAt: number },
+): string =>
+  `${target.split("#")[0]}#${new URLSearchParams({
+    second_factor: challenge.token,
+    expires_at: String(challenge.expiresAt),
+  }).toString()}`;
+
+/** `target` with `error` set in its query; a root-relative target stays root-relative. */
+const withErrorParam = (target: string, error: string): string => {
+  if (URL.canParse(target)) {
+    const url = new URL(target);
+    url.searchParams.set("error", error);
+    return url.toString();
+  }
+  const url = new URL(target, "http://relative.invalid");
+  url.searchParams.set("error", error);
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+
 /** Layer implementing the `auth` group handlers. */
-export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessionConfig) => {
+export const authGroupLayer = (
+  config?: CookieConfig,
+  multiSession?: MultiSessionConfig,
+  ssoRedirect?: SsoRedirectConfig,
+) => {
   const cfg = resolveCookieConfig(config, multiSession);
+  const ssoRedirectTo = ssoRedirect?.redirectTo ?? "/";
+  const ssoErrorRedirectTo = ssoRedirect?.errorRedirectTo ?? ssoRedirectTo;
+  const ssoSecondFactorRedirectTo = ssoRedirect?.secondFactorRedirectTo ?? ssoRedirectTo;
 
   return HttpApiBuilder.group(AuthApi, "auth", (handlers) =>
     handlers
@@ -4118,16 +4250,29 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           // RFC 8628 §3.2: the answer carries the device code, the secret
           // the device polls with.
           yield* noStore;
-          return yield* device.service
+          if (payload.client_id === undefined || payload.client_id === "") {
+            return yield* oauthError("invalid_request", "client_id is required");
+          }
+          const scopes = scopeList(payload.scope);
+          const begun = yield* device.service
             .begin({
-              ...(payload.clientId !== undefined && { clientId: payload.clientId }),
-              ...(payload.scopes !== undefined && { scopes: payload.scopes }),
+              clientId: payload.client_id,
+              ...(Arr.isReadonlyArrayNonEmpty(scopes) && { scopes }),
             })
             .pipe(
               Effect.catchTags({
+                DeviceClientError: (e) => oauthError(e.error, e.message),
                 AuthError: (e) => internalServerError(e),
               }),
             );
+          return {
+            device_code: begun.deviceCode,
+            user_code: begun.userCode,
+            verification_uri: begun.verificationUri,
+            verification_uri_complete: begun.verificationUriComplete,
+            expires_in: begun.expiresIn,
+            interval: begun.interval,
+          };
         }),
       )
       .handle("deviceToken", ({ payload }) =>
@@ -4135,51 +4280,55 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           const device = yield* resolveDevice;
           // A token response (RFC 8628 §3.5, RFC 6749 §5.1): never cached.
           yield* noStore;
-          const result = yield* device.service.poll(payload.deviceCode).pipe(
+          if (payload.grant_type !== DEVICE_CODE_GRANT_TYPE) {
+            return yield* payload.grant_type === undefined
+              ? oauthError("invalid_request", "grant_type is required")
+              : oauthError(
+                  "unsupported_grant_type",
+                  `grant_type must be ${DEVICE_CODE_GRANT_TYPE}`,
+                );
+          }
+          if (payload.device_code === undefined || payload.device_code === "") {
+            return yield* oauthError("invalid_request", "device_code is required");
+          }
+          if (payload.client_id === undefined || payload.client_id === "") {
+            return yield* oauthError("invalid_request", "client_id is required");
+          }
+          const result = yield* device.service.poll(payload.device_code, payload.client_id).pipe(
             Effect.catchTags({
-              // RFC 8628 poll errors -> 400 with the error code as message.
-              DevicePollError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
+              DevicePollError: (e) => oauthError(e.error, e.message),
               SessionNotFoundError: (e) => internalServerError(e),
               SessionExpiredError: (e) => internalServerError(e),
               UserNotFoundError: (e) => internalServerError(e),
               AuthError: (e) => internalServerError(e),
-              RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-              AccountLockedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              UserBannedError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                  ),
-                ),
-              CaptchaError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
-              PwnedPasswordError: (e) =>
-                resolveMessage(e.code, e.message).pipe(
-                  Effect.flatMap((msg) =>
-                    Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                  ),
-                ),
+              // A session hook refused the grant: the device stops polling.
+              // A rate limit asks it to poll more slowly instead.
+              RateLimitError: (e) => oauthError("slow_down", e.message),
+              AccountLockedError: (e) => oauthError("access_denied", e.message),
+              UserBannedError: (e) => oauthError("access_denied", e.message),
+              CaptchaError: (e) => oauthError("access_denied", e.message),
+              PwnedPasswordError: (e) => oauthError("access_denied", e.message),
             }),
           );
-          const body: S.AuthSuccess = {
-            user: yield* encodeUserView(result.user),
-            needsEmailVerification: false,
+          const now = yield* Clock.currentTimeMillis;
+          return {
+            access_token: result.token,
+            token_type: "Bearer" as const,
+            expires_in: Math.max(0, Math.floor((result.session.expiresAt.getTime() - now) / 1000)),
+            scope: Arr.join(result.grant.scopes, " "),
           };
-          return yield* withSessionCookie(body, result, cfg, "device");
         }),
       )
-      .handle("ssoCallback", ({ payload }) =>
+      .handle("ssoCallback", ({ payload, request }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
+          // Login CSRF: the state must be the one this browser was handed when
+          // it started the sign-in, not one an attacker started for themselves.
+          if (!(yield* ssoStateMatches(readSsoStateCookie(request, cfg), payload.state))) {
+            return yield* new S.BadRequest({
+              message: "SSO sign-in was not started in this browser",
+            });
+          }
           const result = yield* sso.service.handleCallback(payload.state, payload.code).pipe(
             Effect.catchTags({
               SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
@@ -4211,49 +4360,68 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
                 ),
             }),
           );
-          return yield* answerIdpSignIn(result, cfg, "sso");
+          return yield* clearSsoStateCookie(yield* answerIdpSignIn(result, cfg, "sso"), cfg);
         }),
       )
       // SAML assertion consumer service. The IdP form-POSTs here through the
-      // user's browser, so the tail is the same session-issuing one the OIDC
-      // callback uses — cookie, last-login-method hint, bearer header and all.
-      .handle("samlAcs", ({ params, payload }) =>
+      // user's browser as a top-level navigation, so it answers with a
+      // redirect: to `redirectTo` with the session cookie (and the
+      // last-login-method hint and bearer header) set, or to
+      // `errorRedirectTo` with an `error` code. The reason a response was
+      // refused goes to the log, never into the URL.
+      .handle("samlAcs", ({ params, payload, request }) =>
         Effect.gen(function* () {
           const sso = yield* resolveSso;
-          const result = yield* sso.service
-            .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState)
+          const refused = (error: string) => (cause: Cause.YieldableError) =>
+            Effect.logWarning("[effect-auth] SAML response refused", cause).pipe(
+              Effect.as(
+                HttpServerResponse.redirect(withErrorParam(ssoErrorRedirectTo, error), {
+                  status: 303,
+                }),
+              ),
+            );
+          return yield* sso.service
+            .handleSamlCallback(params.providerId, payload.SAMLResponse, payload.RelayState, {
+              browserState: readSsoStateCookie(request, cfg),
+            })
             .pipe(
+              Effect.flatMap((result) =>
+                (result.session === undefined
+                  ? Effect.as(
+                      noStore,
+                      HttpServerResponse.redirect(
+                        withSecondFactorFragment(ssoSecondFactorRedirectTo, result.secondFactor),
+                        { status: 303 },
+                      ),
+                    )
+                  : decorateSessionResponse(
+                      HttpServerResponse.redirect(ssoRedirectTo, { status: 303 }),
+                      result,
+                      cfg,
+                      "sso",
+                    )
+                ).pipe(Effect.flatMap((response) => clearSsoStateCookie(response, cfg))),
+              ),
               Effect.catchTags({
-                SsoError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-                AuthError: (e) => internalServerError(e),
-                RateLimitError: (e) => Effect.fail(new S.TooManyRequests({ message: e.message })),
-                AccountLockedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                UserBannedError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.Forbidden({ message: msg, code: e.code })),
-                    ),
-                  ),
-                CaptchaError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
-                    ),
-                  ),
-                PwnedPasswordError: (e) =>
-                  resolveMessage(e.code, e.message).pipe(
-                    Effect.flatMap((msg) =>
-                      Effect.fail(new S.BadRequest({ message: msg, code: e.code })),
+                SsoError: refused("access_denied"),
+                AccountLockedError: refused("access_denied"),
+                UserBannedError: refused("access_denied"),
+                CaptchaError: refused("access_denied"),
+                PwnedPasswordError: refused("access_denied"),
+                RateLimitError: refused("temporarily_unavailable"),
+                AuthError: (e) =>
+                  Effect.logError("[effect-auth] internal error", e).pipe(
+                    Effect.as(
+                      HttpServerResponse.redirect(
+                        withErrorParam(ssoErrorRedirectTo, "server_error"),
+                        {
+                          status: 303,
+                        },
+                      ),
                     ),
                   ),
               }),
             );
-          return yield* answerIdpSignIn(result, cfg, "sso");
         }),
       )
       .handle("samlMetadata", ({ params }) =>
@@ -4472,7 +4640,8 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
         Effect.andThen(resolveOidcProvider, jwksDocument()),
       ),
   ).pipe(
-    // `/oauth2/token` answers a request it cannot decode as RFC 6749 §5.2 does.
+    // The token endpoints and `/device/code` answer a request they cannot
+    // decode as RFC 6749 §5.2 does.
     Layer.provide(S.OAuthTokenSchemaErrors.layer),
   );
 };
@@ -5056,17 +5225,14 @@ const requireSession = (
 > => resolveSession(request, cfg).pipe(Effect.map((r) => r.resolved));
 
 /**
- * Fail with `Forbidden` unless the request's credential is
- * `"interactive"` — i.e. presented as the session cookie, not the
- * `Authorization: Bearer/Token` header. Gates operations that must not be
- * reachable by a machine credential (a bearer-delivered session token, or —
- * for an app that wires its own API-key middleware on top of this library —
- * an API key), such as minting a new API key from one already in hand.
+ * Fail with `Forbidden` unless the caller's session is `"interactive"`: the
+ * class recorded on the session when it was issued
+ * (`sessionCredentialClass`), never the header or cookie that carried its
+ * token. Gates operations a machine-issued session (the device grant) must
+ * not reach, such as minting or widening an API key.
  */
-const requireInteractiveCredential = (
-  request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<void, S.Forbidden> =>
-  credentialClassFromRequest(request) === "interactive"
+const requireInteractiveCredential = (session: Types.Session): Effect.Effect<void, S.Forbidden> =>
+  Types.sessionCredentialClass(session) === "interactive"
     ? Effect.void
     : Effect.fail(new S.Forbidden({ message: "This operation requires an interactive session" }));
 
@@ -5284,6 +5450,7 @@ const postRule = (
  * | `POST /google-one-tap-nonces`                                  | 20 req  | 10 min | 30 min |
  * | `POST /device/code`                                            | 10 req  | 10 min | 30 min |
  * | `POST /device/token` (polling)                                 | 300 req | 15 min | 15 min |
+ * | `POST /device-authorizations/lookups`                          | 20 req  | 10 min | 30 min |
  * | `POST /device-authorizations/decisions` (approve, deny)        | 20 req  | 10 min | 30 min |
  * | `POST /sso-authorizations` (SSO sign-in)                       | 20 req  | 10 min | 30 min |
  * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
@@ -5324,6 +5491,7 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   postRule("/device/code", 10, 10 * MINUTE_MS, 30 * MINUTE_MS),
   // A device polls every few seconds until the user decides.
   postRule("/device/token", 300, 15 * MINUTE_MS, 15 * MINUTE_MS),
+  postRule("/device-authorizations/lookups", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   postRule("/device-authorizations/decisions", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   postRule("/sso-authorizations", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   {
@@ -5579,6 +5747,12 @@ export interface AuthWebHandlerOptions {
    */
   readonly clientHiddenAttributes?: ReadonlyArray<string> | undefined;
   /**
+   * Where the SAML assertion consumer service (`POST /sso/saml/acs/:providerId`)
+   * redirects the browser after a sign-in (default `"/"`) or a refused
+   * response (default the same, with an `error` query parameter).
+   */
+  readonly sso?: SsoRedirectConfig | undefined;
+  /**
    * Mount path prefix to strip before routing, e.g. `"/api/auth"`. When set, a
    * request to `/api/auth/sessions` is routed to the `/sessions` endpoint.
    */
@@ -5594,6 +5768,12 @@ export interface AuthWebHandlerOptions {
    * (e.g. a plain HTML form submission), the `Referer` origin is used as a
    * fallback. Requests with neither header (curl, server-to-server) are
    * allowed through.
+   *
+   * Three protocol endpoints skip the check, since cross-site callers post to
+   * them by design and each carries its own proof: `POST /oauth2/token`,
+   * `POST /register` and the SAML ACS (`POST /sso/saml/acs/:providerId`),
+   * which needs the pre-login cookie `POST /sso-authorizations` sets. Don't
+   * list an IdP's origin here: that would trust it on every endpoint.
    *
    * **Host trust**: the request URL's origin is derived from the `Host` header
    * as seen by the application. When deployed behind a reverse proxy you MUST
@@ -5661,8 +5841,7 @@ export interface AuthWebHandlerOptions {
    * **Client address required**: the limiter keys each request by its client
    * address, so `make` throws {@link ClientAddressConfigError} unless this is
    * `false` or {@link trustedProxy} is set. A Web `Request` has no socket
-   * address to fall back on, and {@link allowMissingClientIp} is no address
-   * source.
+   * address to fall back on.
    *
    * **Overriding a default.** The first rule that matches an endpoint wins, so
    * a deployment changes one endpoint's limit by putting its own rule ahead of
@@ -5682,24 +5861,6 @@ export interface AuthWebHandlerOptions {
    * with no rule are unaffected.
    */
   readonly ipRateLimit?: HttpIPRateLimitConfig | false | undefined;
-  /**
-   * Not an address source, and not an opt-out of the client-address check.
-   * Under `Http.make` a Web `Request` has no socket address, so with no
-   * {@link trustedProxy} no request has an address, and a limit keyed on it
-   * would refuse every request it covers with `429`. So `make` throws
-   * {@link ClientAddressConfigError} (and {@link makeAsync} rejects with it)
-   * whenever {@link ipRateLimit} (on unless it is `false`), an
-   * `IPRateLimitPlugin` in the `services` `Hooks`, or dynamic client
-   * registration in the `services`' `OidcProviderService` has no
-   * `trustedProxy`, whether or not this is set; with it set, the error's
-   * message says so. With a `trustedProxy` it changes nothing.
-   *
-   * Give the handler a `trustedProxy`, or serve without the IP limit with
-   * `ipRateLimit: false`, the only way to turn it off. Under a `trustedProxy`,
-   * a request whose forwarded address is missing or unusable is refused with
-   * `429` on a limited endpoint, and is never counted under a shared bucket.
-   */
-  readonly allowMissingClientIp?: boolean | undefined;
   /**
    * Refuse configuration that would otherwise only be warned about, and a
    * `services` build `make` cannot check at startup. Default `false`.
@@ -5825,6 +5986,31 @@ const isTrustedRequest = (request: Request, trustedOrigins: ReadonlyArray<string
 };
 
 /**
+ * The protocol endpoints a cross-site caller posts to by design, which the
+ * Origin gate leaves alone (paths inside the mount `prefix`). Each carries its
+ * own proof and never acts on the session cookie: the token endpoint and
+ * dynamic registration authenticate the client in the request itself, and the
+ * SAML ACS, which the IdP's page form-POSTs from the IdP's origin, needs the
+ * pre-login cookie (`SameSite=None`) and a signed response. Listing the IdP in
+ * `trustedOrigins` instead would open every endpoint to it.
+ *
+ * Only these exact spellings are exempt: another spelling the router also
+ * matches still meets the gate, which only fails closed.
+ */
+const isOriginExempt = (method: string, path: string): boolean =>
+  method.toUpperCase() === "POST" &&
+  (path === "/oauth2/token" || path === "/register" || /^\/sso\/saml\/acs\/[^/]+$/.test(path));
+
+/** The Origin gate: an exempt protocol endpoint, or a trusted request. */
+const isOriginAllowed = (
+  request: Request,
+  inner: string | null,
+  trustedOrigins: ReadonlyArray<string>,
+): boolean =>
+  (inner !== null && isOriginExempt(request.method, inner)) ||
+  isTrustedRequest(request, trustedOrigins);
+
+/**
  * A mounted auth handler, as {@link make} and {@link makeAsync} return it.
  */
 export interface AuthWebHandler {
@@ -5840,9 +6026,8 @@ export interface AuthWebHandler {
 /**
  * The startup check of `ipRateLimit`, which needs no build: a rate limit
  * keyed by client address needs an address source. A Web Request has no socket
- * address, so `trustedProxy` must be configured; `allowMissingClientIp: true`
- * without it would refuse every request to a limited endpoint, so it is
- * refused too. Its IPv6 prefix length must be one it can key on.
+ * address, so `trustedProxy` must be configured. Its IPv6 prefix length must
+ * be one it can key on.
  */
 const ipRateLimitAddressError = (
   options: AuthWebHandlerOptions,
@@ -5854,8 +6039,7 @@ const ipRateLimitAddressError = (
         message:
           "ipRateLimit (on by default) needs a client address, and a Web Request has none under Http.make or Http.makeAsync. " +
           "Set trustedProxy (for example ClientIP.cloudflare) to key the limit by the visitor's address, " +
-          "or set ipRateLimit: false to serve without the limit." +
-          allowMissingClientIpNote(options),
+          "or set ipRateLimit: false to serve without the limit.",
       })
     : undefined);
 
@@ -5976,7 +6160,9 @@ const serve = (
       ),
     ),
     Layer.provide(tokenEndpointsNoStore),
-    Layer.provide(groupLayers(options.cookie, options.multiSession, options.signUpAttributes)),
+    Layer.provide(
+      groupLayers(options.cookie, options.multiSession, options.signUpAttributes, options.sso),
+    ),
     Layer.provide(PlatformLayer),
   );
   // The handlers' service requirements are tracked as phantom
@@ -6028,7 +6214,7 @@ const serve = (
       return Promise.resolve(Response.json({ message: "Not Found" }, { status: 404 }));
     }
 
-    if (!isTrustedRequest(request, trustedOrigins)) {
+    if (!isOriginAllowed(request, inner, trustedOrigins)) {
       return Promise.resolve(Response.json({ message: "Origin not allowed" }, { status: 403 }));
     }
 
@@ -6192,7 +6378,6 @@ const tooManyRequests = (
  *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.
@@ -6305,7 +6490,6 @@ export const make = (options: AuthWebHandlerOptions): AuthWebHandler => {
  *   `false`), an `IPRateLimitPlugin` in the `services` `Hooks`, or
  *   dynamic client registration enabled in the `services`'
  *   `OidcProviderService`, with no `trustedProxy`.
- *   `allowMissingClientIp: true` does not stand in for one.
  * - `RateLimiterConfigError`: `ipRateLimit` (unless it is `false`), dynamic
  *   client registration or a `DeviceAuthorizationService` (without
  *   `allowMissingRateLimiter: true`) with no `RateLimiter` in `services`.

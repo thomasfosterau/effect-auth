@@ -67,7 +67,7 @@ import { randomBase64UrlToken } from "./RandomToken.ts";
 import { SessionService } from "./SessionService.ts";
 import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { normalizeEmail } from "./utils.ts";
+import { normalizeDomain, normalizeEmail } from "./utils.ts";
 
 /**
  * Organization error
@@ -515,6 +515,18 @@ export class OrganizationStore extends Context.Service<
     readonly countMembersByOrganization: (
       organizationId: string,
     ) => Effect.Effect<number, Errors.AuthError>;
+    /**
+     * Optional: one page of the organization's memberships, oldest first
+     * (`createdAt`, then `id`), skipping `offset` and returning at most
+     * `limit`. SCIM's `GET /Users` pages through it, so a sync reads one page
+     * of users rather than the whole directory; push the `ORDER BY … LIMIT …
+     * OFFSET …` into the database. Absent, SCIM lists every membership and
+     * slices the page out of it.
+     */
+    readonly listMembersByOrganizationPage?: (
+      organizationId: string,
+      page: { readonly offset: number; readonly limit: number },
+    ) => Effect.Effect<ReadonlyArray<Member>, Errors.AuthError>;
 
     readonly createInvitation: (
       invitation: Invitation,
@@ -1402,9 +1414,6 @@ export class OrganizationService extends Context.Service<
   static readonly layer = (config: OrganizationConfig = {}) =>
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
-
-/** Trim surrounding whitespace and lower-case a domain. */
-const normalizeDomain = (domain: string): string => domain.trim().toLowerCase();
 
 /** The domain part of an email address, normalized; `""` when there is none. */
 const domainOfEmail = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");

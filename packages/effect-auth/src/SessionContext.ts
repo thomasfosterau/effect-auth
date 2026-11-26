@@ -81,6 +81,7 @@ import { CurrentCredential, CurrentPrincipal, type CredentialClass } from "./Aut
 import * as Entity from "./Entity.ts";
 import * as Errors from "./Errors.ts";
 import type * as Types from "./Types.ts";
+import { sessionCredentialClass } from "./Types.ts";
 
 // ---------------------------------------------------------------------------
 // Context services
@@ -162,9 +163,9 @@ export const principalOf = (user: Types.User): Entity.EntityRef => Entity.ref("U
 /**
  * How the caller got in, for the constructors below.
  *
- * Defaults to `"interactive"`: a session handed to a runtime by an app edge
- * came from a browser credential unless the edge says otherwise. Pass
- * `"machine"` when the request authenticated with an API key — a credential
+ * Defaults to the class the session was issued with
+ * (`sessionCredentialClass`) for a session, and to `"interactive"` for a bare
+ * user. Pass `"machine"` when the request authenticated with an API key — a credential
  * changes *who* the request is, never *what* it may do, and the policy kernel
  * reads `CurrentCredential` to enforce exactly that.
  *
@@ -187,7 +188,7 @@ export interface CredentialOptions {
  *
  * `CurrentCredential` is provided because the required-auth middleware provides
  * it: an effect that reads it has to run in all three contexts, which is the
- * whole point of this module. It defaults to `"interactive"` — see
+ * whole point of this module. It defaults to the session's own class — see
  * {@link CredentialOptions}.
  *
  * @since 0.1.0
@@ -204,7 +205,10 @@ export const authenticatedLayer = (
     Layer.succeed(CurrentUser, resolved.user),
     Layer.succeed(MaybeCurrentSession, Option.some(resolved)),
     Layer.succeed(CurrentPrincipal, principalOf(resolved.user)),
-    Layer.succeed(CurrentCredential, options?.credentialClass ?? "interactive"),
+    Layer.succeed(
+      CurrentCredential,
+      options?.credentialClass ?? sessionCredentialClass(resolved.session),
+    ),
   );
 
 /**

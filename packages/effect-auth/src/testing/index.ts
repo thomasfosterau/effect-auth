@@ -74,6 +74,7 @@ export {
   memoryAccountManagementStore,
   memoryApiKeyStore,
   memoryCredentialStore,
+  memoryDeviceAuthorizationStore,
   memoryEmailPasswordStore,
   memoryJwtKeyStore,
   memoryMultiFactorStore,

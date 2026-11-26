@@ -35,7 +35,7 @@
  * bearer token.
  */
 
-import { Clock, DateTime, Duration, Effect, Layer, Order } from "effect";
+import { Clock, DateTime, Duration, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
@@ -157,7 +157,10 @@ interface UserRow {
   readonly updated_at: number;
 }
 
-const rowToUser = (row: UserRow, label: string): Effect.Effect<Auth.User, Auth.AuthError> =>
+const rowToUser = (
+  row: Omit<UserRow, "password_hash">,
+  label: string,
+): Effect.Effect<Auth.User, Auth.AuthError> =>
   Effect.all(
     {
       attributes: decodeAttributes(row.attributes, label),
@@ -2245,15 +2248,13 @@ export const makeApiKeyStore: Effect.Effect<
 // AdminUserStore (reuses auth_users + auth_identifiers — no dedicated table)
 // ---------------------------------------------------------------------------
 
-interface UserRowWithEmail extends UserRow {
+/** A user row without `password_hash`, which `listUsers` never selects, and its earliest email. */
+interface ListedUserRow extends Omit<UserRow, "password_hash"> {
   readonly primary_email: string | null;
 }
 
-/** Orders by `email` with `localeCompare`, the order `listUsers` pages in. */
-const byEmail: Order.Order<{ readonly email: string }> = Order.make((a, b) => {
-  const compared = a.email.localeCompare(b.email);
-  return compared < 0 ? -1 : compared > 0 ? 1 : 0;
-});
+/** `value` as a `LIKE` pattern matching it as a literal substring (escape `\\`). */
+const likeSubstring = (value: string): string => `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 
 /** `Auth.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
 export const makeAdminUserStore: Effect.Effect<
@@ -2263,41 +2264,44 @@ export const makeAdminUserStore: Effect.Effect<
 > = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
 
+  // Each user with their earliest email identifier, the column `listUsers`
+  // searches and orders by.
+  const listed = sql`SELECT u.id, u.name, u.image, u.attributes, u.created_at, u.updated_at, (
+      SELECT value FROM auth_identifiers ie
+      WHERE ie.user_id = u.id AND ie.type = 'email'
+      ORDER BY ie.created_at ASC LIMIT 1
+    ) AS primary_email
+    FROM auth_users u`;
+
   return {
-    // No SQL-side pagination: matches/sorts on each user's earliest email
-    // identifier, which lives in a different table and isn't indexable as a
-    // plain column, so the candidate set is materialized once and paged in
-    // memory (mirrors the reference semantics in Admin.test.ts's test store).
+    // Search, order and page in SQL: one page of rows is read, never the table.
     listUsers: (query) =>
       Effect.gen(function* () {
+        const search = query.searchEmail?.toLowerCase();
+        const where =
+          search === undefined || search === ""
+            ? sql``
+            : sql`WHERE LOWER(COALESCE(l.primary_email, '')) LIKE ${likeSubstring(search)} ESCAPE '\\'`;
+        const offset = Math.max(0, Math.trunc(query.offset ?? 0));
+        // SQLite has no OFFSET without a LIMIT, so "no limit" is the largest one.
+        const limit = Math.max(0, Math.trunc(query.limit ?? Number.MAX_SAFE_INTEGER));
+        const counted = yield* firstRow(
+          "adminUser.listUsers",
+          sql<{
+            readonly total: number;
+          }>`SELECT CAST(COUNT(*) AS INTEGER) AS total FROM (${listed}) l ${where}`,
+        );
         const rows = yield* allRows(
           "adminUser.listUsers",
-          sql<UserRowWithEmail>`
-            SELECT u.*, (
-              SELECT value FROM auth_identifiers ie
-              WHERE ie.user_id = u.id AND ie.type = 'email'
-              ORDER BY ie.created_at ASC LIMIT 1
-            ) AS primary_email
-            FROM auth_users u`,
+          sql<ListedUserRow>`SELECT * FROM (${listed}) l ${where}
+            ORDER BY COALESCE(l.primary_email, ''), l.id
+            LIMIT ${limit} OFFSET ${offset}`,
         );
-        const decorated = yield* Effect.forEach(
-          rows,
-          (row) =>
-            rowToUser(row, "adminUser.listUsers").pipe(
-              Effect.map((user) => ({ user, email: row.primary_email ?? "" })),
-            ),
-          { concurrency: 1 },
-        );
-        const search = query.searchEmail?.toLowerCase();
-        const matching = Arr.sort(
-          decorated.filter(({ email }) => (search ? email.toLowerCase().includes(search) : true)),
-          byEmail,
-        );
-        const offset = query.offset ?? 0;
-        const limit = query.limit ?? matching.length;
         return {
-          users: matching.slice(offset, offset + limit).map(({ user }) => user),
-          total: matching.length,
+          users: yield* Effect.forEach(rows, (row) => rowToUser(row, "adminUser.listUsers"), {
+            concurrency: 1,
+          }),
+          total: counted?.total ?? 0,
         } satisfies Auth.ListUsersResult;
       }),
     createUser: (input) => users.create(input, "adminUser.createUser"),

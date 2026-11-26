@@ -8,7 +8,9 @@
  *
  * The `id_token` is signed with the {@link module:jwt} `JwtService`, sharing
  * its signing keys — the JWKS published at `/.well-known/jwks.json` (or
- * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s.
+ * `GET /jwks`) verifies both plain user JWTs and OIDC `id_token`s. An
+ * `id_token` carries `typ: "JWT"` and only its OIDC claims, so
+ * `JwtService.verify` (which requires `typ: "at+jwt"`) refuses it as a bearer.
  *
  * Secrets at rest: client secrets, authorization codes, and access/refresh
  * tokens are stored only as sha256 hex digests — lookups by exact digest are
@@ -174,7 +176,9 @@ export class OidcCodeStore extends Context.Service<
  * `kind: "rotated"` is the record a refresh token leaves behind when it is
  * rotated, under a key derived from the token's digest: it grants nothing,
  * and presenting its token again is a replay that revokes the whole family
- * (RFC 6819 §5.2.2.3). It expires with the family.
+ * (RFC 6819 §5.2.2.3). It expires with the family. A family revoked because
+ * two refreshes raced also leaves one, with no `familyId` of its own, so the
+ * winner of the race finds it after issuing and gives its tokens up.
  */
 export interface OidcToken {
   /** sha256 hex digest of the token — never the plaintext. */
@@ -424,8 +428,7 @@ export interface OidcDynamicRegistrationConfig {
    * The limit keys on the client address in the `ClientIP` service, which
    * `Http.make` and `Http.makeAsync` resolve from their own `trustedProxy`.
    * They fail at startup with `ClientAddressConfigError` when registration is
-   * enabled with no `trustedProxy` (`allowMissingClientIp: true` does not
-   * stand in for one).
+   * enabled with no `trustedProxy`.
    * A registration with no address is refused with `429`, and is never counted
    * under a shared bucket.
    */
@@ -966,6 +969,8 @@ export const make = (
      * token with it. The record lives in the store, so this holds across
      * restarts and instances.
      */
+    const revokedFamilyKey = (familyId: string) => hashSecret(`revoked-family:${familyId}`);
+
     const revokeIfRotated = (presentedHash: string) =>
       Effect.gen(function* () {
         const rotated = yield* tokenStore.get(yield* rotationRecordKey(presentedHash));
@@ -1035,11 +1040,12 @@ export const make = (
         let idToken: string | undefined;
         if (grant.scopes.includes("openid")) {
           const signed = yield* jwt
-            .sign(user, {
+            .signIdToken({
+              ...(yield* claimsFor(user, grant.scopes)),
               iss: config.issuer,
+              sub: user.id,
               aud: grant.clientId,
               ...(grant.nonce !== undefined && { nonce: grant.nonce }),
-              ...(yield* claimsFor(user, grant.scopes)),
             })
             .pipe(
               Effect.catchTag("JwtError", (e) =>
@@ -1747,19 +1753,14 @@ export const make = (
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
 
-            // Rotation: burn the presented token immediately, atomically.
-            // A `null` means a concurrent refresh rotated it first, so
-            // this one is refused rather than forking the family.
-            if ((yield* tokenStore.consume(record.tokenHash)) === null) {
-              return yield* new OidcTokenError({ error: "invalid_grant" });
-            }
-
             // Carry the family lineage and absolute lifetime through all rotations.
             const familyId = record.familyId ?? (yield* randomToken());
             const absoluteExpiresAt = record.absoluteExpiresAt ?? record.expiresAt;
 
             // Leave a record of the rotation for reuse detection. It grants
-            // nothing and expires with the family.
+            // nothing and expires with the family. It is written before the
+            // spend, so a presentation that finds the token gone always finds
+            // this record.
             yield* tokenStore.create({
               tokenHash: yield* rotationRecordKey(record.tokenHash),
               kind: "rotated",
@@ -1771,6 +1772,28 @@ export const make = (
               familyId,
               absoluteExpiresAt,
             });
+
+            // Rotation: burn the presented token, atomically. A `null` means a
+            // concurrent refresh spent it first. That is reuse as surely as a
+            // later replay (timing must not decide whether a stolen token's
+            // family survives), so the family goes. A client that
+            // double-submits a refresh (a retry, two tabs) is signed out by
+            // this, by design. The revocation marker is written before the
+            // delete, and the winner reads it after writing its tokens, so
+            // either the winner finds the marker or the delete finds its tokens.
+            if ((yield* tokenStore.consume(record.tokenHash)) === null) {
+              yield* tokenStore.create({
+                tokenHash: yield* revokedFamilyKey(familyId),
+                kind: "rotated",
+                clientId: record.clientId,
+                userId: record.userId,
+                scopes: [],
+                expiresAt: absoluteExpiresAt,
+                createdAt: yield* Clock.currentTimeMillis,
+              });
+              yield* tokenStore.deleteByFamily(familyId);
+              return yield* new OidcTokenError({ error: "invalid_grant" });
+            }
 
             // Absolute (non-sliding) lifetime check.
             if ((yield* Clock.currentTimeMillis) > absoluteExpiresAt) {
@@ -1793,13 +1816,20 @@ export const make = (
               effectiveScopes = requested;
             }
 
-            return yield* issueTokens({
+            const issued = yield* issueTokens({
               clientId: client.clientId,
               userId: record.userId,
               scopes: effectiveScopes,
               familyId,
               absoluteExpiresAt,
             });
+            // A concurrent refresh with the same token lost the race and
+            // revoked the family; these tokens belong to it too.
+            if ((yield* tokenStore.get(yield* revokedFamilyKey(familyId))) !== null) {
+              yield* tokenStore.deleteByFamily(familyId);
+              return yield* new OidcTokenError({ error: "invalid_grant" });
+            }
+            return issued;
           }
 
           return yield* new OidcTokenError({ error: "unsupported_grant_type" });

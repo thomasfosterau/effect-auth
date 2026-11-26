@@ -22,6 +22,7 @@
     class: className = undefined,
     classes: classOverrides = undefined,
     labels: labelOverrides = undefined,
+    captchaToken = undefined,
   }: PasswordResetRequestFormProps = $props();
 
   const client = resolveAuthClient(() => clientProp);
@@ -35,7 +36,7 @@
 
   const handleSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
-    void submission.run(() => client.passwordResetRequest({ email }), {
+    void submission.run(() => client.passwordResetRequest({ email, captchaToken: captchaToken?.() }), {
       fallback: labels.error,
       onSuccess,
       onError,

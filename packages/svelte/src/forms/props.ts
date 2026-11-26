@@ -111,7 +111,8 @@ export const PASSWORD_RESET_REQUEST_LABELS: PasswordResetRequestLabels = {
 };
 
 /** Props for `PasswordResetRequestForm`. */
-export interface PasswordResetRequestFormProps extends AuthFormBaseProps<StatusResponse> {
+export interface PasswordResetRequestFormProps
+  extends AuthFormBaseProps<StatusResponse>, SendCaptchaProps {
   readonly labels?: Partial<PasswordResetRequestLabels> | undefined;
 }
 

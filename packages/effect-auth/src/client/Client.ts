@@ -214,6 +214,8 @@ interface WireDeviceSession extends WireSession {
   readonly active: boolean;
 }
 
+type WireDeviceAuthorization = Omit<Http.DeviceAuthorizationView, "id">;
+
 type WireOrganization = Omit<Http.OrganizationView, "id">;
 
 type WireMember = Omit<Http.MemberView, "id" | "organizationId" | "userId">;
@@ -413,7 +415,9 @@ const errorMessage = (body: unknown): string | undefined => {
       ? first.detail
       : undefined;
   }
-  return "message" in body && typeof body.message === "string" ? body.message : undefined;
+  if ("message" in body && typeof body.message === "string") return body.message;
+  // An OAuth error object (RFC 6749 §5.2), as the RFC tier answers.
+  return "error" in body && typeof body.error === "string" ? body.error : undefined;
 };
 
 /** The auth client: typed methods over the contract, plus session-change notification. */
@@ -448,7 +452,11 @@ export interface AuthClient {
   readonly getSession: () => Promise<Http.SessionWithUserView | null>;
   readonly sendVerificationEmail: (payload: { email: string }) => Promise<Http.StatusResponse>;
   readonly verifyEmail: (payload: { token: string }) => Promise<AuthResult>;
-  readonly passwordResetRequest: (payload: { email: string }) => Promise<Http.StatusResponse>;
+  readonly passwordResetRequest: (payload: {
+    email: string;
+    /** A captcha token, for a server running `CaptchaPlugin` with the `"sendCode"` endpoint. */
+    captchaToken?: string | undefined;
+  }) => Promise<Http.StatusResponse>;
   readonly passwordResetConfirm: (payload: {
     token: string;
     newPassword: string;
@@ -537,15 +545,28 @@ export interface AuthClient {
 
   /**
    * Device authorization grant (RFC 8628). `code`/`token` are called by the
-   * input-constrained device; `approve`/`deny` by the signed-in user on the
-   * verification page. 404 when unconfigured.
+   * input-constrained device with its registered `client_id`, in RFC 8628's
+   * wire format; a refusal rejects with the RFC error code (`invalid_client`,
+   * `authorization_pending`, `slow_down`, ...) as the `AuthClientError`'s
+   * message. `lookup`/`approve`/`deny` are called by the signed-in user on the verification page,
+   * which shows the client and scopes `lookup` answers before the user
+   * decides. 404 when unconfigured.
    */
   readonly device: {
-    readonly code: (payload?: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
-    /** Poll for the session. 400 while the user has not decided yet. */
-    readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.AuthSuccess>;
-    readonly approve: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
-    readonly deny: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
+    readonly code: (payload: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
+    /**
+     * Poll for the token response, whose `access_token` is a session token to
+     * send as `Authorization: Bearer`. 400 `authorization_pending` while the
+     * user has not decided yet. Sets no cookie, so it notifies no session
+     * observer.
+     */
+    readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.DeviceTokenView>;
+    /** The pending request a user code names: the client and the scopes it asks for. */
+    readonly lookup: (payload: Http.DeviceUserCodePayload) => Promise<Http.DeviceAuthorizationView>;
+    readonly approve: (
+      payload: Http.DeviceUserCodePayload,
+    ) => Promise<Http.DeviceAuthorizationView>;
+    readonly deny: (payload: Http.DeviceUserCodePayload) => Promise<Http.DeviceAuthorizationView>;
   };
 
   readonly multiFactor: {
@@ -978,17 +999,31 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       },
     );
 
+  /** A `device-authorizations` document as its view. */
+  const deviceAuthorizationView = ({
+    data,
+  }: DataDocument<WireDeviceAuthorization>): Http.DeviceAuthorizationView => ({
+    id: data.id,
+    ...data.attributes,
+  });
+
   /**
-   * Approve or deny a device's user code (`POST /device-authorizations/decisions`).
-   * The code travels in the body, never in the URL.
+   * Look up (`POST /device-authorizations/lookups`), approve or deny
+   * (`POST /device-authorizations/decisions`) a device's user code. The code
+   * travels in the body, never in the URL.
    */
+  const lookupDevice = (userCode: string): Promise<Http.DeviceAuthorizationView> =>
+    jsonApi<DataDocument<WireDeviceAuthorization>>("POST", "/device-authorizations/lookups", {
+      data: { type: "device-authorization-lookups", attributes: { userCode } },
+    }).then(deviceAuthorizationView);
+
   const decideDevice = (
     userCode: string,
     decision: "approved" | "denied",
-  ): Promise<Http.StatusResponse> =>
-    jsonApi<void>("POST", "/device-authorizations/decisions", {
+  ): Promise<Http.DeviceAuthorizationView> =>
+    jsonApi<DataDocument<WireDeviceAuthorization>>("POST", "/device-authorizations/decisions", {
       data: { type: "device-authorization-decisions", attributes: { userCode, decision } },
-    }).then(() => ({ status: true }));
+    }).then(deviceAuthorizationView);
 
   /** Redeem a second-factor challenge with a TOTP or backup code. */
   const verifySecondFactor = (
@@ -1090,9 +1125,12 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           data: { type: "email-verification-redemptions", attributes: { token } },
         }).then(authResult),
       ),
-    passwordResetRequest: ({ email }) =>
+    passwordResetRequest: ({ email, captchaToken }) =>
       jsonApi<void>("POST", "/password-resets", {
-        data: { type: "password-resets", attributes: { email } },
+        data: {
+          type: "password-resets",
+          attributes: { email, ...(captchaToken !== undefined && { captchaToken }) },
+        },
       }).then(() => ({ status: true })),
     passwordResetConfirm: ({ token, newPassword }) =>
       jsonApi<void>("POST", "/password-resets/redemptions", {
@@ -1217,9 +1255,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     device: {
-      code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload ?? {}),
-      token: (payload) =>
-        mutating(() => request<Http.AuthSuccess>("POST", "/device/token", payload)),
+      code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload),
+      token: (payload) => request<Http.DeviceTokenView>("POST", "/device/token", payload),
+      lookup: ({ userCode }) => lookupDevice(userCode),
       approve: ({ userCode }) => decideDevice(userCode, "approved"),
       deny: ({ userCode }) => decideDevice(userCode, "denied"),
     },

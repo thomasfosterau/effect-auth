@@ -12,6 +12,7 @@ import * as Http from "../../http/index.ts";
 import { testRootSecretLayer } from "../../testing/RootSecret.ts";
 import {
   memoryApiKeyStore,
+  memoryDeviceAuthorizationStore,
   memoryPhoneOtpStore,
   memoryRateLimitStore,
   memorySessionStore,
@@ -38,17 +39,26 @@ const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A 
   return found;
 };
 
+/** The device client `features` registers: what `device.code` names as its `clientId`. */
+export const FIXTURE_DEVICE_CLIENT = {
+  id: "fixture-device",
+  name: "Fixture device",
+  scopes: ["read", "write"],
+} as const satisfies Auth.DeviceClient;
+
 export interface ServerFixtureOptions {
   /**
    * Mount the optional auth features: username + anonymous sign-in,
    * multi-factor (with the sign-in gate), account management
    * (change-email / delete-user), phone OTP and device authorization.
    *
+   * Device authorization registers one client, {@link FIXTURE_DEVICE_CLIENT}
+   * (`fixture-device`, scopes `read` and `write`).
+   *
    * The feature set includes an in-memory `RateLimiter`, because the core
-   * requires one for device authorization. Device approve and deny are
-   * therefore rate limited as in production: 5 attempts per user code per 15
-   * minutes, then `429`. A test that approves or denies one code more than 5
-   * times in a window sees the limit.
+   * requires one for device authorization. Device lookups and decisions are
+   * therefore rate limited as in production: 10 per signed-in caller per 15
+   * minutes, then `429`.
    */
   readonly features?: boolean;
   /**
@@ -310,32 +320,6 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
-  const deviceRecords = MutableHashMap.empty<string, Auth.DeviceAuthorizationRecord>();
-  const deviceStore: typeof Auth.DeviceAuthorizationStore.Service = {
-    create: (record) =>
-      Effect.sync(() => (MutableHashMap.set(deviceRecords, record.deviceCode, record), record)),
-    getByDeviceCode: (deviceCode) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(deviceRecords, deviceCode))),
-    getByUserCode: (userCode) =>
-      Effect.sync(
-        () =>
-          Arr.fromIterable(MutableHashMap.values(deviceRecords)).find(
-            (r) => r.userCode === userCode,
-          ) ?? null,
-      ),
-    update: (record) =>
-      Effect.sync(() => (MutableHashMap.set(deviceRecords, record.deviceCode, record), record)),
-    delete: (deviceCode) =>
-      Effect.sync(() => void MutableHashMap.remove(deviceRecords, deviceCode)),
-    claimApproval: (deviceCode) =>
-      Effect.sync(() => {
-        const record = Option.getOrUndefined(MutableHashMap.get(deviceRecords, deviceCode));
-        if (record === undefined || record.status !== "approved") return null;
-        MutableHashMap.remove(deviceRecords, deviceCode);
-        return record;
-      }),
-  };
-
   const featureBase = Layer.mergeAll(
     core,
     Layer.succeed(Auth.AnonymousUserStore)(anonymousUserStore),
@@ -344,7 +328,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     Layer.succeed(Auth.MultiFactor.PendingMultiFactorStore)(pendingMultiFactorStore),
     Layer.succeed(Auth.PhoneOtpStore)(memoryPhoneOtpStore()),
     Layer.succeed(Auth.PhoneOtpUserStore)(phoneOtpUserStore),
-    Layer.succeed(Auth.DeviceAuthorizationStore)(deviceStore),
+    Layer.succeed(Auth.DeviceAuthorizationStore)(memoryDeviceAuthorizationStore()),
   );
 
   const multiFactorServiceLayer = Auth.MultiFactor.MultiFactorService.layer({
@@ -369,6 +353,7 @@ export const makeServerFixture = (options: ServerFixtureOptions = {}) => {
     }).pipe(Layer.provide(featureBase)),
     Auth.DeviceAuthorizationService.layer({
       verificationUri: "https://client.test/device",
+      clients: [FIXTURE_DEVICE_CLIENT],
       // interval 0 so back-to-back polls in one test never hit `slow_down`.
       interval: 0,
     }).pipe(Layer.provide(featureBase)),

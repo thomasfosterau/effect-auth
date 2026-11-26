@@ -159,13 +159,35 @@ export interface Jwks {
 }
 
 /**
+ * The `typ` header of every JWT {@link JwtService.sign} issues: the RFC 9068
+ * access-token type. {@link JwtService.verify} and {@link RemoteJwksVerifier}
+ * accept only this type (or its `application/at+jwt` spelling), so a token the
+ * same keys sign for another purpose, such as an OIDC `id_token`, is refused.
+ *
+ * @since 0.1.0
+ */
+export const ACCESS_TOKEN_TYPE = "at+jwt";
+
+/**
+ * The claims of an OIDC `id_token` handed to {@link JwtService.signIdToken}.
+ * `iat` and `exp` are added by the service.
+ */
+export interface IdTokenClaims {
+  readonly iss: string;
+  readonly sub: string;
+  readonly aud: string;
+  readonly [claim: string]: Types.Json;
+}
+
+/**
  * JWT service
  */
 export class JwtService extends Context.Service<
   JwtService,
   {
     /**
-     * Sign a JWT for a user. The header is `{ alg, kid, typ: "JWT" }`; the
+     * Sign an access JWT for a user. The header is
+     * `{ alg, kid, typ: "at+jwt" }` ({@link ACCESS_TOKEN_TYPE}); the
      * payload carries `iss`/`aud?`/`sub`/`iat`/`exp` plus `definePayload(user)`
      * and any `extraClaims`. Lazily generates and persists a key pair on first
      * use when the store is empty.
@@ -176,10 +198,21 @@ export class JwtService extends Context.Service<
     ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError>;
 
     /**
-     * Verify a compact JWS and return its decoded payload. Validates the
-     * signature against the stored key whose `kid` matches the header, then
-     * checks `exp` (required), `nbf`, `iss`, and (when configured) `aud`.
-     * Fails with {@link JwtError} on any mismatch.
+     * Sign an OIDC `id_token` with the same keys. The header is
+     * `{ alg, kid, typ: "JWT" }`, so {@link verify} refuses the result; the
+     * payload is exactly `claims` plus `iat` and `exp`, never
+     * `definePayload` or the configured `audience`.
+     */
+    readonly signIdToken: (
+      claims: IdTokenClaims,
+    ) => Effect.Effect<JwtSignResult, JwtError | Errors.AuthError>;
+
+    /**
+     * Verify a compact access JWS and return its decoded payload. Requires
+     * the `typ` header {@link ACCESS_TOKEN_TYPE}, validates the signature
+     * against the stored key whose `kid` matches the header, then checks
+     * `exp` (required), `nbf`, `iss`, and (when configured) `aud`. Fails with
+     * {@link JwtError} on any mismatch.
      */
     readonly verify: (
       token: string,
@@ -479,42 +512,57 @@ export const make = (
       },
     );
 
+    const lifetime = (now: number) => ({
+      iat: Math.floor(now / 1000),
+      exp: Math.floor((now + expiresIn) / 1000),
+    });
+
+    /** Sign `payload`, which expires at `exp` (seconds), under the active key with header type `typ`. */
+    const signToken = (typ: string, payload: Types.JsonObject, exp: number) =>
+      Effect.gen(function* () {
+        const pair = yield* getOrCreateActiveKey();
+        const signingKey = yield* signingKeyOf(pair);
+        const token = yield* JoseJwt.sign(Claims, payload, signingKey, {
+          kid: pair.id,
+          typ,
+        }).pipe(
+          Effect.mapError((cause) => new JwtError({ message: "Failed to sign token", cause })),
+          Effect.provideContext(context),
+        );
+        return { token: Redacted.value(token), expiresAt: exp * 1000 } satisfies JwtSignResult;
+      }).pipe(Effect.withSpan(Obs.spanNames.tokenSign));
+
     return {
       sign: Effect.fn("JwtService.sign")((user: Types.User, extraClaims?: Types.JsonObject) =>
         Effect.gen(function* () {
-          const pair = yield* getOrCreateActiveKey();
-          const signingKey = yield* signingKeyOf(pair);
-
-          const now = yield* Clock.currentTimeMillis;
-          const iat = Math.floor(now / 1000);
-          const exp = Math.floor((now + expiresIn) / 1000);
-
-          const payload: Types.JsonObject = {
-            iss: config.issuer,
-            ...(config.audience !== undefined && { aud: config.audience }),
-            sub: getSubject(user),
-            iat,
-            exp,
-            ...config.definePayload?.(user),
-            ...extraClaims,
-          };
-
-          const token = yield* JoseJwt.sign(Claims, payload, signingKey, {
-            kid: pair.id,
-            typ: "JWT",
-          }).pipe(
-            Effect.mapError((cause) => new JwtError({ message: "Failed to sign token", cause })),
-            Effect.provideContext(context),
+          const times = lifetime(yield* Clock.currentTimeMillis);
+          return yield* signToken(
+            ACCESS_TOKEN_TYPE,
+            {
+              iss: config.issuer,
+              ...(config.audience !== undefined && { aud: config.audience }),
+              sub: getSubject(user),
+              ...times,
+              ...config.definePayload?.(user),
+              ...extraClaims,
+            },
+            times.exp,
           );
+        }),
+      ),
 
-          return { token: Redacted.value(token), expiresAt: exp * 1000 } satisfies JwtSignResult;
-        }).pipe(Effect.withSpan(Obs.spanNames.tokenSign)),
+      signIdToken: Effect.fn("JwtService.signIdToken")((claims: IdTokenClaims) =>
+        Effect.gen(function* () {
+          const times = lifetime(yield* Clock.currentTimeMillis);
+          return yield* signToken("JWT", { ...claims, ...times }, times.exp);
+        }),
       ),
 
       verify: Effect.fn("JwtService.verify")((token: string) =>
         Effect.gen(function* () {
           const keySet = yield* JoseJwks.makeLocal(keySetOf(yield* store.list()));
           const verified = yield* JoseJwt.verifyWithKeySet(Claims, token, {
+            typ: ACCESS_TOKEN_TYPE,
             algorithms: ["ES256", "EdDSA"],
             issuer: config.issuer,
             ...(config.audience !== undefined && { audience: config.audience }),
@@ -564,6 +612,12 @@ export interface RemoteJwksConfig {
   readonly clockSkewLeeway?: number;
   /** The algorithms a token may be signed with (default: `RS256`, `ES256` and `EdDSA`). */
   readonly algorithms?: ReadonlyArray<Jwk.AsymmetricAlgorithm>;
+  /**
+   * The `typ` header a token must carry (default: {@link ACCESS_TOKEN_TYPE}).
+   * Media types compare case-insensitively and without the `application/`
+   * prefix, so an `id_token` (`typ: "JWT"`) is refused by default.
+   */
+  readonly tokenType?: string | undefined;
 }
 
 /**
@@ -612,6 +666,7 @@ export const remoteJwksVerifier = (
     }).pipe(Effect.mapError(toJwtError));
     const signature = yield* Signature.Signature;
     const options: JoseJwt.VerifyWithKeySetOptions = {
+      typ: config.tokenType ?? ACCESS_TOKEN_TYPE,
       algorithms: config.algorithms ?? ["RS256", "ES256", "EdDSA"],
       issuer: config.issuer,
       ...(config.audience !== undefined && { audience: config.audience }),

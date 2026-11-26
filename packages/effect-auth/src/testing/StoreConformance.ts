@@ -1512,6 +1512,41 @@ export const organizationStoreConformance = <E = never, R = never>(
 ): ConformanceSuite<E, R | OrganizationStore> =>
   suite<E, R, OrganizationStore>("OrganizationStore", options, [
     {
+      name: "listMembersByOrganizationPage, when implemented, pages oldest first within one organization",
+      run: (newUser) =>
+        Effect.gen(function* () {
+          const store = yield* OrganizationStore;
+          const page = store.listMembersByOrganizationPage;
+          if (page === undefined) return;
+          const organization = yield* store.createOrganization(makeOrganization());
+          const other = yield* store.createOrganization(makeOrganization());
+          const members = [
+            { ...makeMember(organization.id, yield* newUser()), createdAt: at(3000).getTime() },
+            { ...makeMember(organization.id, yield* newUser()), createdAt: at(1000).getTime() },
+            { ...makeMember(organization.id, yield* newUser()), createdAt: at(2000).getTime() },
+          ];
+          yield* Effect.forEach(
+            [...members, makeMember(other.id, yield* newUser())],
+            (member) => store.createMember(member),
+            { concurrency: 1, discard: true },
+          );
+          const [newest, oldest, middle] = members;
+          yield* expectEqual(
+            "the first two",
+            yield* page(organization.id, { offset: 0, limit: 2 }),
+            [oldest, middle],
+          );
+          yield* expectEqual("the rest", yield* page(organization.id, { offset: 2, limit: 2 }), [
+            newest,
+          ]);
+          yield* expectEqual(
+            "past the end",
+            yield* page(organization.id, { offset: 3, limit: 2 }),
+            [],
+          );
+        }),
+    },
+    {
       name: "getMember and getMemberById read a membership back, and miss with null",
       run: (newUser) =>
         Effect.gen(function* () {

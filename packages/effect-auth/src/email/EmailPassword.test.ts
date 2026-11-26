@@ -201,6 +201,32 @@ describe("EmailPasswordService", () => {
     expect(createdWith).toEqual([{ type: "email", value: "test@example.com", verified: false }]);
   });
 
+  it("stores an internationalised address in normalised form, so its other spellings sign in", async () => {
+    const testContext = await makeTestContext();
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* EmailPassword.make();
+        // A decomposed "a" + combining diaeresis in the domain, a precomposed one in the local part.
+        const signedUp = yield* service.signUp({
+          email: "J\u00e4ger@Exa\u0308mple.COM",
+          password: "strong-password-123",
+        });
+        const signedIn = yield* service.signIn({
+          email: "ja\u0308ger@xn--exmple-cua.com",
+          password: "strong-password-123",
+        });
+        return { signedUp, signedIn };
+      }).pipe(Effect.provide(testContext), Effect.provide(Hooks.Default)),
+    );
+
+    expect(result.signedUp.identifier).toEqual({
+      type: "email",
+      value: "j\u00e4ger@xn--exmple-cua.com",
+    });
+    expect(result.signedIn.user.id).toBe(result.signedUp.user.id);
+  });
+
   it("fails with EmailInUseError when the store's writer returns the existing owner, and leaves the owner untouched", async () => {
     // A writer that upserts on the address. The owner's row lands between the
     // sign-up's pre-check and its insert, so the upsert returns the owner and

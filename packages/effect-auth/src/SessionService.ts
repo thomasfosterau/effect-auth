@@ -3,7 +3,9 @@ import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
 import { Digest, SecureRandom } from "effect/crypto";
+import * as R from "effect/Record";
 import type * as Types from "./Types.ts";
+import { SESSION_ISSUANCE_ATTRIBUTES } from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -295,9 +297,14 @@ export const make = (
             sessionId: storedSessionId,
           });
         }
+        // The issuance attributes (credential class, device grant) stay as
+        // the issuing flow wrote them, so no caller can upgrade a session.
         const updated: Types.Session = {
           ...session,
-          attributes: { ...session.attributes, ...attributes },
+          attributes: {
+            ...session.attributes,
+            ...R.filter(attributes, (_, key) => !SESSION_ISSUANCE_ATTRIBUTES.includes(key)),
+          },
         };
         return yield* sessionStore.update(updated);
       }),

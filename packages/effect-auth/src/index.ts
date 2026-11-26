@@ -107,6 +107,8 @@ export {
   hashApiKey,
 } from "./ApiKey.ts";
 export {
+  ACCESS_TOKEN_TYPE,
+  type IdTokenClaims,
   JwtError,
   type JwtAlgorithm,
   type JwtKeyPair,
@@ -130,6 +132,7 @@ export {
   SsoProviderStore,
   type RegisterProviderInput,
   type RegisterSamlProviderInput,
+  type SamlCallbackOptions,
   type SsoSignInResult,
   type SsoSignInSelector,
   SsoService,
@@ -256,12 +259,20 @@ export { AccountDeletion } from "./AccountDeletion.ts";
 export {
   type DeviceAuthorizationStatus,
   type DeviceAuthorizationRecord,
+  type DeviceDecision,
+  type DevicePollTouch,
   DeviceAuthorizationStore,
   DevicePollError,
   DeviceCodeError,
+  DeviceClientError,
+  type DeviceClient,
   type DeviceAuthorizationConfig,
+  type DeviceBeginInput,
   type DeviceBeginResult,
+  type DeviceAuthorizationRequest,
   type DevicePollResult,
+  type DeviceGrant,
+  deviceGrantOf,
   DeviceAuthorizationService,
   normalizeUserCode,
 } from "./DeviceAuthorization.ts";

@@ -503,6 +503,68 @@ describe("OidcProviderService", () => {
     expect(new URL(result.redirectTo).searchParams.get("code")).toBeTruthy();
   });
 
+  it("signs id_tokens that JwtService.verify refuses and that carry no definePayload claims", async () => {
+    const stores = makeOidcStores();
+    const user = makeUser("u1");
+    const layer = Layer.mergeAll(
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
+      Layer.succeed(UserStore)({ get: () => Effect.succeed(user) }),
+      Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
+      JwtService.layer({ issuer: ISSUER, definePayload: () => ({ roles: ["admin"] }) }).pipe(
+        Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
+      ),
+      testCryptoLayer,
+    );
+    const service = await Effect.runPromise(
+      OidcProvider.make({
+        ...config,
+        trustedClients: [
+          {
+            clientId: "first-party",
+            clientSecret: Redacted.make("shh"),
+            name: "First Party",
+            redirectUris: ["https://fp.test/cb"],
+          },
+        ],
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const { claims, verified } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authorized = yield* service.authorize(user, {
+          responseType: "code",
+          clientId: "first-party",
+          redirectUri: "https://fp.test/cb",
+          scope: "openid",
+        });
+        const code = new URL(authorized.redirectTo).searchParams.get("code") ?? "";
+        const tokens = yield* service.token({
+          grantType: "authorization_code",
+          code,
+          redirectUri: "https://fp.test/cb",
+          clientId: "first-party",
+          clientSecret: "shh",
+        });
+        const idToken = tokens.idToken ?? "";
+        const jwt = yield* JwtService;
+        return {
+          claims: Schema.decodeUnknownSync(
+            Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+          )(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8")),
+          verified: yield* Effect.result(jwt.verify(idToken)),
+        };
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(claims["sub"]).toBe("u1");
+    expect(claims["aud"]).toBe("first-party");
+    expect(claims["roles"]).toBeUndefined();
+    expect(Result.isFailure(verified)).toBe(true);
+  });
+
   describe("updateClient", () => {
     it("applies every supplied field and keeps the rest", async () => {
       const { layer, stores } = setup();
@@ -706,6 +768,38 @@ describe("OidcProviderService token state", () => {
       ),
     );
     expect(infos.map(Result.isFailure)).toEqual([true, true]);
+  });
+
+  it("revokes the family when two refreshes race with one token", async () => {
+    const { provider } = setup();
+    const service = provider();
+    const { credentials, tokens } = await Effect.runPromise(
+      grant(service, "openid offline_access"),
+    );
+    assert(Result.isSuccess(tokens));
+    const original = tokens.success;
+
+    // The store's reads yield, so both requests read the record before either spends it.
+    const raced = await Effect.runPromise(
+      Effect.all(
+        [
+          refresh(service, credentials, original.refreshToken ?? ""),
+          refresh(service, credentials, original.refreshToken ?? ""),
+        ],
+        { concurrency: "unbounded" },
+      ),
+    );
+    // The winner of the rotation finds the family revoked by the loser, so
+    // neither request keeps a token.
+    expect(raced.map((result) => Result.isFailure(result))).toEqual([true, true]);
+    expect(raced.map((result) => Result.isFailure(result) && result.failure)).toEqual([
+      expect.objectContaining({ error: "invalid_grant" }),
+      expect.objectContaining({ error: "invalid_grant" }),
+    ]);
+
+    // The original access token went with the family.
+    const info = await Effect.runPromise(Effect.result(service.userinfo(original.accessToken)));
+    assert(Result.isFailure(info));
   });
 
   // A refresh down-scoped to drop openid signs no id_token, and is refused all the same.
@@ -1199,13 +1293,10 @@ const makeHttpFixture = (
     readonly rateLimit?: boolean;
     readonly trustedProxy?: TrustedProxyConfig;
     /**
-     * `false` passes `Http.make` neither `trustedProxy` nor
-     * `allowMissingClientIp`, so a registration-enabled handler fails its
-     * startup check.
+     * `false` passes `Http.make` no `trustedProxy`, so a registration-enabled
+     * handler fails its startup check.
      */
     readonly declareRegistrationAddress?: boolean;
-    /** Pass `allowMissingClientIp: true` to `Http.make`. */
-    readonly allowMissingClientIp?: boolean;
     /**
      * Add a build step that waits on a promise, as a database connection does,
      * so the services finish building only after `Http.make` returns.
@@ -1416,7 +1507,6 @@ const makeHttpFixture = (
       services: limited ? withOidcLimiter : withOidc,
       ...WITHOUT_IP_LIMIT,
       ...(addressSource !== undefined && { trustedProxy: addressSource }),
-      ...(options.allowMissingClientIp === true && { allowMissingClientIp: true }),
     }).handler,
     handlerWithoutOidc: HttpServer.make({ services: withoutOidc, ...WITHOUT_IP_LIMIT }).handler,
   };
@@ -2115,7 +2205,7 @@ describe("HTTP OIDC provider endpoints", () => {
     expect(afterRevoke.status).toBe(400);
   });
 
-  it("redeems an authorization code and rotates a refresh token once under concurrency", async () => {
+  it("redeems an authorization code once and revokes the family on concurrent refreshes", async () => {
     const fx = makeHttpFixture();
     const adminSid = fx.makeSession(fx.seedUser("admin@idp.test", { role: "admin" }));
     const userSid = fx.makeSession(fx.seedUser("race@idp.test"));
@@ -2167,7 +2257,8 @@ describe("HTTP OIDC provider endpoints", () => {
     assert(issued !== undefined);
     const { refresh_token: refreshToken } = await jsonBody(issued, RefreshTokenBody);
 
-    // Concurrent refreshes of one token rotate it once, never forking the family.
+    // Concurrent refreshes of one token are reuse: every one is refused and
+    // the family is revoked, never forked.
     const rotations = await Promise.all(
       Arr.makeBy(3, () =>
         fx.handler(
@@ -2180,9 +2271,7 @@ describe("HTTP OIDC provider endpoints", () => {
         ),
       ),
     );
-    expect(rotations.map((response) => response.status).toSorted((a, b) => a - b)).toEqual([
-      200, 400, 400,
-    ]);
+    expect(rotations.map((response) => response.status)).toEqual([400, 400, 400]);
   });
 
   it("enforces absolute (non-sliding) refresh token lifetime", async () => {
@@ -2890,18 +2979,6 @@ describe("HTTP dynamic registration and the per-IP limit", () => {
       makeHttpFixture({ dynamicRegistration: {}, declareRegistrationAddress: false });
     expect(make).toThrow(ClientAddressConfigError);
     expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
-  });
-
-  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every registration", () => {
-    const options = {
-      dynamicRegistration: {},
-      declareRegistrationAddress: false,
-      allowMissingClientIp: true,
-    };
-    const make = () => makeHttpFixture(options);
-    expect(make).toThrow(ClientAddressConfigError);
-    expect(make).toThrow(REGISTRATION_ADDRESS_ERROR);
-    expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
   });
 
   it("rejects Http.makeAsync with ClientAddressConfigError when registration has no address source and services build asynchronously", async () => {

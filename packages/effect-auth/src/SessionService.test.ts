@@ -24,6 +24,7 @@ import { SessionStore, type SessionTouch } from "./SessionStore.ts";
 import { memorySessionStore } from "./testing/MemoryStores.ts";
 import { UserStore } from "./UserStore.ts";
 import type { Session, User, SessionConfig } from "./Types.ts";
+import { sessionCredentialClass } from "./Types.ts";
 
 // Mock implementations for testing
 const mockSessionStore = {
@@ -280,6 +281,42 @@ describe("SessionService", () => {
     // The raw token names no stored session.
     assert(Result.isFailure(result.byToken));
     expect(result.byToken.failure._tag).toBe("SessionNotFoundError");
+  });
+
+  it("setSessionAttributes never changes how the session was issued", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+
+    const updated = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const machine = yield* manager.createSession("user1", {
+            credentialClass: "machine",
+            deviceGrant: { clientId: "cli", scopes: ["read"] },
+          });
+          const interactive = yield* manager.createSession("user1");
+          return {
+            machine: yield* manager.setSessionAttributes(machine.session.id, {
+              credentialClass: "interactive",
+              deviceGrant: { clientId: "other", scopes: ["admin"] },
+              theme: "dark",
+            }),
+            interactive: yield* manager.setSessionAttributes(interactive.session.id, {
+              credentialClass: "machine",
+            }),
+          };
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(Effect.provide(Layer.merge(Hooks.Default, PlatformCrypto.layer))),
+    );
+
+    expect(updated.machine.attributes).toEqual({
+      credentialClass: "machine",
+      deviceGrant: { clientId: "cli", scopes: ["read"] },
+      theme: "dark",
+    });
+    expect(sessionCredentialClass(updated.machine)).toBe("machine");
+    expect(updated.interactive.attributes).toEqual({});
   });
 
   it("afterSignOut observes the stored id, never the token", async () => {

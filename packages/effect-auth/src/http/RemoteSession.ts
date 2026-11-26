@@ -972,7 +972,10 @@ const toEdge =
   }): EdgeSession => ({
     ...result.value,
     outcome: result.outcome,
-    credentialClass: SessionResolution.credentialClassOf(credential),
+    credentialClass: SessionResolution.credentialClassOf(
+      credential,
+      Option.getOrUndefined(Option.map(result.value.session, (resolved) => resolved.session)),
+    ),
   });
 
 /**

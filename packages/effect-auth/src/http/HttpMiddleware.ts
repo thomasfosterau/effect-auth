@@ -156,13 +156,13 @@ import {
 } from "../SessionContext.ts";
 import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
+import { sessionCredentialClass } from "../Types.ts";
 import {
   dataCookieName,
   internalServerError,
   resolveCookieConfig,
   sessionIdFromRequest,
   sessionValidationFailure,
-  credentialClassFromRequest,
   type CookieConfig,
   type ResolvedCookieConfig,
 } from "./HttpServer.ts";
@@ -238,8 +238,9 @@ const _authSecurity = {
  * `Authorization: Bearer/Token` header), validates it via `SessionService`
  * (honoring the signed cookie cache), and provides `CurrentSession`,
  * `CurrentUser`, `CurrentPrincipal` (`User::"<user.id>"`) and
- * `CurrentCredential` (`"interactive"` for the session cookie, `"machine"`
- * for the `Authorization` header) to the downstream handler.
+ * `CurrentCredential` (the class the session was issued with,
+ * `sessionCredentialClass`, whichever carrier presented the token) to the
+ * downstream handler.
  *
  * Fails with `Unauthorized` (HTTP 401) when the session is absent, expired, or
  * invalid, and with a logged `InternalServerError` (HTTP 500) when the session
@@ -571,15 +572,15 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
         Effect.provideService(CurrentUser, user),
         Effect.provideService(MaybeCurrentSession, maybeResolved),
         Effect.provideService(CurrentPrincipal, principalOf(user)),
-        Effect.provideService(CurrentCredential, credentialClassFromRequest(request)),
+        Effect.provideService(CurrentCredential, sessionCredentialClass(session)),
       );
     }),
 
     // `bearer` scheme handler: fallback tried when `conduit_session` fails.
     // At this point no valid session was found via cookie or bearer in the
     // primary path, so this re-validates the pre-decoded Bearer credential.
-    // Reached only via the `Authorization` header, so the credential is
-    // unconditionally "machine".
+    // The credential class is the session's own, whichever header carried
+    // its token.
     bearer: Effect.fn("AuthMiddleware.bearer")(function* (
       ...[handler, { credential }]: SchemeHandlerArgs<"bearer">
     ) {
@@ -603,7 +604,7 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
         Effect.provideService(CurrentUser, resolved.user),
         Effect.provideService(MaybeCurrentSession, Option.some(resolved)),
         Effect.provideService(CurrentPrincipal, principalOf(resolved.user)),
-        Effect.provideService(CurrentCredential, "machine"),
+        Effect.provideService(CurrentCredential, sessionCredentialClass(resolved.session)),
       );
     }),
   });
@@ -773,7 +774,7 @@ export const optionalLayer = (
                 principalOf(maybeResolved.value.user),
               ),
               CurrentCredential,
-              credentialClassFromRequest(request),
+              sessionCredentialClass(maybeResolved.value.session),
             );
 
       return yield* withPrincipal(
