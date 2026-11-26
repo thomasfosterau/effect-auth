@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { memoryApiKeyStore, memoryEmailPasswordStore } from "./testing/MemoryStores.ts";
 import { ApiKeyStore } from "./ApiKey.ts";
@@ -8,11 +9,10 @@ import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { AuthError, UserNotFoundError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
-import * as PlatformCrypto from "./PlatformCrypto.ts";
+import { testCryptoLayer } from "./testing/TestCrypto.ts";
 import { SessionService } from "./SessionService.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
-import { hashToken } from "./TokenHash.ts";
 import { UserServiceStore, UserService } from "./User.ts";
 import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -287,7 +287,7 @@ const makeStores = (
       ),
     ),
     Hooks.Default,
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   /** Register an organization row, with whatever JIT settings a test needs. */
@@ -1085,7 +1085,7 @@ const makeHttpFixture = () => {
     const rawToken = Buffer.from(globalThis.crypto.getRandomValues(new Uint8Array(12))).toString(
       "hex",
     );
-    const tokenHash = hashToken(rawToken);
+    const tokenHash = sha256Hex(rawToken);
     const now = DateTime.toDateUtc(DateTime.nowUnsafe());
     MutableHashMap.set(sessions, tokenHash, {
       id: tokenHash,
@@ -1216,7 +1216,7 @@ const makeHttpFixture = () => {
     Layer.succeed(OrganizationStore)(orgStore as never),
     Layer.succeed(SamlVerifier)(stubSamlVerifier(samlRequests)),
     Layer.succeed(SamlReplayStore)(memorySamlReplayStore()),
-    PlatformCrypto.layer,
+    testCryptoLayer,
   );
 
   const ssoServiceLayer = SsoService.layer().pipe(Layer.provide([ssoDeps, globalFetchHttpClient]));

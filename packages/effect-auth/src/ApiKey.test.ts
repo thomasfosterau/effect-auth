@@ -1,13 +1,12 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import { Clock, Context, Deferred, Effect, Fiber, MutableHashMap, Result } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   type ApiKeyService,
   ApiKeyStore,
-  hashApiKey,
   type ApiKey as ApiKeyRecord,
   type ApiKeyConfig,
 } from "./ApiKey.ts";
@@ -82,7 +81,7 @@ const makeRateLimitContext = async () => {
         Context.make(RateLimiter, rateLimiter),
         Context.make(RateLimitStore, rateLimitStore),
       ),
-      Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+      PlatformCrypto.context(),
     ),
   );
 };
@@ -134,7 +133,7 @@ describe("ApiKeyService", () => {
     expect(result.created.apiKey.metadata).toEqual({ env: "test" });
 
     // Only the sha256 digest is stored, never the plaintext
-    expect(result.created.apiKey.keyHash).toBe(hashApiKey(result.created.key));
+    expect(result.created.apiKey.keyHash).toBe(sha256Hex(result.created.key));
     expect(result.created.apiKey.keyHash).not.toContain(result.created.key);
 
     expect(result.verified.valid).toBe(true);
@@ -567,7 +566,7 @@ describe("ApiKeyService", () => {
     const serviceOver = (store: typeof ApiKeyStore.Service) =>
       ApiKey.make().pipe(
         Effect.provideService(ApiKeyStore, store),
-        Effect.provideService(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        Effect.provide(PlatformCrypto.layer),
       );
     const withSlowReads = () => serviceOver(slowReads);
 

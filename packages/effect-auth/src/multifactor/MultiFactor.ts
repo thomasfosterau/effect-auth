@@ -15,9 +15,8 @@
 import { Clock, Config, Context, Data, Effect, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import { Hex } from "effect/encoding";
-import { SecureRandom } from "effect/crypto";
+import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
-import * as Cipher from "../Cipher.ts";
 import type { TokenCipher } from "../Cipher.ts";
 import * as Errors from "../Errors.ts";
 import * as Obs from "../Observability.ts";
@@ -26,7 +25,8 @@ import { Hooks, type HookError } from "../Hooks.ts";
 import { generateBase32Secret, generateOtpUri, verifyTotp, type TotpConfig } from "./Otp.ts";
 import { PasswordHasher } from "../password/Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
-import { constantTimeHashEqual, hashToken } from "../TokenHash.ts";
+import * as RootSecret from "../RootSecret.ts";
+import { constantTimeHashEqual, hashToken, tokenHasher } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { UserStore } from "../UserStore.ts";
 import { anyEmailValue, IdentifierStore } from "../Identifier.ts";
@@ -183,16 +183,15 @@ export interface MultiFactorConfig {
    */
   readonly skipVerificationOnEnable?: boolean;
   /**
-   * Opt-in encryption-at-rest for the base32 TOTP `secret` field in
-   * {@link MultiFactorStore}. The store sees only ciphertext; plaintext is only
-   * ever held in memory during enrollment and verification.
+   * How the base32 TOTP `secret` in {@link MultiFactorStore} is encrypted at
+   * rest; it always is, bound to its user. By default the key is derived from
+   * the {@link RootSecret.RootSecret}. Pass `{ secret }` to derive it from an
+   * override secret instead (ciphertexts written under it before still
+   * open), or `{ cipher }` for a custom {@link TokenCipher} (envelope
+   * encryption, HSM-backed keys, etc.). A secret stored as plaintext before
+   * encryption was on still reads.
    *
-   * Pass `{ secret }` to use the built-in AES-256-GCM cipher. Pass
-   * `{ cipher }` to supply a custom {@link TokenCipher} (envelope
-   * encryption, HSM-backed keys, etc.).
-   *
-   * Strongly recommended in production. Backup codes are already SHA-256
-   * hashed and are unaffected by this option.
+   * Backup codes are peppered with the root secret and are unaffected.
    */
   readonly encryptSecret?:
     | { readonly secret: Redacted.Redacted }
@@ -379,9 +378,11 @@ const invalidBackupCode = "Invalid backup code";
 const normalizeBackupCode = (code: string): string => code.replace(/[\s-]/g, "").toLowerCase();
 
 /**
- * sha256 hex digest of a normalized backup code
+ * The unkeyed SHA-256 hex digest of a normalized backup code: the form codes
+ * were stored in before they were peppered, still accepted on redemption.
  */
-export const hashBackupCode = (code: string): string => hashToken(normalizeBackupCode(code));
+export const hashBackupCode = (code: string): Effect.Effect<string, never, Digest.Digest> =>
+  hashToken(normalizeBackupCode(code));
 
 /**
  * Find the index of a backup-code hash using timing-safe comparison.
@@ -391,6 +392,22 @@ const findBackupCodeIndex = (hashes: readonly string[], candidateHash: string): 
   Arr.reduce(hashes, -1, (match, hash, i) =>
     constantTimeHashEqual(hash, candidateHash) && match === -1 ? i : match,
   );
+
+/**
+ * `store` keyed by the digest of each pending token, so the store never holds
+ * the raw token that stands for an already-verified password.
+ */
+const hashedPendingStore = (
+  store: typeof PendingMultiFactorStore.Service,
+  hash: (token: string) => Effect.Effect<string>,
+): typeof PendingMultiFactorStore.Service => ({
+  create: (pending) =>
+    Effect.flatMap(hash(pending.token), (token) => store.create({ ...pending, token })),
+  get: (token) => Effect.flatMap(hash(token), store.get),
+  recordFailedAttempt: (token) => Effect.flatMap(hash(token), store.recordFailedAttempt),
+  consume: (token) => Effect.flatMap(hash(token), store.consume),
+  delete: (token) => Effect.flatMap(hash(token), store.delete),
+});
 
 /**
  * Create a multi-factor service
@@ -409,20 +426,26 @@ export const make = (
   | SessionService
   | Hooks
   | SecureRandom.SecureRandom
+  | Aead.Aead
+  | Digest.Digest
+  | Kdf.Kdf
+  | Mac.Mac
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const backupCodeCount = config.backupCodeCount ?? 10;
     const pendingExpiresIn = config.pendingExpiresIn ?? 5 * 60 * 1000; // 5 minutes default
     const skipVerificationOnEnable = config.skipVerificationOnEnable ?? false;
 
-    const cipher: TokenCipher | null = config.encryptSecret
-      ? "cipher" in config.encryptSecret
-        ? config.encryptSecret.cipher
-        : Cipher.aes256GcmCipher(Redacted.value(config.encryptSecret.secret))
-      : null;
+    const sealer = yield* RootSecret.sealerFor("totp-secret", config.encryptSecret);
+    const digestToken = yield* tokenHasher;
+    const pepper = yield* RootSecret.pepperHasher;
+    const hashBackup = (code: string): Effect.Effect<string> => pepper(normalizeBackupCode(code));
+    const legacyHashBackup = (code: string): Effect.Effect<string> =>
+      digestToken(normalizeBackupCode(code));
 
     const store = yield* MultiFactorStore;
-    const pendingStore = yield* PendingMultiFactorStore;
+    const pendingStore = hashedPendingStore(yield* PendingMultiFactorStore, digestToken);
     const emailPasswordStore = yield* EmailPasswordStore;
     const passwordHasher = yield* PasswordHasher;
     const userStore = yield* UserStore;
@@ -587,7 +610,7 @@ export const make = (
         }
 
         const secret = yield* generateBase32Secret(crypto);
-        const storedSecret = cipher !== null ? yield* cipher.encrypt(secret) : secret;
+        const storedSecret = yield* sealer.seal(secret, userId);
 
         const backupCodes = yield* Effect.all(
           Array.from({ length: backupCodeCount }, () => generateBackupCode()),
@@ -597,7 +620,7 @@ export const make = (
         const record: MultiFactorRecord = {
           userId,
           secret: storedSecret,
-          backupCodes: backupCodes.map((code) => hashBackupCode(code)),
+          backupCodes: yield* Effect.forEach(backupCodes, hashBackup, { concurrency: "unbounded" }),
           verified: skipVerificationOnEnable,
           createdAt: yield* Clock.currentTimeMillis,
         };
@@ -645,7 +668,7 @@ export const make = (
           });
         }
 
-        const plainSecret = cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+        const plainSecret = yield* sealer.open(record.secret, userId);
         const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
         if (matchedCounter === null) {
           return yield* new MultiFactorError({
@@ -703,8 +726,7 @@ export const make = (
             const record = yield* getVerifiedRecord(pending.userId);
             const attempts = yield* countAttempt(pendingToken, invalidTotpCode);
 
-            const plainSecret =
-              cipher !== null ? yield* cipher.decrypt(record.secret) : record.secret;
+            const plainSecret = yield* sealer.open(record.secret, pending.userId);
             const matchedCounter = yield* verifyTotp(code, plainSecret, config.totp);
             if (matchedCounter === null) {
               return yield* rejectCode(pendingToken, attempts, invalidTotpCode);
@@ -753,7 +775,15 @@ export const make = (
             const record = yield* getVerifiedRecord(pending.userId);
             const attempts = yield* countAttempt(pendingToken, invalidBackupCode);
 
-            const index = findBackupCodeIndex(record.backupCodes, hashBackupCode(code));
+            // Peppered codes first; codes stored before the pepper still redeem
+            // under their unkeyed digest. Both are computed, whichever matches.
+            const peppered = yield* hashBackup(code);
+            const legacy = yield* legacyHashBackup(code);
+            const pepperedIndex = findBackupCodeIndex(record.backupCodes, peppered);
+            const index =
+              pepperedIndex === -1
+                ? findBackupCodeIndex(record.backupCodes, legacy)
+                : pepperedIndex;
             if (index === -1) {
               return yield* rejectCode(pendingToken, attempts, invalidBackupCode);
             }
@@ -807,7 +837,7 @@ export const make = (
 
         yield* store.upsert({
           ...record,
-          backupCodes: backupCodes.map(hashBackupCode),
+          backupCodes: yield* Effect.forEach(backupCodes, hashBackup, { concurrency: "unbounded" }),
         });
 
         return backupCodes;

@@ -1,9 +1,9 @@
+import { sha256Hex } from "../testing/Sha256.ts";
 import { describe, it, expect, beforeEach, assert } from "vite-plus/test";
 import { type RateLimitEntry, RateLimitStore } from "../RateLimit.ts";
 import { memoryRateLimitStore } from "../testing/MemoryStores.ts";
 import { Context, DateTime, Effect, Layer, MutableHashMap, Result } from "effect";
 import * as Option from "effect/Option";
-import { SecureRandom } from "effect/crypto";
 import { Hooks } from "../Hooks.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import {
@@ -23,7 +23,6 @@ import { SessionStore } from "../SessionStore.ts";
 import { UserStore } from "../UserStore.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as Password from "./Password.ts";
-import { hashToken } from "../TokenHash.ts";
 import type { Session, User, SessionConfig } from "../Types.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { looseCollationIdentifierStore } from "../testing/LooseCollation.ts";
@@ -151,7 +150,7 @@ const makeTestContext = async (
       make(sessionConfig),
       Context.merge(
         Context.merge(Context.make(SessionStore, sessionStore), Context.make(UserStore, userStore)),
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+        PlatformCrypto.context(),
       ),
     ).pipe(Effect.provide(TestHooks)),
   );
@@ -172,7 +171,7 @@ const makeTestContext = async (
               ),
               Context.merge(
                 Context.make(IdentifierStore, identifierStore),
-                Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
+                PlatformCrypto.context(),
               ),
             ),
           ),
@@ -308,7 +307,7 @@ describe("PasswordResetService", () => {
 
     // Seed with the hash as key (the service looks up by hash).
     const resetToken: PasswordResetToken = {
-      token: hashToken("token-123"),
+      token: sha256Hex("token-123"),
       userId: user.id,
       email: "session-reset@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
@@ -360,7 +359,7 @@ describe("PasswordResetService", () => {
     MutableHashMap.set(users, user.id, user);
     seedEmailIdentifier(user.id, "race-reset@example.com", true);
     const resetToken: PasswordResetToken = {
-      token: hashToken("token-race"),
+      token: sha256Hex("token-race"),
       userId: user.id,
       email: "race-reset@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),
@@ -409,7 +408,7 @@ describe("PasswordResetService", () => {
     MutableHashMap.set(passwordHashes, user.id, oldHash.hash);
 
     const resetToken: PasswordResetToken = {
-      token: hashToken("token-456"),
+      token: sha256Hex("token-456"),
       userId: user.id,
       email: "session-keep@example.com",
       createdAt: DateTime.toEpochMillis(DateTime.nowUnsafe()),

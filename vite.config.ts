@@ -244,15 +244,11 @@ export default defineConfig({
         },
       },
       {
-        // Direct `node:crypto` use is corralled in these three modules. They
-        // import `Buffer` from `node:buffer` where they need it, so the
-        // global stays banned here too: `nodejs_compat` sets no `Buffer`
-        // global on Workers dated before 2024-09-23.
-        files: [
-          "packages/effect-auth/src/password/Password.ts",
-          "packages/effect-auth/src/TokenHash.ts",
-          "packages/effect-auth/src/Cipher.ts",
-        ],
+        // Direct `node:crypto` use is corralled in scrypt, which
+        // `effect/crypto` lacks. It imports `Buffer` from `node:buffer` where
+        // it needs it, so the global stays banned here too: `nodejs_compat`
+        // sets no `Buffer` global on Workers dated before 2024-09-23.
+        files: ["packages/effect-auth/src/password/Scrypt.ts"],
         rules: { "effect/avoid-node-imports": "off" },
       },
       {
@@ -299,7 +295,12 @@ export default defineConfig({
       },
       {
         // The Promise-facing web handler is an entrypoint: it runs effects.
-        files: ["packages/effect-auth/src/http/HttpServer.ts"],
+        // `PlatformCrypto.context` builds its resource-free default layer
+        // once, synchronously, for callers with no layer of their own.
+        files: [
+          "packages/effect-auth/src/http/HttpServer.ts",
+          "packages/effect-auth/src/PlatformCrypto.ts",
+        ],
         rules: { "effect/effect-run-in-body": "off" },
       },
       {

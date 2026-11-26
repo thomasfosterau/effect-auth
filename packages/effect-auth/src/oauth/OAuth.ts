@@ -10,14 +10,16 @@ import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Aead, Digest, Kdf, Mac, SecureRandom } from "effect/crypto";
 import { Base64, Base64Url, Hex } from "effect/encoding";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 import { optionalSecret } from "../OptionalSecretConfig.ts";
-import * as Cipher from "../Cipher.ts";
+import { signWithPkcs8, verifiesWithJwk } from "../JwsSignature.ts";
 import * as Obs from "../Observability.ts";
 import * as OutboundHttp from "../OutboundHttp.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import * as RootSecret from "../RootSecret.ts";
+import { tokenHasher } from "../TokenHash.ts";
 import type { TokenCipher } from "../Cipher.ts";
 export type { TokenCipher } from "../Cipher.ts";
 import {
@@ -195,6 +197,12 @@ export interface OAuthProvider {
   readonly name: string;
   readonly config: OAuthProviderConfig;
   /**
+   * Whether the authorization request carries a PKCE challenge. Its verifier
+   * is derived from the `state` and the root secret, never stored, so the
+   * callback derives it again.
+   */
+  readonly usePKCE?: boolean;
+  /**
    * `OAuthProvider` is a plain object built by {@link provider} — it
    * is never itself Layer-constructed, so there is no construction-time
    * scope to resolve `OAuthStateStore` in. `OAuthStateStore` is only ever
@@ -209,7 +217,7 @@ export interface OAuthProvider {
   ) => Effect.Effect<
     AuthorizationUrlResult,
     OAuthProviderError | AuthError,
-    OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest
+    OAuthStateStore | SecureRandom.SecureRandom | Digest.Digest | Mac.Mac | RootSecret.RootSecret
   >;
   /**
    * The token, userinfo and JWKS requests require an `HttpClient`;
@@ -319,8 +327,33 @@ export const generateState = (): Effect.Effect<string, never, SecureRandom.Secur
     return yield* crypto.randomBytes(32).pipe(Effect.map((bytes) => Base64Url.encode(bytes)));
   });
 
+/** The S256 PKCE challenge of `codeVerifier` (RFC 7636 §4.2). */
+export const pkceChallenge = (codeVerifier: string): Effect.Effect<string, never, Digest.Digest> =>
+  Effect.map(
+    Digest.Digest.use((digest) =>
+      digest.digest(Digest.sha256, new TextEncoder().encode(codeVerifier)),
+    ),
+    Base64Url.encode,
+  );
+
 /**
- * Generate PKCE code verifier and challenge
+ * The PKCE verifier and challenge for `state`: the verifier is derived from
+ * the state under the root secret, so the stored state never holds it.
+ */
+export const derivedPKCE = (
+  state: string,
+): Effect.Effect<
+  { codeVerifier: string; codeChallenge: string },
+  never,
+  Digest.Digest | Mac.Mac | RootSecret.RootSecret
+> =>
+  Effect.gen(function* () {
+    const codeVerifier = yield* (yield* RootSecret.pkceVerifier)(state);
+    return { codeVerifier, codeChallenge: yield* pkceChallenge(codeVerifier) };
+  });
+
+/**
+ * Generate a random PKCE code verifier and challenge
  */
 export const generatePKCE = (): Effect.Effect<
   { codeVerifier: string; codeChallenge: string },
@@ -355,9 +388,6 @@ const decodeJwtSegmentJson = Schema.decodeSync(Schema.fromJsonString(Schema.Json
 
 /** Decodes base64url text to its UTF-8 string; throws on invalid input. */
 const decodeBase64UrlText = Schema.decodeSync(Schema.StringFromBase64Url);
-
-/** Decodes base64url text to its bytes; throws on invalid input. */
-const decodeBase64UrlBytes = Schema.decodeSync(Schema.Uint8ArrayFromBase64Url);
 
 const decodeJwtSegment = (segment: string): Types.JsonObject =>
   decodeJwtSegmentJson(decodeBase64UrlText(segment));
@@ -570,7 +600,7 @@ const verifyIdTokenClaims = (
     if (segments === undefined) {
       return yield* fail("Malformed id_token");
     }
-    const [headerSeg, payloadSeg, signatureSeg] = segments;
+    const [headerSeg, payloadSeg] = segments;
 
     const { header, payload } = yield* Effect.try({
       try: (): { header: Types.JsonObject; payload: Types.JsonObject } => ({
@@ -592,19 +622,16 @@ const verifyIdTokenClaims = (
 
     const jwk = yield* fetchIdTokenJwk(params, header);
 
-    const verified = yield* Effect.try({
-      try: () => {
-        const signingInput = new TextEncoder().encode(`${headerSeg}.${payloadSeg}`);
-        const signature = decodeBase64UrlBytes(signatureSeg);
-        return Cipher.verifyJws(alg, signingInput, signature, jwk);
-      },
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: "id_token signature verification failed",
-          provider: params.provider,
-          cause,
-        }),
-    });
+    const verified = yield* verifiesWithJwk(idToken, jwk, alg).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: "id_token signature verification failed",
+            provider: params.provider,
+            cause,
+          }),
+      ),
+    );
     if (!verified) {
       return yield* fail("Invalid id_token signature");
     }
@@ -780,14 +807,15 @@ export const provider = (
   return {
     name,
     config,
+    usePKCE,
 
     generateAuthorizationUrl: (customScopes?: readonly string[]) =>
       Effect.gen(function* () {
         const stateStore = yield* OAuthStateStore;
         const state = yield* generateState();
 
-        // Generate PKCE if enabled
-        const pkce = usePKCE ? yield* generatePKCE() : undefined;
+        // PKCE, with the verifier derived from the state rather than stored.
+        const pkce = usePKCE ? yield* derivedPKCE(state) : undefined;
         // OIDC id_token flows carry a nonce for replay protection.
         const nonce = config.getUserInfoFromIdToken ? yield* generateNonce() : undefined;
 
@@ -795,7 +823,6 @@ export const provider = (
         const stateEntry: OAuthState = {
           state,
           provider: name,
-          ...(pkce?.codeVerifier && { codeVerifier: pkce.codeVerifier }),
           ...(nonce && { nonce }),
           createdAt: yield* Clock.currentTimeMillis,
           expiresAt: (yield* Clock.currentTimeMillis) + 10 * 60 * 1000, // 10 minutes
@@ -1065,6 +1092,19 @@ const emailInUse = (email: string) =>
   new EmailInUseError({ message: "This email is already associated with an account", email });
 
 /**
+ * `store` keyed by the digest of each `state`, so a database read yields no
+ * state a callback would accept.
+ */
+export const hashedStateStore = (
+  store: typeof OAuthStateStore.Service,
+  hash: (token: string) => Effect.Effect<string>,
+): typeof OAuthStateStore.Service => ({
+  create: (entry) =>
+    Effect.flatMap(hash(entry.state), (state) => store.create({ ...entry, state })),
+  consume: (state) => Effect.flatMap(hash(state), store.consume),
+});
+
+/**
  * Create an OAuth service with configured providers
  */
 export const make = (
@@ -1081,8 +1121,12 @@ export const make = (
   | EmailPasswordStore
   | SessionService
   | SecureRandom.SecureRandom
+  | Aead.Aead
   | Digest.Digest
   | HttpClient.HttpClient
+  | Kdf.Kdf
+  | Mac.Mac
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const httpClient = yield* HttpClient.HttpClient;
@@ -1091,13 +1135,13 @@ export const make = (
     const allowDifferentEmails = options.allowDifferentEmails ?? false;
     const updateUserInfoOnLink = options.updateUserInfoOnLink ?? false;
 
-    const cipher: TokenCipher | null = options.encryptTokens
-      ? "cipher" in options.encryptTokens
-        ? options.encryptTokens.cipher
-        : Cipher.aes256GcmCipher(Redacted.value(options.encryptTokens.secret))
-      : null;
+    const sealer = yield* RootSecret.sealerFor("oauth-tokens", options.encryptTokens);
+    const digestToken = yield* tokenHasher;
+    const deriveVerifier = yield* RootSecret.pkceVerifier;
+    const mac = yield* Mac.Mac;
+    const rootSecret = yield* RootSecret.RootSecret;
 
-    const stateStore = yield* OAuthStateStore;
+    const stateStore = hashedStateStore(yield* OAuthStateStore, digestToken);
     const accountStore = yield* OAuthAccountStore;
     const userStore = yield* OAuthUserStore;
     const identifiers = yield* IdentifierStore;
@@ -1115,29 +1159,16 @@ export const make = (
     const randomAccountId = (): Effect.Effect<string> =>
       crypto.randomBytes(16).pipe(Effect.map((bytes) => Hex.encode(bytes)));
 
-    const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> => {
-      if (cipher === null) return Effect.succeed(account);
-      return Effect.gen(function* () {
-        const accessToken = yield* cipher.encrypt(account.accessToken);
-        const refreshToken =
-          account.refreshToken !== undefined
-            ? yield* cipher.encrypt(account.refreshToken)
-            : undefined;
-        return {
-          ...account,
-          accessToken,
-          ...(refreshToken !== undefined && { refreshToken }),
-        };
-      });
-    };
+    /** The row a token is sealed for: the account and which of its tokens. */
+    const tokenRow = (account: OAuthAccount, which: "access" | "refresh") =>
+      `${account.provider}\u0000${account.providerId}\u0000${which}`;
 
-    const decryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> => {
-      if (cipher === null) return Effect.succeed(account);
-      return Effect.gen(function* () {
-        const accessToken = yield* cipher.decrypt(account.accessToken);
+    const encryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> =>
+      Effect.gen(function* () {
+        const accessToken = yield* sealer.seal(account.accessToken, tokenRow(account, "access"));
         const refreshToken =
           account.refreshToken !== undefined
-            ? yield* cipher.decrypt(account.refreshToken)
+            ? yield* sealer.seal(account.refreshToken, tokenRow(account, "refresh"))
             : undefined;
         return {
           ...account,
@@ -1145,7 +1176,32 @@ export const make = (
           ...(refreshToken !== undefined && { refreshToken }),
         };
       });
-    };
+
+    const decryptAccount = (account: OAuthAccount): Effect.Effect<OAuthAccount, AuthError> =>
+      Effect.gen(function* () {
+        const accessToken = yield* sealer.open(account.accessToken, tokenRow(account, "access"));
+        const refreshToken =
+          account.refreshToken !== undefined
+            ? yield* sealer.open(account.refreshToken, tokenRow(account, "refresh"))
+            : undefined;
+        return {
+          ...account,
+          accessToken,
+          ...(refreshToken !== undefined && { refreshToken }),
+        };
+      });
+
+    /** The PKCE verifier a callback sends: stored by an earlier release, else derived. */
+    const callbackVerifier = (
+      providerInstance: OAuthProvider,
+      state: string,
+      entry: OAuthState,
+    ): Effect.Effect<string | undefined> =>
+      entry.codeVerifier !== undefined
+        ? Effect.succeed(entry.codeVerifier)
+        : providerInstance.usePKCE === true
+          ? deriveVerifier(state)
+          : Effect.void.pipe(Effect.as(undefined));
 
     /**
      * Spend a callback's state. It is consumed atomically before
@@ -1174,6 +1230,7 @@ export const make = (
     /** Exchange the callback's code, then read the profile, over this layer's client. */
     const exchangeForProfile = (
       providerInstance: OAuthProvider,
+      state: string,
       code: string,
       stateEntry: OAuthState,
     ): Effect.Effect<
@@ -1181,7 +1238,10 @@ export const make = (
       OAuthProviderError
     > =>
       Effect.gen(function* () {
-        const tokens = yield* providerInstance.exchangeCode(code, stateEntry.codeVerifier);
+        const tokens = yield* providerInstance.exchangeCode(
+          code,
+          yield* callbackVerifier(providerInstance, state, stateEntry),
+        );
         const userInfo = yield* providerInstance.getProfile(tokens, {
           ...(stateEntry.nonce !== undefined && { expectedNonce: stateEntry.nonce }),
         });
@@ -1204,7 +1264,12 @@ export const make = (
           });
         }
 
-        const { tokens, userInfo } = yield* exchangeForProfile(providerInstance, code, stateEntry);
+        const { tokens, userInfo } = yield* exchangeForProfile(
+          providerInstance,
+          state,
+          code,
+          stateEntry,
+        );
 
         return { stateEntry, tokens, userInfo };
       });
@@ -1341,6 +1406,8 @@ export const make = (
                 Effect.provideService(OAuthStateStore, stateStore),
                 Effect.provideService(SecureRandom.SecureRandom, crypto),
                 Effect.provideService(Digest.Digest, digest),
+                Effect.provideService(Mac.Mac, mac),
+                Effect.provideService(RootSecret.RootSecret, rootSecret),
               );
 
             // Update state with returnTo if provided
@@ -1352,6 +1419,7 @@ export const make = (
               // Record the state again, now carrying returnTo.
               yield* stateStore.create({
                 ...stateEntry,
+                state: result.state,
                 returnTo: options.returnTo,
               });
             }
@@ -1495,7 +1563,12 @@ export const make = (
         }
 
         // Exchange the code, then read the profile (userinfo or a verified id_token).
-        const { tokens, userInfo } = yield* exchangeForProfile(providerInstance, code, stateEntry);
+        const { tokens, userInfo } = yield* exchangeForProfile(
+          providerInstance,
+          state,
+          code,
+          stateEntry,
+        );
 
         // Email-mismatch guard: reject when the provider email differs from the
         // user's current account email (overridable with allowDifferentEmails).
@@ -1858,38 +1931,32 @@ export const appleClientSecret = (params: {
   readonly expiresIn?: number;
   readonly now?: number;
 }): Effect.Effect<string, OAuthProviderError> =>
-  Effect.flatMap(Clock.currentTimeMillis, (millis) =>
-    Effect.try({
-      try: () => {
-        const iat = Math.floor((params.now ?? millis) / 1000);
-        const exp = iat + (params.expiresIn ?? 15777000);
-        const header = { alg: "ES256", kid: params.keyId, typ: "JWT" };
-        const payload = {
-          iss: params.teamId,
-          iat,
-          exp,
-          aud: "https://appleid.apple.com",
-          sub: params.clientId,
-        };
-        const encode = (obj: Schema.Json): string => Base64Url.encode(encodeJsonString(obj));
-        const signingInput = `${encode(header)}.${encode(payload)}`;
-        const signature = Base64Url.encode(
-          Cipher.signJws(
-            "ES256",
-            new TextEncoder().encode(signingInput),
-            Redacted.value(params.privateKey),
-          ),
-        );
-        return `${signingInput}.${signature}`;
-      },
-      catch: (cause) =>
-        new OAuthProviderError({
-          message: "Failed to sign Apple client secret",
-          provider: "apple",
-          cause,
-        }),
-    }),
-  );
+  Effect.flatMap(Clock.currentTimeMillis, (millis) => {
+    const iat = Math.floor((params.now ?? millis) / 1000);
+    const payload = {
+      iss: params.teamId,
+      iat,
+      exp: iat + (params.expiresIn ?? 15777000),
+      aud: "https://appleid.apple.com",
+      sub: params.clientId,
+    };
+    return signWithPkcs8(
+      new TextEncoder().encode(encodeJsonString(payload)),
+      Redacted.make(Redacted.value(params.privateKey)),
+      "ES256",
+      { kid: params.keyId, typ: "JWT" },
+    ).pipe(
+      PlatformCrypto.provide,
+      Effect.mapError(
+        (cause) =>
+          new OAuthProviderError({
+            message: "Failed to sign Apple client secret",
+            provider: "apple",
+            cause,
+          }),
+      ),
+    );
+  });
 
 /** Facebook Login (Graph API userinfo; `picture` is nested under `data.url`). */
 export const FacebookProvider = (config: OAuthClientConfig): OAuthProvider =>

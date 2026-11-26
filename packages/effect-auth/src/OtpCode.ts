@@ -19,7 +19,7 @@ import { Clock, Duration, Effect } from "effect";
 import type { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
-import { constantTimeHashEqual, hashToken } from "./TokenHash.ts";
+import { constantTimeHashEqual } from "./TokenHash.ts";
 import type { OtpBackoffConfig, OtpFailureBudget, OtpFailures } from "./Types.ts";
 
 /** The fields of a stored code the shared steps read. */
@@ -179,10 +179,12 @@ export const verifyCode = <P, E>(
     readonly purpose: P;
     readonly maxAttempts: number;
     readonly reject: (purpose: P, reason: VerifyFailure) => Effect.Effect<never, E>;
+    /** The digest a code is stored as. */
+    readonly hash: (code: string) => Effect.Effect<string>;
   },
 ): Effect.Effect<void, E | Errors.AuthError> =>
   Effect.gen(function* () {
-    const { address, code, purpose, maxAttempts, reject } = options;
+    const { address, code, purpose, maxAttempts, reject, hash } = options;
     if (!address || !code) {
       return yield* reject(purpose, "missing");
     }
@@ -211,7 +213,7 @@ export const verifyCode = <P, E>(
       return yield* reject(purpose, "attempts");
     }
 
-    if (!constantTimeHashEqual(record.otpHash, hashToken(code))) {
+    if (!constantTimeHashEqual(record.otpHash, yield* hash(code))) {
       // Counted against the pair too, where a resend cannot reset it.
       yield* store.recordFailure(address, purpose, now);
       if (attempts >= maxAttempts) {
@@ -250,6 +252,7 @@ export const generateOtp = (
  */
 export const issueCode = (
   crypto: typeof SecureRandom.SecureRandom.Service,
+  hash: (code: string) => Effect.Effect<string>,
   config: ResolvedCodeConfig,
   deliver: boolean,
 ): Effect.Effect<{ readonly code: string; readonly record: CodeRecord }> =>
@@ -260,7 +263,7 @@ export const issueCode = (
     return {
       code,
       record: {
-        otpHash: hashToken(deliver ? code : markerSecret),
+        otpHash: yield* hash(deliver ? code : markerSecret),
         attempts: 0,
         createdAt: now,
         expiresAt: now + config.expiresIn,

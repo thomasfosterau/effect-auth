@@ -5,7 +5,7 @@ import { authenticateGate } from "../testing/AuthenticateGate.ts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Digest, SecureRandom } from "effect/crypto";
+import { Digest } from "effect/crypto";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import { base64UrlDecode, ChallengeStore, CredentialStore } from "./WebAuthn.ts";
 import * as WebAuthn from "./WebAuthn.ts";
@@ -129,10 +129,7 @@ const dependenciesWith = (hooks: typeof Hooks.Service) =>
       Context.make(CredentialStore, mockCredentialStore),
     ),
     Context.merge(
-      Context.merge(
-        Context.make(SecureRandom.SecureRandom, PlatformCrypto.instance),
-        Context.make(Digest.Digest, platformDigest),
-      ),
+      Context.merge(PlatformCrypto.context(), Context.make(Digest.Digest, platformDigest)),
       Context.make(Hooks, hooks),
     ),
   );

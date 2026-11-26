@@ -2,12 +2,12 @@ import { Clock, Context, DateTime, Effect, Layer } from "effect";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { Hex } from "effect/encoding";
-import { SecureRandom } from "effect/crypto";
+import { Digest, SecureRandom } from "effect/crypto";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 import { Hooks, type HookError } from "./Hooks.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
-import { hashToken } from "./TokenHash.ts";
+import { tokenHasher } from "./TokenHash.ts";
 import * as Obs from "./Observability.ts";
 import { SessionStore } from "./SessionStore.ts";
 import { UserStore } from "./UserStore.ts";
@@ -61,7 +61,7 @@ export const make = (
 ): Effect.Effect<
   typeof SessionService.Service,
   never,
-  SessionStore | UserStore | Hooks | SecureRandom.SecureRandom
+  SessionStore | UserStore | Hooks | SecureRandom.SecureRandom | Digest.Digest
 > =>
   Effect.gen(function* () {
     const problem = sessionConfigProblem(config.sessionExpiresIn);
@@ -69,6 +69,7 @@ export const make = (
       return yield* Effect.die(new Errors.SessionConfigError({ message: problem }));
     }
     const sessionStore = yield* SessionStore;
+    const hashToken = yield* tokenHasher;
     const userStore = yield* UserStore;
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
@@ -96,7 +97,7 @@ export const make = (
             );
 
             const session: Types.Session = {
-              id: hashToken(rawToken), // the store, and every reader, sees only the digest
+              id: yield* hashToken(rawToken), // the store, and every reader, sees only the digest
               userId: args.userId,
               expiresAt,
               createdAt: now,
@@ -119,7 +120,7 @@ export const make = (
           // Look up the session by its token hash; never expose the raw token
           // to the store or to a hook. The hook observes or denies:
           // what it returns is not read back, so it cannot redirect the lookup.
-          const tokenHash = hashToken(rawSessionId);
+          const tokenHash = yield* hashToken(rawSessionId);
           yield* hooks.beforeValidateSession({ sessionId: tokenHash });
           const session = yield* sessionStore.get(tokenHash);
           if (session === null) {
@@ -234,7 +235,7 @@ export const make = (
         Effect.gen(function* () {
           // Every hook gets the stored id, so none can record the credential;
           // `beforeSignOut` observes or denies, and is not read back.
-          const storedId = hashToken(rawSessionId);
+          const storedId = yield* hashToken(rawSessionId);
           yield* hooks.beforeSignOut({ sessionId: storedId });
           yield* sessionStore.delete(storedId);
           yield* hooks.afterSignOut({ sessionId: storedId });

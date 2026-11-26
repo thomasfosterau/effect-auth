@@ -1,3 +1,4 @@
+import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, Layer, MutableHashMap, Order } from "effect";
 import * as Arr from "effect/Array";
@@ -221,14 +222,21 @@ describe("AccountManagement — change email", () => {
     expect(err).toBeInstanceOf(AccountTokenError);
   });
 
+  it("stores the token's digest, never the token", async () => {
+    const h = makeHarness();
+    const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice4@example.com"));
+    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
+  });
+
   it("rejects an expired token", async () => {
     const h = makeHarness();
     const { token } = await run(h, (svc) => svc.requestEmailChange("user-1", "alice3@example.com"));
     // Force expiry.
-    const rec = Option.getOrUndefined(MutableHashMap.get(h.tokens, token));
+    const rec = Option.getOrUndefined(MutableHashMap.get(h.tokens, sha256Hex(token)));
     assert(rec !== undefined, "the change-email token is stored");
 
-    MutableHashMap.set(h.tokens, token, {
+    MutableHashMap.set(h.tokens, sha256Hex(token), {
       ...rec,
       expiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) - 1,
     });
@@ -276,7 +284,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       Arr.fromIterable(MutableHashMap.values(h.identifiers)).find((i) => i.value === NEW_EMAIL)
         ?.userId,
     ).toBe("user-2");
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -332,7 +340,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       { value: "alice@example.com", verified: true },
       { value: NEW_EMAIL, verified: true },
     ]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
 
     // The retry sees the new address as this user's own and releases the old one.
     await run(h, (svc) => svc.confirmEmailChange(token));
@@ -391,7 +399,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toContain("changed during the confirmation");
     expect(userEmails(h, "user-1")).toEqual([]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -438,7 +446,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
         expect(user.id).toBe("user-1");
         expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-        expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+        expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
         expect(h.revoked).toEqual(["user-1"]);
         expect(h.notifiedOld).toEqual([{ oldEmail: "alice@example.com", newEmail: NEW_EMAIL }]);
       });
@@ -450,7 +458,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
         await run(h, (svc) => svc.confirmEmailChange(token));
 
         expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-        expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+        expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
       });
     },
   );
@@ -479,7 +487,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     await run(h, (svc) => svc.confirmEmailChange(token));
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
   });
 
   it("a user who already holds the new address, unverified, ends with it verified and the previous address released", async () => {
@@ -496,7 +504,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     await run(h, (svc) => svc.confirmEmailChange(token));
 
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
   });
 
   it("a failed verification of a converged address fails and keeps the token; a retry completes the change verified", async () => {
@@ -516,12 +524,12 @@ describe("AccountManagement — change email: failed claims keep the previous ad
     const err = await run(h, (svc) => Effect.flip(svc.confirmEmailChange(token)));
 
     expect(err).toBeInstanceOf(AuthError);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
     expect(h.revoked).toEqual([]);
 
     await run(h, (svc) => svc.confirmEmailChange(token));
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
   });
 
   it("an address deleted before its verification fails with AccountTokenError and keeps the token", async () => {
@@ -538,7 +546,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     expect(err).toBeInstanceOf(AccountTokenError);
     expect(err.message).toBe("The account's email changed during the confirmation; try again");
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });
@@ -587,7 +595,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
 
     expect(user.id).toBe("user-1");
     expect(userEmails(h, "user-1")).toEqual([{ value: NEW_EMAIL, verified: true }]);
-    expect(MutableHashMap.has(h.tokens, token)).toBe(false);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(false);
     expect(h.revoked).toEqual(["user-1"]);
     expect(h.notifiedOld).toEqual([{ oldEmail: null, newEmail: NEW_EMAIL }]);
   });
@@ -605,7 +613,7 @@ describe("AccountManagement — change email: failed claims keep the previous ad
       Arr.fromIterable(MutableHashMap.values(h.identifiers)).find((i) => i.value === NEW_EMAIL)
         ?.userId,
     ).toBe("user-2");
-    expect(MutableHashMap.has(h.tokens, token)).toBe(true);
+    expect(MutableHashMap.has(h.tokens, sha256Hex(token))).toBe(true);
     expect(h.revoked).toEqual([]);
     expect(h.notifiedOld).toEqual([]);
   });

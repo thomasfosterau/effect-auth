@@ -3,13 +3,13 @@
  *
  * Implements one-time numeric codes delivered by email (better-auth
  * "email OTP" parity) for three purposes: sign-in, email verification, and
- * password reset. Only a SHA-256 hash of the code is stored; codes are
+ * password reset. Only a peppered hash of the code is stored; codes are
  * single-use, expire, and are attempt-limited. Comparison is constant-time.
  *
  * @module email-otp
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
-import { SecureRandom } from "effect/crypto";
+import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { IdentifierStore, findIdentifierOwner, lookupIdentifier } from "../Identifier.ts";
 import {
@@ -23,12 +23,12 @@ import { deliverCode } from "../CodeDelivery.ts";
 import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import * as OtpCode from "../OtpCode.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
+import * as RootSecret from "../RootSecret.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
 import { makeRecipientSendGate } from "../RecipientSendLimit.ts";
 import { SessionService } from "../SessionService.ts";
 import { EmailPasswordStore } from "./EmailPassword.ts";
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
-import { hashToken } from "../TokenHash.ts";
 import type * as Types from "../Types.ts";
 import { normalizeEmail } from "../utils.ts";
 
@@ -46,7 +46,7 @@ export class EmailOtpError extends Data.TaggedError("EmailOtpError")<{
 export type EmailOtpPurpose = "sign-in" | "email-verification" | "forget-password";
 
 /**
- * Stored email OTP record. Only the SHA-256 hash of the code is persisted.
+ * Stored email OTP record. Only the peppered hash of the code (HMAC-SHA256 under the root secret) is persisted.
  */
 export interface EmailOtpRecord {
   readonly email: string;
@@ -252,7 +252,7 @@ export class EmailOtpService extends Context.Service<
   {
     /**
      * Generate an OTP for the given email + purpose (replacing any outstanding
-     * one) and send it. Only a SHA-256 hash of the code is stored.
+     * one) and send it. Only a peppered hash of the code is stored.
      *
      * Anti-enumeration: for `"sign-in"` with sign-up disabled and no matching
      * user, and for `"forget-password"` with no matching user, this succeeds
@@ -335,13 +335,6 @@ export class EmailOtpService extends Context.Service<
 }
 
 /**
- * SHA-256 hex digest of an OTP; an alias of {@link hashToken}.
- *
- * @deprecated Use {@link hashToken} from `@thomasfosterau/effect-auth` instead.
- */
-export const hashOtp = hashToken;
-
-/**
  * Generate a numeric OTP with crypto-secure randomness (one unbiased
  * `intBetween` draw per digit — no modulo bias).
  */
@@ -367,6 +360,9 @@ export const make = (
   | Hooks
   | RateLimitStore
   | SecureRandom.SecureRandom
+  | Digest.Digest
+  | Mac.Mac
+  | RootSecret.RootSecret
 > =>
   Effect.gen(function* () {
     const codes = OtpCode.resolveCodeConfig(config);
@@ -385,6 +381,7 @@ export const make = (
     });
     const hooks = yield* Hooks;
     const crypto = yield* SecureRandom.SecureRandom;
+    const hashCode = yield* RootSecret.pepperHasher;
     const detached = yield* makeDetachedSend;
     const recipientSendGate = yield* makeRecipientSendGate(config.recipientSendLimit);
 
@@ -413,6 +410,7 @@ export const make = (
         purpose,
         maxAttempts: codes.maxAttempts,
         reject: rejectOtp,
+        hash: hashCode,
       });
 
     return {
@@ -455,7 +453,12 @@ export const make = (
 
         // An address with no account gets a marker record that no code
         // redeems (see `issueCode`).
-        const { code: otp, record: fields } = yield* OtpCode.issueCode(crypto, codes, deliver);
+        const { code: otp, record: fields } = yield* OtpCode.issueCode(
+          crypto,
+          hashCode,
+          codes,
+          deliver,
+        );
         const record: EmailOtpRecord = { email, purpose, ...fields };
 
         // One active OTP per email + purpose: replaces any outstanding one.
