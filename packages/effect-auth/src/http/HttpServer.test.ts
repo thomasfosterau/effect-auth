@@ -4133,7 +4133,6 @@ describe("client IP at the HTTP boundary", () => {
   const limitedHandler = (
     options: {
       readonly trustedProxy?: TrustedProxyConfig | undefined;
-      readonly allowMissingClientIp?: boolean | undefined;
       readonly ipRateLimit?: HttpServer.HttpIPRateLimitConfig | undefined;
       /** Fail every rate-limit store call, as a down store does. */
       readonly storeDown?: boolean | undefined;
@@ -4182,7 +4181,6 @@ describe("client IP at the HTTP boundary", () => {
       cookie: { secure: false },
       ipRateLimit: options.ipRateLimit ?? signInOncePerHour,
       trustedProxy: options.trustedProxy,
-      allowMissingClientIp: options.allowMissingClientIp,
     }).handler;
     return { handler, keys };
   };
@@ -4359,24 +4357,6 @@ describe("client IP at the HTTP boundary", () => {
 
   it("builds with a trustedProxy", () => {
     expect(() => limitedHandler({ trustedProxy: ClientIP.cloudflare })).not.toThrow();
-  });
-
-  // With no proxy no Web Request has an address, so the limit would refuse
-  // every request it covers: the handler refuses to start instead.
-  it("refuses to start with allowMissingClientIp and no trustedProxy", async () => {
-    expect(() => limitedHandler({ allowMissingClientIp: true })).toThrow(
-      HttpServer.ClientAddressConfigError,
-    );
-    expect(() => limitedHandler({ allowMissingClientIp: true })).toThrow(
-      /allowMissingClientIp: true does not stand in for trustedProxy/,
-    );
-    await expect(
-      HttpServer.makeAsync({ services: limiter(), allowMissingClientIp: true }),
-    ).rejects.toBeInstanceOf(HttpServer.ClientAddressConfigError);
-    // ipRateLimit: false stays the off switch.
-    expect(() =>
-      HttpServer.make({ services: limiter(), ipRateLimit: false, allowMissingClientIp: true }),
-    ).not.toThrow();
   });
 
   it("refuses an address-less request to a limited endpoint, counts nothing, and leaves other endpoints alone", async () => {
@@ -4994,20 +4974,6 @@ describe("IPRateLimitPlugin needs a client-address source under make", () => {
     expect((await signIn("203.0.113.20")).status).toBe(401);
     expect((await signIn("203.0.113.20")).status).toBe(429);
     expect((await signIn("203.0.113.21")).status).toBe(401);
-  });
-
-  it("refuses to start with allowMissingClientIp and no trustedProxy, rather than refuse every sign-in", () => {
-    const { services } = makeFixture({ hooks: ipRateLimitHooks() });
-    const make = () =>
-      HttpServer.make({
-        ipRateLimit: false,
-        services,
-        cookie: { secure: false },
-        allowMissingClientIp: true,
-      });
-    expect(make).toThrow(ClientAddressConfigError);
-    expect(make).toThrow(/IPRateLimitPlugin keys its limits on the client address/);
-    expect(make).toThrow(/allowMissingClientIp: true does not stand in for trustedProxy/);
   });
 
   it("refuses an address-less sign-in with 429 under a trustedProxy", async () => {

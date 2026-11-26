@@ -28,9 +28,8 @@
  * socket address, so under `Http.make` the address comes only from
  * `trustedProxy` (for example `ClientIP.cloudflare`). When the `Hooks` in
  * `services` include this plugin and `make` is given no `trustedProxy`, `make`
- * throws `ClientAddressConfigError`, and `allowMissingClientIp: true`
- * does not stand in for one: with no proxy no request has an address, so the
- * plugin would refuse every one of them.
+ * throws `ClientAddressConfigError`: with no proxy no request has an
+ * address, so the plugin would refuse every one of them.
  *
  * Composes with the existing {@link RateLimiter} / {@link RateLimitStore}
  * infrastructure, so in-memory, SQL, and Redis backends all work.
