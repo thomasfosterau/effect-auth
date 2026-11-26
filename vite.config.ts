@@ -107,10 +107,6 @@ export default defineConfig({
       // Type tests (expect-error directives) and tests that assert by running
       // an Effect that fails on a mismatch.
       "vitest/expect-expect": "warn", // 29
-      // The one site is `BroadcastChannel#postMessage` (client/Client.ts's
-      // cross-tab sync), which takes no `targetOrigin`; the rule cannot tell
-      // it from `window.postMessage` (its docs say so), so it stays a warning.
-      "unicorn/require-post-message-target-origin": "warn", // 1
 
       // ---- Effect preset: rules this codebase's conventions cut across ----
       // DESIGN.md D4: domain errors are `Data.TaggedError`.
@@ -307,6 +303,15 @@ export default defineConfig({
           "packages/effect-auth/src/PlatformCrypto.ts",
         ],
         rules: { "effect/effect-run-in-body": "off" },
+      },
+      {
+        // The session Atoms' cross-tab sync posts through
+        // `BroadcastChannel#postMessage`, which takes no `targetOrigin` (a
+        // channel never leaves its origin). The rule reads no types, so it
+        // cannot tell it from `window.postMessage` (its docs say so), and its
+        // fix (`channel.location.origin`) does not type-check.
+        files: ["packages/effect-auth/src/client/SessionAtoms.ts"],
+        rules: { "unicorn/require-post-message-target-origin": "off" },
       },
       {
         // SvelteKit's `handle` is a Promise-facing entrypoint: it runs the
