@@ -645,13 +645,20 @@ interface ChallengeRow {
 }
 
 /** A row whose ceremony is not one the core knows reads as missing. */
-const rowToChallenge = (row: ChallengeRow): Auth.MultiFactor.WebAuthnChallenge | null => {
+const rowToChallenge = (
+  row: ChallengeRow,
+): Effect.Effect<Auth.MultiFactor.WebAuthnChallenge | null, Auth.AuthError> => {
   const { ceremony } = row;
-  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return null;
-  const challenge = fromBase64(row.challenge);
-  return row.user_id == null
-    ? { challenge, ceremony, expiresAt: row.expires_at }
-    : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+  if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return Effect.succeed(null);
+  return Effect.try({
+    try: () => {
+      const challenge = fromBase64(row.challenge);
+      return row.user_id == null
+        ? { challenge, ceremony, expiresAt: row.expires_at }
+        : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id };
+    },
+    catch: (cause) => new Auth.AuthError({ message: "challenge decode failed", cause }),
+  });
 };
 
 /**
@@ -703,7 +710,7 @@ export const makeChallengeStore: Effect.Effect<
           FROM auth_webauthn_challenges c
           JOIN auth_webauthn_challenge_ceremonies k ON k.challenge = c.challenge
           WHERE c.challenge = ${toBase64(challenge)}`,
-      ).pipe(Effect.map((row) => (row ? rowToChallenge(row) : null))),
+      ).pipe(Effect.flatMap((row) => (row ? rowToChallenge(row) : Effect.succeed(null)))),
     delete: (challenge) =>
       withTx("challenge.delete", remove("challenge.delete", toBase64(challenge))),
   } satisfies typeof Auth.MultiFactor.ChallengeStore.Service;
