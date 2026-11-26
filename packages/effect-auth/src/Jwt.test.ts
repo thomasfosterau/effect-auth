@@ -2,9 +2,10 @@ import { assert, describe, it, expect, beforeEach, beforeAll } from "vite-plus/t
 import { testCryptoContext, type TestCryptoServices } from "./testing/TestCrypto.ts";
 import { Clock, Context, DateTime, Effect, Layer, Redacted, Result, type Scope } from "effect";
 import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { Jwk } from "effect/jose";
+import { Jwk, Jwt as JoseJwt } from "effect/jose";
 import {
   generateKeyPair,
   JwtKeyStore,
@@ -223,6 +224,95 @@ describe("JwtService", () => {
     expect(payload["email"]).toBe("jwt@example.com");
     expect(payload["plan"]).toBe("pro");
     expect(payload["role"]).toBe("admin");
+  });
+
+  it("signs access tokens with the at+jwt type", async () => {
+    const token = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        return (yield* service.sign(user)).token;
+      }),
+    );
+    const [header] = jwsSegments(token.split("."));
+    expect(decodeJsonObject(Buffer.from(header, "base64url").toString("utf8"))["typ"]).toBe(
+      "at+jwt",
+    );
+  });
+
+  it("refuses an id_token signed with the same keys", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make({ issuer: baseConfig.issuer });
+        const { token } = yield* service.signIdToken({
+          iss: baseConfig.issuer,
+          sub: user.id,
+          aud: "client-1",
+        });
+        return yield* Effect.result(service.verify(token));
+      }),
+    );
+
+    assert(Result.isFailure(result));
+    expect(result.failure.message).toContain("Token type");
+  });
+
+  it("refuses a token with no typ or another typ, and accepts application/at+jwt", async () => {
+    const results = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        const pair = yield* generateKeyPair("ES256");
+        keyPairs.push(verifyOnly(pair));
+        const signingKey = yield* Jwk.importPrivate(pair.privateKey, pair.algorithm);
+        const now = Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000);
+        const claims = {
+          iss: baseConfig.issuer,
+          aud: "https://api.example.com",
+          sub: "u",
+          exp: now + 60,
+        };
+        const forge = (typ: string | undefined) =>
+          Effect.map(
+            JoseJwt.sign(Schema.Json, claims, signingKey, {
+              kid: pair.id,
+              ...(typ !== undefined && { typ }),
+            }),
+            Redacted.value,
+          );
+        return yield* Effect.forEach(
+          [undefined, "JWT", "id_token+jwt", "Application/AT+JWT"],
+          (typ) => Effect.flatMap(forge(typ), (token) => Effect.result(service.verify(token))),
+          { concurrency: 1 },
+        );
+      }),
+    );
+
+    expect(results.map(Result.isSuccess)).toEqual([false, false, false, true]);
+  });
+
+  it("signs an id_token with exactly its claims, never definePayload or the audience", async () => {
+    const payload = await run(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make({
+          ...baseConfig,
+          definePayload: () => ({ roles: ["admin"] }),
+        });
+        const { token } = yield* service.signIdToken({
+          iss: "https://oidc.example.com",
+          sub: user.id,
+          aud: "client-1",
+          nonce: "n",
+        });
+        const [header, body] = jwsSegments(token.split("."));
+        return {
+          header: decodeJsonObject(Buffer.from(header, "base64url").toString("utf8")),
+          body: decodeJsonObject(Buffer.from(body, "base64url").toString("utf8")),
+        };
+      }),
+    );
+
+    expect(payload.header["typ"]).toBe("JWT");
+    expect(R.keys(payload.body).toSorted()).toEqual(["aud", "exp", "iat", "iss", "nonce", "sub"]);
+    expect(payload.body["aud"]).toBe("client-1");
   });
 
   it("should use a custom subject when configured", async () => {
@@ -638,7 +728,7 @@ describe("RemoteJwksVerifier", () => {
   const rsaJwks = { keys: [{ ...rsa.publicKeyJwk, kid: "rsa-1", alg: "RS256", use: "sig" }] };
   const b64 = (value: Schema.Json) => Buffer.from(encodeJson(value)).toString("base64url");
   const rsaSigned = (claims: Schema.JsonObject): string => {
-    const input = `${b64({ alg: "RS256", kid: "rsa-1", typ: "JWT" })}.${b64(claims)}`;
+    const input = `${b64({ alg: "RS256", kid: "rsa-1", typ: "at+jwt" })}.${b64(claims)}`;
     const signature = testSignJws("RS256", Buffer.from(input), rsa.privateKeyPem);
     return `${input}.${Buffer.from(signature).toString("base64url")}`;
   };
@@ -820,6 +910,33 @@ describe("RemoteJwksVerifier", () => {
     expect(results[0]["sub"]).toBe("user-1");
     expect(results[1]["sub"]).toBe("user-1");
     expect(requested).toEqual([jwksUrl]);
+  });
+
+  it("refuses an id_token signed with the published keys", async () => {
+    const idToken = await runRemote(
+      Effect.gen(function* () {
+        const service = yield* Jwt.make(baseConfig);
+        return (yield* service.signIdToken({
+          iss: baseConfig.issuer,
+          sub: user.id,
+          aud: "client-1",
+        })).token;
+      }),
+    );
+    const result = await runVerifier(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* Jwt.remoteJwksVerifier({
+            jwksUri: jwksUrl,
+            issuer: baseConfig.issuer,
+          });
+          return yield* verifier.verify(idToken);
+        }),
+      ),
+    );
+
+    assert(Result.isFailure(result));
+    expect(result.failure.message).toContain("Token type");
   });
 
   it("should reject an issuer mismatch via the remote verifier", async () => {

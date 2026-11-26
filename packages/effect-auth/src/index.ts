@@ -107,6 +107,8 @@ export {
   hashApiKey,
 } from "./ApiKey.ts";
 export {
+  ACCESS_TOKEN_TYPE,
+  type IdTokenClaims,
   JwtError,
   type JwtAlgorithm,
   type JwtKeyPair,

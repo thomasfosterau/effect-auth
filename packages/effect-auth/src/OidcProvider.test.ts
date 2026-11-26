@@ -503,6 +503,68 @@ describe("OidcProviderService", () => {
     expect(new URL(result.redirectTo).searchParams.get("code")).toBeTruthy();
   });
 
+  it("signs id_tokens that JwtService.verify refuses and that carry no definePayload claims", async () => {
+    const stores = makeOidcStores();
+    const user = makeUser("u1");
+    const layer = Layer.mergeAll(
+      Layer.succeed(OidcClientStore)(stores.clientStore),
+      Layer.succeed(OidcCodeStore)(stores.codeStore),
+      Layer.succeed(OidcTokenStore)(stores.tokenStore),
+      Layer.succeed(OidcConsentStore)(stores.consentStore),
+      Layer.succeed(UserStore)({ get: () => Effect.succeed(user) }),
+      Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
+      JwtService.layer({ issuer: ISSUER, definePayload: () => ({ roles: ["admin"] }) }).pipe(
+        Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
+      ),
+      testCryptoLayer,
+    );
+    const service = await Effect.runPromise(
+      OidcProvider.make({
+        ...config,
+        trustedClients: [
+          {
+            clientId: "first-party",
+            clientSecret: Redacted.make("shh"),
+            name: "First Party",
+            redirectUris: ["https://fp.test/cb"],
+          },
+        ],
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const { claims, verified } = await Effect.runPromise(
+      Effect.gen(function* () {
+        const authorized = yield* service.authorize(user, {
+          responseType: "code",
+          clientId: "first-party",
+          redirectUri: "https://fp.test/cb",
+          scope: "openid",
+        });
+        const code = new URL(authorized.redirectTo).searchParams.get("code") ?? "";
+        const tokens = yield* service.token({
+          grantType: "authorization_code",
+          code,
+          redirectUri: "https://fp.test/cb",
+          clientId: "first-party",
+          clientSecret: "shh",
+        });
+        const idToken = tokens.idToken ?? "";
+        const jwt = yield* JwtService;
+        return {
+          claims: Schema.decodeUnknownSync(
+            Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+          )(Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8")),
+          verified: yield* Effect.result(jwt.verify(idToken)),
+        };
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(claims["sub"]).toBe("u1");
+    expect(claims["aud"]).toBe("first-party");
+    expect(claims["roles"]).toBeUndefined();
+    expect(Result.isFailure(verified)).toBe(true);
+  });
+
   describe("updateClient", () => {
     it("applies every supplied field and keeps the rest", async () => {
       const { layer, stores } = setup();
