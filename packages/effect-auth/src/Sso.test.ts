@@ -834,7 +834,7 @@ describe("SsoService — SAML", () => {
   it("remembers a spent assertion for as long as the clock skew still admits it", async () => {
     const fx = makeSamlFixture();
     const skew = 3 * 60 * 1000;
-    const sso = await Effect.runPromise(
+    const sso = await runPromiseHttp(
       Sso.make({ samlClockSkewMs: skew }).pipe(Effect.provide(fx.layer)),
     );
 
