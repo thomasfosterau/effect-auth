@@ -472,10 +472,9 @@ export const make = <Id, User extends ViewerShape, Rung extends string>(
     Option.filter((user) => Str.isNonEmpty(user.id)),
   );
 
-  const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(viewer, (maybe) =>
-    Option.isSome(maybe)
-      ? Effect.succeed(maybe.value)
-      : Effect.fail(new Unauthorized({ message: "Unauthorized" })),
+  const requireUser: Effect.Effect<User, Unauthorized, Id> = Effect.flatMap(
+    viewer,
+    Effect.fromOption(() => new Unauthorized({ message: "Unauthorized" })),
   );
 
   const gate = (
