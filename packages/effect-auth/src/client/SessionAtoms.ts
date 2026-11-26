@@ -7,6 +7,7 @@
  * @example
  * ```ts
  * import assert from "node:assert";
+ * import * as Option from "effect/Option";
  * import { AtomRegistry } from "effect/reactivity";
  * import { createAuthClient } from "@thomasfosterau/effect-auth/client";
  * import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
@@ -30,7 +31,10 @@
  * // A command resolves once the observed session has refetched.
  * await client.signUp({ email: "ada@app.test", password: "correct horse battery" });
  * assert.strictEqual(registry.get(session.isSignedIn), true);
- * assert.strictEqual(registry.get(session.data)?.user.email, "ada@app.test");
+ * assert.strictEqual(
+ *   Option.getOrUndefined(registry.get(session.data))?.user.email,
+ *   "ada@app.test",
+ * );
  *
  * await client.signOut();
  * assert.strictEqual(registry.get(session.isSignedIn), false);
@@ -43,15 +47,16 @@
  * @module client/atoms
  */
 import * as Effect from "effect/Effect";
+import * as Eq from "effect/Equal";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import type * as Http from "../http/index.ts";
 import { type AuthClient, AuthClientError } from "./Client.ts";
 
-/** The session read: the session and its user, or `null` when signed out. */
+/** The session read: the session and its user, or `None` when signed out. */
 export type SessionResult = AsyncResult.AsyncResult<
-  Http.SessionWithUserView | null,
+  Option.Option<Http.SessionWithUserView>,
   AuthClientError
 >;
 
@@ -63,22 +68,22 @@ export type SessionListResult = AsyncResult.AsyncResult<
 
 /** A snapshot of the session read, for templates that want plain fields. */
 export interface SessionState {
-  /** The authenticated session + user, or `null` when signed out (or not read yet). */
-  readonly data: Http.SessionWithUserView | null;
+  /** The authenticated session + user, or `None` when signed out (or not read yet). */
+  readonly data: Option.Option<Http.SessionWithUserView>;
   /** `true` from the first read until it settles, and while a refetch is in flight. */
   readonly isPending: boolean;
-  /** The last unexpected error (a `401` is `data: null`, not an error). */
-  readonly error: AuthClientError | null;
+  /** The last unexpected error (a `401` is `data: None`, not an error). */
+  readonly error: Option.Option<AuthClientError>;
 }
 
 /** A snapshot of the session list, shaped like {@link SessionState}. */
 export interface SessionListState {
-  /** The sessions, or `null` before the first list arrives. */
-  readonly data: readonly Http.SessionView[] | null;
+  /** The sessions, or `None` before the first list arrives. */
+  readonly data: Option.Option<readonly Http.SessionView[]>;
   /** `true` while the list is being read. */
   readonly isPending: boolean;
   /** The last error reading the list. */
-  readonly error: AuthClientError | null;
+  readonly error: Option.Option<AuthClientError>;
 }
 
 /** Options for opt-in background session refresh. Every feature is off by default. */
@@ -87,12 +92,12 @@ export interface RefreshOptions {
    * Refetch the session every `intervalMs` milliseconds while it is observed:
    * the interval starts with the first subscriber and stops with the last.
    */
-  readonly intervalMs?: number | undefined;
+  readonly intervalMs?: number;
   /**
    * Refetch when the window gains focus or the tab becomes visible. A no-op
    * outside a browser.
    */
-  readonly onFocus?: boolean | undefined;
+  readonly onFocus?: boolean;
   /**
    * Mirror session changes across browser tabs via `BroadcastChannel`: `true`
    * for the default channel name (`"effect-auth-session"`), or a string for a
@@ -100,13 +105,13 @@ export interface RefreshOptions {
    * session takes it as is, without a request, and does not echo it. A no-op
    * where `BroadcastChannel` is unavailable.
    */
-  readonly crossTab?: boolean | string | undefined;
+  readonly crossTab?: boolean | string;
 }
 
 /** Options for {@link makeSessionAtoms}. */
 export interface SessionAtomsOptions {
   /** Opt-in background refresh while the session is observed. */
-  readonly refresh?: RefreshOptions | undefined;
+  readonly refresh?: RefreshOptions;
 }
 
 /**
@@ -118,21 +123,21 @@ export interface SessionAtomsOptions {
 export interface SessionAtoms {
   /**
    * The session read. It starts waiting (`Initial`); a `401` is
-   * `Success(null)`; a failure keeps the last session as its previous success;
+   * `Success(None)`; a failure keeps the last session as its previous success;
    * a refetch keeps the current value, marked waiting; and a refetch
    * superseded by a later one is interrupted, so its answer never lands.
    */
   readonly result: Atom.Atom<SessionResult>;
   /** {@link result} as `{ data, isPending, error }`. */
   readonly state: Atom.Atom<SessionState>;
-  /** The current session and user (kept through a failed refetch), or `null`. */
-  readonly data: Atom.Atom<Http.SessionWithUserView | null>;
+  /** The current session and user (kept through a failed refetch), or `None`. */
+  readonly data: Atom.Atom<Option.Option<Http.SessionWithUserView>>;
   /** Whether {@link data} holds a session. `false` while the first read is pending. */
   readonly isSignedIn: Atom.Atom<boolean>;
   /** Whether the session read is in flight. */
   readonly isPending: Atom.Atom<boolean>;
-  /** The last unexpected error reading the session, or `null`. */
-  readonly error: Atom.Atom<AuthClientError | null>;
+  /** The last unexpected error reading the session, or `None`. */
+  readonly error: Atom.Atom<Option.Option<AuthClientError>>;
   /**
    * The signed-in user's sessions. It depends on the session's id, so a
    * sign-in, sign-out or switch of account refetches it through the graph;
@@ -145,9 +150,13 @@ export interface SessionAtoms {
 
 const DEFAULT_CHANNEL = "effect-auth-session";
 
-/** What a tab posts on the cross-tab channel. */
+/**
+ * What a tab posts on the cross-tab channel: the session, or no `data` when
+ * signed out. A plain object, since a structured clone drops an `Option`'s
+ * prototype.
+ */
 interface SessionMessage {
-  readonly data: Http.SessionWithUserView | null;
+  readonly data?: Http.SessionWithUserView;
 }
 
 /** Any rejection as an {@link AuthClientError}; status `0` for one that never reached the server. */
@@ -194,9 +203,9 @@ const settled = <A, E>(
   });
 
 const stateOf = <A>(result: AsyncResult.AsyncResult<A, AuthClientError>) => ({
-  data: Option.getOrNull(AsyncResult.value(result)),
+  data: AsyncResult.value(result),
   isPending: result.waiting,
-  error: Option.getOrNull(AsyncResult.error(result)),
+  error: AsyncResult.error(result),
 });
 
 /**
@@ -234,13 +243,16 @@ export const makeSessionAtoms = (
       registry.refresh(read);
       return settled(registry, read);
     };
-    let channel: BroadcastChannel | undefined;
+    let channel = Option.none<BroadcastChannel>();
 
     get.subscribe(read, (next) => {
       get.setSelf(merge(get.self<SessionResult>(), next));
-      if (channel !== undefined && AsyncResult.isSuccess(next) && !next.waiting) {
-        const message: SessionMessage = { data: next.value };
-        channel.postMessage(message);
+      if (Option.isSome(channel) && AsyncResult.isSuccess(next) && !next.waiting) {
+        const message: SessionMessage = Option.match(next.value, {
+          onNone: () => ({}),
+          onSome: (data) => ({ data }),
+        });
+        channel.value.postMessage(message);
       }
     });
     get.addFinalizer(client.onSessionChange(refetch));
@@ -276,37 +288,44 @@ export const makeSessionAtoms = (
         refresh.crossTab === true ? DEFAULT_CHANNEL : refresh.crossTab,
       );
       opened.addEventListener("message", (event: MessageEvent<SessionMessage>) => {
-        get.setSelf(AsyncResult.success(event.data.data));
+        get.setSelf(AsyncResult.success(Option.fromUndefinedOr(event.data.data)));
       });
-      channel = opened;
+      channel = Option.some(opened);
       get.addFinalizer(() => opened.close());
     }
 
     return get.once(read);
   });
 
-  const state = Atom.map(result, stateOf);
-  const data = Atom.map(result, (current) => Option.getOrNull(AsyncResult.value(current)));
-  const isSignedIn = Atom.map(data, (current) => current !== null);
-  const isPending = Atom.map(result, (current) => current.waiting);
-  const error = Atom.map(result, (current) => Option.getOrNull(AsyncResult.error(current)));
-
-  // The session's identity: `undefined` until the first read settles, then
-  // the session id or `null`. A string compares by value, so a refetch that
-  // returns the same session does not reach the list.
-  const sessionId = Atom.make((get): string | null | undefined => {
-    const current = get(result);
-    if (AsyncResult.isInitial(current)) return undefined;
-    return Option.getOrNull(AsyncResult.value(current))?.session.id ?? null;
+  const state = Atom.map(result, (current): SessionState => {
+    const { data: nested, ...rest } = stateOf(current);
+    return { data: Option.flatten(nested), ...rest };
   });
+  const data = Atom.map(result, (current) => Option.flatten(AsyncResult.value(current)));
+  const isSignedIn = Atom.map(data, Option.isSome);
+  const isPending = Atom.map(result, (current) => current.waiting);
+  const error = Atom.map(result, (current) => AsyncResult.error(current));
+
+  // The session's identity: `None` until the first read settles, then
+  // `Some` of the session id, or of `None` when signed out. It compares by
+  // value, so a refetch that returns the same session does not reach the list.
+  const sessionId = Atom.make((get): Option.Option<Option.Option<string>> => {
+    const current = get(result);
+    if (AsyncResult.isInitial(current)) return Option.none();
+    return Option.some(
+      Option.map(Option.flatten(AsyncResult.value(current)), (found) => found.session.id),
+    );
+  }).pipe(Atom.withEquality(Eq.equals));
 
   const sessions: Atom.Atom<SessionListResult> = Atom.make(
-    (get): Effect.Effect<readonly Http.SessionView[], AuthClientError> => {
-      const id = get(sessionId);
-      if (id === undefined) return Effect.never;
-      if (id === null) return Effect.succeed<readonly Http.SessionView[]>([]);
-      return Effect.tryPromise({ try: () => client.listSessions(), catch: toClientError });
-    },
+    (get): Effect.Effect<readonly Http.SessionView[], AuthClientError> =>
+      Option.match(get(sessionId), {
+        onNone: () => Effect.never,
+        onSome: (id) =>
+          Option.isNone(id)
+            ? Effect.succeed<readonly Http.SessionView[]>([])
+            : Effect.tryPromise({ try: () => client.listSessions(), catch: toClientError }),
+      }),
   );
   const sessionsState = Atom.map(sessions, stateOf);
 

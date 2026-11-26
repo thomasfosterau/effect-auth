@@ -1,4 +1,5 @@
 import { assert, describe, it, expect } from "vite-plus/test";
+import * as Option from "effect/Option";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import {
   type AuthClient,
@@ -305,7 +306,7 @@ describe("PasswordResetRequestForm", () => {
       },
     });
     const { container } = render(PasswordResetRequestForm, {
-      props: { captchaToken: () => "captcha-ok" },
+      props: { captchaToken: () => Option.some("captcha-ok") },
       context: withClient(client),
     });
 
@@ -407,7 +408,7 @@ describe("MagicLinkForm", () => {
         },
       },
     });
-    let token: string | undefined;
+    let token = Option.none<string>();
     const { container } = render(MagicLinkForm, {
       props: { captchaToken: () => token },
       context: withClient(client),
@@ -415,7 +416,7 @@ describe("MagicLinkForm", () => {
 
     await type("Email", EMAIL);
     // The widget solves after the form rendered; the form reads the token on submit.
-    token = "captcha-ok";
+    token = Option.some("captcha-ok");
     await fireEvent.submit(formOf(container));
 
     await waitFor(() =>
@@ -457,7 +458,7 @@ describe("EmailOtpForm", () => {
   it("sends the captcha token with the code request only", async () => {
     const calls: unknown[] = [];
     const { container } = render(EmailOtpForm, {
-      props: { captchaToken: () => "captcha-ok" },
+      props: { captchaToken: () => Option.some("captcha-ok") },
       context: withClient(otpClient(calls)),
     });
 

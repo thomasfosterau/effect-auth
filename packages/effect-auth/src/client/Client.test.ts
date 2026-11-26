@@ -47,11 +47,11 @@ describe("createAuthClient", () => {
     const signedUp = await client.signUp({ email: EMAIL, password: PW, name: "Alice" });
     expect(signedInUser(signedUp).email).toBe(EMAIL);
 
-    const session = await client.getSession();
+    const session = Option.getOrUndefined(await client.getSession());
     expect(session?.user.email).toBe(EMAIL);
 
     await client.signOut();
-    expect(await client.getSession()).toBeNull();
+    expect(Option.isNone(await client.getSession())).toBe(true);
   });
 
   it("never sees the session token: every body names the session by its digest", async () => {
@@ -78,7 +78,7 @@ describe("createAuthClient", () => {
     await client.signUp({ email: EMAIL, password: PW });
     await client.signOut();
     await client.signIn({ email: EMAIL, password: PW });
-    const current = await client.getSession();
+    const current = Option.getOrUndefined(await client.getSession());
     const listed = await client.listSessions();
 
     expect(tokens).toHaveLength(2);
@@ -89,7 +89,7 @@ describe("createAuthClient", () => {
 
     // The id the client holds signs the current session out.
     await client.revokeSession(current?.session.id ?? "");
-    expect(await client.getSession()).toBeNull();
+    expect(Option.isNone(await client.getSession())).toBe(true);
   });
 
   it("signs in with credentials and surfaces failures as AuthClientError", async () => {
@@ -186,7 +186,7 @@ describe("createAuthClient", () => {
     // Revoke the other device's session from the first device.
     await client.revokeOtherSessions();
     expect((await client.listSessions()).length).toBe(1);
-    expect(await other.getSession()).toBeNull();
+    expect(Option.isNone(await other.getSession())).toBe(true);
 
     await client.changePassword({ currentPassword: PW, newPassword: "new-password-456" });
     await client.signOut();
@@ -208,7 +208,7 @@ describe("createAuthClient", () => {
 const clientReturning = (response: () => Response) =>
   createAuthClient({ baseUrl: "http://client.test", fetch: () => Promise.resolve(response()) });
 
-const respond = (body: string | null, contentType: string, init?: ResponseInit) =>
+const respond = (body: string, contentType: string, init?: ResponseInit) =>
   new Response(body, { ...init, headers: { "content-type": contentType } });
 
 describe("JSON response detection", () => {
@@ -305,6 +305,6 @@ describe("plugin extension", () => {
 
     await ext.logOut();
     expect(notified).toBe(1);
-    expect(await ext.getSession()).toBeNull();
+    expect(Option.isNone(await ext.getSession())).toBe(true);
   });
 });

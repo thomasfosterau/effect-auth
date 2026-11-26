@@ -77,18 +77,18 @@ export interface ServerFixtureOptions {
    * The attribute keys a sign-up may set (`Http.make`'s `signUpAttributes`).
    * Default none: as in production, a sign-up keeps no attribute.
    */
-  readonly signUpAttributes?: ReadonlyArray<string> | undefined;
+  readonly signUpAttributes?: ReadonlyArray<string>;
   /**
    * Mount `ApiKeyService` (an in-memory store and `RateLimiter`), so
    * `/api-keys` and `GET /api-keys/current` answer instead of `404`.
    */
-  readonly apiKeys?: boolean | undefined;
+  readonly apiKeys?: boolean;
   /** A layer merged into the server's services, such as `Logger.layer([...])` to capture its log. */
-  readonly layer?: Layer.Layer<never> | undefined;
+  readonly layer?: Layer.Layer<never>;
   /** The server's cookie settings beyond `secure: false` (`apiKeyHeaders`, …). */
-  readonly cookie?: Http.CookieConfig | undefined;
+  readonly cookie?: Http.CookieConfig;
   /** The `RateLimitStore` every limiter in the fixture runs on; default in-memory. */
-  readonly rateLimitStore?: typeof Auth.RateLimitStore.Service | undefined;
+  readonly rateLimitStore?: typeof Auth.RateLimitStore.Service;
 }
 
 export const makeServerFixture = (options: ServerFixtureOptions = {}) => {

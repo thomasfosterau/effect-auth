@@ -17,7 +17,7 @@
     onValueChange: (value: string) => void;
     invalid: boolean;
     disabled: boolean;
-    inputmode?: "numeric" | undefined;
+    inputmode?: "numeric";
     /** Defaults to `true`; pass `false` for genuinely optional inputs. */
     required?: boolean;
   }

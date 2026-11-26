@@ -1,6 +1,6 @@
 # The browser client
 
-`@thomasfosterau/effect-auth/client` is the front-end half of effect-auth: a dependency-free client over the auth HTTP contract (plain `fetch`, no Effect runtime in the bundle). The session is an `effect/reactivity` Atom graph over that client, in `@thomasfosterau/effect-auth/client/atoms` (§2), so it lives in the same registry as the rest of a page's Atoms. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
+`@thomasfosterau/effect-auth/client` is the front-end half of effect-auth: a small client over the auth HTTP contract (plain `fetch`; absence is an `Option`, so `effect/Option` is the one Effect module in the bundle). The session is an `effect/reactivity` Atom graph over that client, in `@thomasfosterau/effect-auth/client/atoms` (§2), so it lives in the same registry as the rest of a page's Atoms. A thin Svelte binding, with out-of-the-box form components (§4), ships as its own package on top of it (§3). Only the _types_ come from `@thomasfosterau/effect-auth`, and those erase at compile time — nothing server-side reaches the browser bundle.
 
 ## 1. Setup
 
@@ -48,7 +48,7 @@ const unsubscribe = registry.subscribe(auth.state, render, { immediate: true });
 registry.refresh(auth.result); // manual refetch
 ```
 
-`auth.result` is the session read as an `AsyncResult<SessionWithUserView | null, AuthClientError>`; `state` (`{ data, isPending, error }`), `data`, `isSignedIn`, `isPending` and `error` derive from it, and `sessions` / `sessionsState` are the signed-in user's session list. A `401` is `data: null` rather than an error, and a _transient_ failure keeps the last known session while surfacing `error`.
+`auth.result` is the session read as an `AsyncResult<Option<SessionWithUserView>, AuthClientError>`; `state` (`{ data, isPending, error }`), `data`, `isSignedIn`, `isPending` and `error` derive from it, and `sessions` / `sessionsState` are the signed-in user's session list. A `401` is `data: None` rather than an error, and a _transient_ failure keeps the last known session while surfacing `error`.
 
 Commands stay plain calls on the client. The Atoms observe them through `client.onSessionChange`, and four behaviours follow:
 
@@ -95,10 +95,11 @@ The Svelte binding is its own package, depends on the core for its `/client` and
 ```svelte
 <!-- Svelte — @thomasfosterau/effect-auth-svelte -->
 <script>
+  import * as Option from "effect/Option";
   import { sessionStore } from "@thomasfosterau/effect-auth-svelte";
   const session = sessionStore(registry, auth);
 </script>
-{#if $session.data}Signed in as {$session.data.user.email}{/if}
+{#if Option.isSome($session.data)}Signed in as {$session.data.value.user.email}{/if}
 ```
 
 `atomStore(registry, atom)` is the whole Svelte↔Atom binding — any Atom as a readable store, mounted while subscribed — and the session stores are it applied to the session Atoms. The stores implement Svelte's readable-store contract by hand; the components and context helpers use Svelte 5 runes, so the package requires `svelte >= 5.20` as a peer.
@@ -266,7 +267,7 @@ const client = createAuthClient({
 });
 
 await client.signUp({ email, password });
-expect((await client.getSession())?.user.email).toBe(email);
+expect(Option.getOrUndefined(await client.getSession())?.user.email).toBe(email);
 ```
 
 `@thomasfosterau/effect-auth/client/testing` packages exactly this: `makeServerFixture({ features, organization, multiSession })` builds the real handler over in-memory stores, and `makeCookieJarFetch(handler)` is the cookie-jar `fetch`. It imports the core and `effect` at runtime, so keep it to tests. For groups whose server module is disproportionate to stand up (API keys, admin, …), a recording `fetch` that asserts method/path/body is enough.

@@ -6,6 +6,7 @@
   ```
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
@@ -24,7 +25,7 @@
     labels: labelOverrides = undefined,
   }: SignUpFormProps = $props();
 
-  const client = resolveAuthClient(() => clientProp);
+  const client = resolveAuthClient(() => Option.fromUndefinedOr(clientProp));
   const uid = $props.id();
   const submission = createSubmission();
 
@@ -41,11 +42,7 @@
     // `name` is optional on the wire; spread it in only when there is one.
     const payload =
       showName && trimmedName.length > 0 ? { email, password, name: trimmedName } : { email, password };
-    void submission.run(() => client.signUp(payload), {
-      fallback: labels.error,
-      onSuccess,
-      onError,
-    });
+    void submission.run(() => client.signUp(payload), labels.error, onSuccess, onError);
   };
 </script>
 

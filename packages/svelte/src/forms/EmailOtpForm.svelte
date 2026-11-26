@@ -9,11 +9,12 @@
   a stylesheet can tell the two apart.
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
   import SubmitButton from "./SubmitButton.svelte";
-  import { isInvalid, mergeLabels, resolveClasses, routeSignInResult } from "./internal.ts";
+  import { captchaField, isInvalid, mergeLabels, resolveClasses, routeSignInResult } from "./internal.ts";
   import { createSubmission } from "./submission.svelte.ts";
   import { EMAIL_OTP_LABELS, type EmailOtpFormProps } from "./props.ts";
 
@@ -29,7 +30,7 @@
     captchaToken = undefined,
   }: EmailOtpFormProps = $props();
 
-  const client = resolveAuthClient(() => clientProp);
+  const client = resolveAuthClient(() => Option.fromUndefinedOr(clientProp));
   const uid = $props.id();
   // A submission per step, so the request step's error does not linger over the
   // verify step (and vice versa).
@@ -45,22 +46,14 @@
 
   const handleRequest = (event: SubmitEvent): void => {
     event.preventDefault();
-    void request.run(() => client.emailOtp.send({ email, purpose, captchaToken: captchaToken?.() }), {
-      fallback: labels.sendError,
-      onSuccess: () => {
+    void request.run(() => client.emailOtp.send({ email, purpose, ...captchaField(captchaToken) }), labels.sendError, () => {
         sent = true;
-      },
-      onError,
-    });
+      }, onError);
   };
 
   const handleVerify = (event: SubmitEvent): void => {
     event.preventDefault();
-    void verify.run(() => client.emailOtp.signIn({ email, otp }), {
-      fallback: labels.verifyError,
-      onSuccess: routeSignInResult(onSuccess, onSecondFactor),
-      onError,
-    });
+    void verify.run(() => client.emailOtp.signIn({ email, otp }), labels.verifyError, routeSignInResult(onSuccess, onSecondFactor), onError);
   };
 
   const restart = (): void => {

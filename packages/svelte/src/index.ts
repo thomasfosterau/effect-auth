@@ -7,9 +7,10 @@
  * @example The session as Svelte stores
  * ```svelte
  * <script>
+ *   import * as Option from "effect/Option";
  *   const session = sessionStore(registry, auth);
  * </script>
- * {#if $session.data}Signed in as {$session.data.user.email}{/if}
+ * {#if Option.isSome($session.data)}Signed in as {$session.data.value.user.email}{/if}
  * ```
  *
  * @module effect-auth-svelte

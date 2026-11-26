@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vite-plus/test";
+import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import type * as Schema from "effect/Schema";
 import { createAuthClient } from "@thomasfosterau/effect-auth/client";
@@ -123,22 +124,22 @@ describe("svelte sessionStore", () => {
     const registry = AtomRegistry.make();
     const store = sessionStore(registry, makeSessionAtoms(client));
 
-    const seen: Array<string | null | undefined> = [];
+    const seen: Array<Option.Option<string>> = [];
     const pending: boolean[] = [];
     const unsubscribe = store.subscribe((state) => {
-      seen.push(state.data === null ? null : state.data.user.email);
+      seen.push(Option.flatMapNullishOr(state.data, (found) => found.user.email));
       pending.push(state.isPending);
     });
 
     // Immediate synchronous emission with the current value: pending, no session.
-    expect(seen).toEqual([null]);
+    expect(seen).toEqual([Option.none()]);
     expect(pending).toEqual([true]);
 
     await client.signUp({ email: EMAIL, password: PW });
-    expect(seen.at(-1)).toBe(EMAIL);
+    expect(seen.at(-1)).toEqual(Option.some(EMAIL));
 
     await client.signOut();
-    expect(seen.at(-1)).toBeNull();
+    expect(seen.at(-1)).toEqual(Option.none());
     expect(pending.at(-1)).toBe(false);
 
     unsubscribe();
@@ -162,17 +163,21 @@ describe("svelte listSessionsStore", () => {
 
     expect(seen[0]?.isPending).toBe(true);
     await vi.waitFor(() => expect(seen.at(-1)?.isPending).toBe(false));
-    expect(seen.at(-1)).toEqual({ data: [expect.anything()], isPending: false, error: null });
+    expect(seen.at(-1)).toEqual({
+      data: Option.some([expect.anything()]),
+      isPending: false,
+      error: Option.none(),
+    });
     expect(lists).toBe(1);
 
     store.refetch();
     await vi.waitFor(() => expect(lists).toBe(2));
     await vi.waitFor(() => expect(seen.at(-1)?.isPending).toBe(false));
-    expect(seen.at(-1)?.data?.length).toBe(1);
+    expect(Option.getOrUndefined(seen.at(-1)?.data ?? Option.none())?.length).toBe(1);
 
     // Signing out reaches the list through the Atom graph: empty, no request.
     await client.signOut();
-    await vi.waitFor(() => expect(seen.at(-1)?.data).toEqual([]));
+    await vi.waitFor(() => expect(seen.at(-1)?.data).toEqual(Option.some([])));
     expect(lists).toBe(2);
 
     unsubscribe();

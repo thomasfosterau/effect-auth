@@ -172,7 +172,7 @@ Upgrading from a release without the root secret: rows stay readable while they 
 | `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([below](./storage.md#sql-storage-sql))                                                                  |
 | `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([below](./saml.md))                                                                                                        |
 | `@thomasfosterau/effect-auth/scrypt`         | — (subpath only)   | `scryptHasher` and its layer, to verify and rehash scrypt hashes; Node-only                                                                                                           |
-| `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports nothing, not even `effect`                                                                                                       |
+| `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports only `effect/Option`                                                                                                             |
 | `@thomasfosterau/effect-auth/testing`        | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
 
 The package root also carries these namespaces, each a module whose member names are too generic to sit flat:

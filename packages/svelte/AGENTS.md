@@ -4,7 +4,7 @@ Svelte 5 bindings over the core's browser client: `atomStore` (any `effect/react
 
 ## Boundary
 
-Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may import `core` — in practice only its `/client` and `/client/atoms` subpaths — and `ladder`). Peers: `svelte` and `effect` (`catalog:peers`); `effect` for the Atom and registry types only. Depends on `@thomasfosterau/effect-auth` for `/client` and `/client/atoms`, imported as types only. Imports nothing from `effect` at runtime (`import type` only) and nothing from the core's other entries: the stores call the registry's own methods. Built with `svelte-package` and resolved through the `svelte` export condition; `scripts/postbuild.mjs` strips compiled tests and the `.svelte-kit/__package__` staging copy from `dist/`. Type-checked by `svelte-check` (TS6 JS API, no Effect plugin).
+Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may import `core` — in practice only its `/client` and `/client/atoms` subpaths — and `ladder`). Peers: `svelte` and `effect` (`catalog:peers`); `effect/Option` is a runtime import (form failures, the captcha token, the client prop) and the rest of `effect` is types only. Depends on `@thomasfosterau/effect-auth` for `/client` and `/client/atoms`, imported as types only, and nothing from the core's other entries: the stores call the registry's own methods. Session and list state carry `Option`s (`data`, `error`), which templates unwrap (`Option.isSome($session.data)`). Built with `svelte-package` and resolved through the `svelte` export condition; `scripts/postbuild.mjs` strips compiled tests and the `.svelte-kit/__package__` staging copy from `dist/`. Type-checked by `svelte-check` (TS6 JS API, no Effect plugin).
 
 ## Invariants
 
@@ -20,5 +20,5 @@ Archetype **Framework binding** (`.fallowrc.json` zone `bindings`, which may imp
 ## Terms
 
 - **Form outcome** — `AuthSuccess` or `StatusResponse`, the client's result types re-exported; `onError` receives whatever the client threw.
-- **`FormFailure`** — a rendered failure: its message plus the field it implicates (`null` for a server failure, which drives `aria-invalid`).
+- **`FormFailure`** — a rendered failure: its message plus the field it implicates (`None` for a server failure, which drives `aria-invalid`).
 - **Session Atoms** — `SessionAtoms` from `makeSessionAtoms(client)` in the core's `/client/atoms`; the stores' only source.

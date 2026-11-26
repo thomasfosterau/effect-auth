@@ -161,7 +161,7 @@ describe("username and anonymous sign-in", () => {
 
     const signedIn = await client.signInUsername({ username: "cooluser", password: PW });
     expect(signedInUser(signedIn).id).toBe(user.id);
-    expect((await client.getSession())?.user.id).toBe(user.id);
+    expect(Option.getOrUndefined(await client.getSession())?.user.id).toBe(user.id);
   });
 
   it("signs in anonymously and keeps the guest session", async () => {
@@ -169,7 +169,7 @@ describe("username and anonymous sign-in", () => {
 
     const guest = await client.signInAnonymous();
     expect(signedInUser(guest).attributes["isAnonymous"]).toBe(true);
-    expect((await client.getSession())?.user.id).toBe(signedInUser(guest).id);
+    expect(Option.getOrUndefined(await client.getSession())?.user.id).toBe(signedInUser(guest).id);
   });
 });
 
@@ -189,7 +189,7 @@ describe("phone OTP", () => {
       otp: sent.otp,
     });
     expect(signedInUser(signedIn).id).toBeTypeOf("string");
-    expect(await client.getSession()).not.toBeNull();
+    expect(Option.isSome(await client.getSession())).toBe(true);
   });
 });
 
@@ -284,7 +284,7 @@ describe("device authorization", () => {
     const authorized = await device.device.token(poll);
     expect(authorized).toMatchObject({ token_type: "Bearer", scope: "read" });
     expect(authorized.expires_in).toBeGreaterThan(0);
-    expect(await device.getSession()).toBeNull();
+    expect(Option.isNone(await device.getSession())).toBe(true);
   });
 });
 
@@ -298,7 +298,7 @@ describe("multi-session", () => {
 
     const first = await client.signUp({ email: "a@client.test", password: PW });
     const second = await client.signUp({ email: "b@client.test", password: PW });
-    expect((await client.getSession())?.user.id).toBe(signedInUser(second).id);
+    expect(Option.getOrUndefined(await client.getSession())?.user.id).toBe(signedInUser(second).id);
 
     const list = await client.multiSession.list();
     expect(
@@ -316,7 +316,7 @@ describe("multi-session", () => {
     expect(await client.multiSession.setActive({ sessionId: firstEntry.session.id })).toEqual({
       status: true,
     });
-    expect((await client.getSession())?.user.id).toBe(signedInUser(first).id);
+    expect(Option.getOrUndefined(await client.getSession())?.user.id).toBe(signedInUser(first).id);
 
     await client.multiSession.revoke({ sessionId: firstEntry.session.id });
     expect((await client.multiSession.list()).map((entry) => entry.user.id)).toEqual([
@@ -359,7 +359,7 @@ describe("multi-factor challenge continuation", () => {
 
     const gated = await client.signIn({ email: "totp@client.test", password: PW });
     assert(gated.secondFactor !== undefined, "sign-in is gated on the second factor");
-    expect(await client.getSession()).toBeNull(); // no session until redeemed
+    expect(Option.isNone(await client.getSession())).toBe(true); // no session until redeemed
 
     const challenge = client.multiFactor.continueChallenge(gated);
     expect(challenge.token).toBe(gated.secondFactor.token);
@@ -367,7 +367,7 @@ describe("multi-factor challenge continuation", () => {
 
     const verified = await challenge.verifyTotp(await totpFor(enrollment.secret));
     expect(signedInUser(verified).email).toBe("totp@client.test");
-    expect((await client.getSession())?.user.email).toBe("totp@client.test");
+    expect(Option.getOrUndefined(await client.getSession())?.user.email).toBe("totp@client.test");
   });
 
   it("carries a gated sign-in into verifyBackupCode", async () => {
@@ -458,7 +458,7 @@ describe("change email and delete user", () => {
     const [token] = server.sentDeleteTokens;
     assert(token !== undefined);
     await client.deleteUser.confirm({ token });
-    expect(await client.getSession()).toBeNull();
+    expect(Option.isNone(await client.getSession())).toBe(true);
   });
 });
 
@@ -628,7 +628,9 @@ describe("organizations", () => {
     // ...but the row is still on the organization.
     expect((await owner.organization.get(org.id)).members).toHaveLength(2);
     // The session survives: deactivation is organization-scoped.
-    expect((await staff.getSession())?.user.id).toBe(signedInUser(employee).id);
+    expect(Option.getOrUndefined(await staff.getSession())?.user.id).toBe(
+      signedInUser(employee).id,
+    );
 
     const reactivated = await owner.organization.reactivateMember(membership.id);
     expect(reactivated).toMatchObject({ status: "active", role: "admin" });
@@ -695,8 +697,10 @@ describe("organizations", () => {
     );
     assert(Option.isSome(email), "the invitee has an email identifier");
     expect(email.value[1].verified).toBe(true);
-    expect((await invitee.getSession())?.user.id).toBe(signedInUser(account).id);
-    expect(await otherDevice.getSession()).toBeNull();
+    expect(Option.getOrUndefined(await invitee.getSession())?.user.id).toBe(
+      signedInUser(account).id,
+    );
+    expect(Option.isNone(await otherDevice.getSession())).toBe(true);
     const signIn = await rejectionOf(
       browser().signIn({ email: "squatted@client.test", password: PW }),
       AuthClientError,
