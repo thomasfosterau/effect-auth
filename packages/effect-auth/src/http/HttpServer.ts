@@ -2459,10 +2459,19 @@ const clearDataCookie = (cfg: ResolvedCookieConfig) =>
 const lastOwnerConflict = (e: LastOrganizationOwnerError) =>
   Effect.fail(new S.Conflict({ message: e.message, code: e.code }));
 
+/** How a redeemed account token's refusals answer: `400`, or `500` for a fault. */
+const accountTokenRefusals = {
+  AccountTokenError: (e: AccountTokenError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  UserNotFoundError: (e: UserNotFoundError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  AuthError: (e: AuthError) => internalServerError(e),
+};
+
 /**
  * The `redeem` handler of an emailed account token: confirm it with the
  * service's `confirm`, then clear the session-data cookie. A token that does
- * not verify is a `400`; a deletion of an organization's last owner a `409`.
+ * not verify is a `400`.
  */
 const redeemAccountToken =
   (
@@ -2470,10 +2479,7 @@ const redeemAccountToken =
     confirm: (
       service: typeof AccountManagementService.Service,
       token: string,
-    ) => Effect.Effect<
-      unknown,
-      AccountTokenError | UserNotFoundError | LastOrganizationOwnerError | AuthError
-    >,
+    ) => Effect.Effect<unknown, AccountTokenError | UserNotFoundError | AuthError>,
   ) =>
   ({
     payload,
@@ -2483,12 +2489,7 @@ const redeemAccountToken =
     Effect.gen(function* () {
       const account = yield* resolveAccountManagement;
       yield* confirm(account.service, payload.data.attributes.token).pipe(
-        Effect.catchTags({
-          AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-          UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-          LastOrganizationOwnerError: lastOwnerConflict,
-          AuthError: (e) => internalServerError(e),
-        }),
+        Effect.catchTags(accountTokenRefusals),
       );
       yield* clearDataCookie(cfg);
     }).pipe(JsonApiErrors.mapHttpErrors);
@@ -2553,9 +2554,17 @@ export const accountDeletionsGroupLayer = (
           yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle(
-        "redeem",
-        redeemAccountToken(cfg, (service, token) => service.confirmAccountDeletion(token)),
+      .handle("redeem", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.service.confirmAccountDeletion(payload.data.attributes.token).pipe(
+            Effect.catchTags({
+              ...accountTokenRefusals,
+              LastOrganizationOwnerError: lastOwnerConflict,
+            }),
+          );
+          yield* clearDataCookie(cfg);
+        }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
 };
