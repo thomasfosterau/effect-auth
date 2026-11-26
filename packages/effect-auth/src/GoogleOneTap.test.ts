@@ -253,7 +253,7 @@ describe("GoogleOneTapService", () => {
 
   it("answers a second-factor challenge for an enrolled user unless One Tap is exempt", async () => {
     const { layer, nonceStore } = makeStores();
-    const service = await Effect.runPromise(Effect.provide(GoogleOneTap.make(config), layer));
+    const service = await runPromiseHttp(Effect.provide(GoogleOneTap.make(config), layer));
     const challenged: Array<string> = [];
     const signIn = (nonce: string, gate: Layer.Layer<SecondFactorGate>) =>
       Effect.gen(function* () {

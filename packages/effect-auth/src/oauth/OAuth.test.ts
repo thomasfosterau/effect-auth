@@ -1901,7 +1901,7 @@ describe("OAuthService linking controls", () => {
             makeCoreUserLayer(user),
             makeSessionLayer(user.id, minted),
             noPasswordsLayer,
-            PlatformCrypto.layer,
+            testCryptoLayer,
             gate,
           ),
         ),
@@ -1909,7 +1909,7 @@ describe("OAuthService linking controls", () => {
     const userInfo = mockUserInfo({ email: "enrolled@example.com", id: "gh-enrolled" });
 
     const gated = await withProviderFetch(userInfo, () =>
-      Effect.runPromise(signIn(enrolledGate(challenged))),
+      runPromiseHttp(signIn(enrolledGate(challenged))),
     );
     expect(gated.secondFactor).toEqual(testChallenge);
     expect(gated.session).toBeUndefined();
@@ -1917,7 +1917,7 @@ describe("OAuthService linking controls", () => {
     expect(minted).toEqual([]);
 
     const exempt = await withProviderFetch(userInfo, () =>
-      Effect.runPromise(
+      runPromiseHttp(
         signIn(Layer.merge(enrolledGate(challenged), exemptFromSecondFactor("oauth"))),
       ),
     );
