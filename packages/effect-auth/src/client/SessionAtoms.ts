@@ -193,13 +193,7 @@ const settled = <A, E>(
     });
   });
 
-const stateOf = <A>(
-  result: AsyncResult.AsyncResult<A, AuthClientError>,
-): {
-  readonly data: A | null;
-  readonly isPending: boolean;
-  readonly error: AuthClientError | null;
-} => ({
+const stateOf = <A>(result: AsyncResult.AsyncResult<A, AuthClientError>) => ({
   data: Option.getOrNull(AsyncResult.value(result)),
   isPending: result.waiting,
   error: Option.getOrNull(AsyncResult.error(result)),

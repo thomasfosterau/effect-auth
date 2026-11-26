@@ -120,7 +120,6 @@ export default defineConfig({
       // `Bool`; `Option` and `Schema` by name), in sources and tests alike.
       "effect/prefer-namespace-imports": "error",
       // Renaming these would change the published API or the wire format.
-      "effect/no-known-value-widening": "off",
       // `string & {}` (literal autocomplete) and `{} extends …` are type-level idioms.
       "effect/avoid-object-type": "off",
       // The only `makeFilter` calls probe config keys; they are not reusable checks.
@@ -456,6 +455,12 @@ export default defineConfig({
           "effect/no-unknown-parameters": "off",
           "effect/no-unknown-returns": "off",
         },
+      },
+      {
+        // The conformance suite's record comparison maps any stored value to
+        // a comparable one, so it answers `unknown` too, as above.
+        files: ["packages/effect-auth/src/testing/StoreConformance.ts"],
+        rules: { "effect/no-known-value-widening": "off" },
       },
       {
         // The edge, where plain `fetch` is the API being adapted: the

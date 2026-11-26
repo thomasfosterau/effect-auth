@@ -85,9 +85,6 @@ const fail = (message: string, cause?: unknown): Effect.Effect<never, Errors.Has
 
 const isPositiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0;
 
-const isNonEmptyString = (value: unknown): value is string =>
-  P.isString(value) && Str.isNonEmpty(value);
-
 const resolveCosts = (options?: Argon2Options): Argon2Profile => ({
   memoryCost: options?.memoryCost ?? argon2DefaultProfile.memoryCost,
   timeCost: options?.timeCost ?? argon2DefaultProfile.timeCost,
@@ -234,7 +231,7 @@ export const argon2idHasher = (
 
     hash: Effect.fn("effect-auth.password.hash", { attributes: { algorithm: ARGON2ID } })(
       function* (password: string) {
-        if (!isNonEmptyString(password)) {
+        if (!Str.isNonEmpty(password)) {
           return yield* fail("Password must be a non-empty string");
         }
         if (encoder.encode(password).length > MAX_PASSWORD_BYTES) {
@@ -249,10 +246,10 @@ export const argon2idHasher = (
 
     verify: Effect.fn("effect-auth.password.verify", { attributes: { algorithm: ARGON2ID } })(
       function* (password: string, hash: string) {
-        if (!isNonEmptyString(password)) {
+        if (!Str.isNonEmpty(password)) {
           return yield* fail("Password must be a non-empty string");
         }
-        if (!isNonEmptyString(hash)) return yield* fail("Hash must be a non-empty string");
+        if (!Str.isNonEmpty(hash)) return yield* fail("Hash must be a non-empty string");
         // Anti-DoS: an absurdly long password never reaches the KDF.
         if (encoder.encode(password).length > MAX_PASSWORD_BYTES) return false;
         yield* readStored(hash, limits);

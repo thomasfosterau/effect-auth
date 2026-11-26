@@ -104,7 +104,7 @@ export const runVerifySequence = <
       yield* Effect.orDie(options.send);
     }
     const record = Effect.sync(options.record);
-    const sent: { readonly answer: unknown; readonly record: RecordState | null } = {
+    const sent = {
       answer: "sent",
       record: yield* record,
     };

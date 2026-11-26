@@ -133,10 +133,12 @@ export const make = <const Rungs extends readonly [string, ...Array<string>]>(
   const frozen: ReadonlyArray<Rung> = Object.freeze([...rungs]);
 
   const rank = (role: string): number => positions.get(role) ?? -1;
-  const isRung = (role: unknown): role is Rung => typeof role === "string" && positions.has(role);
+  const isKnownRung = (role: string): role is Rung => positions.has(role);
+  const isRung = (role: unknown): role is Rung => typeof role === "string" && isKnownRung(role);
 
   const requireRung = (rung: string, context: string): Rung => {
-    if (!isRung(rung)) throw new Error(`Ladder: ${context} names "${rung}", which is not a rung`);
+    if (!isKnownRung(rung))
+      throw new Error(`Ladder: ${context} names "${rung}", which is not a rung`);
     return rung;
   };
 

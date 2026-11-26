@@ -151,7 +151,11 @@ interface XmlNode {
 
 // xml2js output: element names mapping to text, child elements or lists of
 // them, and attributes under `$`.
-const isXmlNode = (value: unknown): value is XmlNode => P.isObject(value);
+const isXmlNode = (value: XmlValue | XmlAttributes | undefined): value is XmlNode =>
+  P.isObject(value);
+
+/** node-saml's parse of the verified assertion, which it types loosely. */
+const isParsedXml = (value: unknown): value is XmlNode => P.isObject(value);
 
 /** Text-only elements (and stray nested lists) carry no attributes or children. */
 const emptyNode: XmlNode = {};
@@ -417,7 +421,7 @@ const verify = (input: SamlVerifyInput): Effect.Effect<SamlAssertion, SamlError>
     }
     // node-saml builds `getAssertion()` from xml2js's parse of the verified assertion.
     const verified = profile.getAssertion();
-    const assertion = isXmlNode(verified) ? firstChild(verified, "Assertion") : undefined;
+    const assertion = isParsedXml(verified) ? firstChild(verified, "Assertion") : undefined;
     if (assertion === undefined) {
       return yield* fail("Verified SAML content contained no Assertion");
     }

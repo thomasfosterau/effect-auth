@@ -268,9 +268,7 @@ class CancelFailed extends Error {}
  * A body that never ends, recording whether it was cancelled; with
  * `cancelFails`, its cancel throws, so `body.cancel()` rejects.
  */
-const trackedBody = (
-  cancelFails: boolean,
-): { readonly stream: ReadableStream<Uint8Array>; readonly cancelled: () => boolean } => {
+const trackedBody = (cancelFails: boolean) => {
   let cancelled = false;
   return {
     stream: new ReadableStream<Uint8Array>({

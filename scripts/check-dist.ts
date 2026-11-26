@@ -245,10 +245,7 @@ const effectFor = ({ manifest: { name }, range }: Packed): string | undefined =>
  * declare for it, so one install satisfies every declared range; under
  * `--effect catalog` the catalog version, as for `effect`.
  */
-const peerVersionFor = (
-  group: ReadonlyArray<Packed>,
-  peer: string,
-): { readonly version: string; readonly why: string } => {
+const peerVersionFor = (group: ReadonlyArray<Packed>, peer: string) => {
   if (requested === "catalog") return { version: catalogEntry(peer), why: "catalog" };
   const floors = group.flatMap(({ manifest }) => {
     const range = manifest.peerDependencies?.[peer];

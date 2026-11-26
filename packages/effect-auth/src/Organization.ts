@@ -425,7 +425,7 @@ export class DomainVerifier extends Context.Service<
  * `domain:manage` simply leaves domain management to nobody - resolution fails
  * closed, as it does for every other permission.
  */
-export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
+export const defaultOrganizationRoles: NonNullable<OrganizationConfig["roles"]> = {
   owner: ["*:*"],
   admin: [
     "organization:update",

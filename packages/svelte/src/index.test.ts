@@ -5,6 +5,11 @@ import { createAuthClient } from "@thomasfosterau/effect-auth/client";
 import { makeSessionAtoms } from "@thomasfosterau/effect-auth/client/atoms";
 import { atomStore, listSessionsStore, sessionStore, type ListSessionsState } from "./index.ts";
 
+/** The stub server's answers, by `"<METHOD> <path>"`. */
+interface Routes {
+  readonly [route: string]: () => Response;
+}
+
 const EMAIL = "alice@svelte.test";
 const PW = "password-123";
 
@@ -47,7 +52,7 @@ const makeClient = (onList: () => void = () => {}) => {
   });
 
   const signedInSession = () => json({ data: sessionResource(), included: [userResource()] });
-  const routes: Record<string, () => Response> = {
+  const routes: Routes = {
     "POST /users": () => {
       signedIn = true;
       return json({

@@ -237,6 +237,11 @@ export const entityResolverLayer = (config: RbacConfig): Layer.Layer<EntityResol
 // Model
 // ---------------------------------------------------------------------------
 
+/** A model's entity types by name, filled in as the grants are read. */
+interface EntityDecls {
+  [entityType: string]: AuthorizationModel.EntityTypeDecl;
+}
+
 /**
  * Derive an {@link AuthorizationModel.Model} from the configuration, so the
  * generated policies can be validated (and so an application declaring its
@@ -266,7 +271,7 @@ export const model = (config: RbacConfig): AuthorizationModel.Model => {
     ),
   );
 
-  const baseEntityDecls: Record<string, AuthorizationModel.EntityTypeDecl> = {
+  const baseEntityDecls: EntityDecls = {
     [principalType]: { memberOf: [RoleEntityType] },
     [RoleEntityType]: { memberOf: [RoleEntityType] },
   };

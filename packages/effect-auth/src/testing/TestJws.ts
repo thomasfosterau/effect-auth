@@ -19,12 +19,7 @@ const generate = (algorithm: TestJwsAlgorithm) =>
       : crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
 
 /** A fresh key pair: the public key as a JWK, the private key as PKCS#8 PEM. */
-export const testJwsKeyPair = (
-  algorithm: TestJwsAlgorithm,
-): {
-  readonly publicKeyJwk: { readonly [member: string]: Schema.Json };
-  readonly privateKeyPem: string;
-} => {
+export const testJwsKeyPair = (algorithm: TestJwsAlgorithm) => {
   const { publicKey, privateKey } = generate(algorithm);
   return {
     publicKeyJwk: decodeJwk(publicKey.export({ format: "jwk" })),

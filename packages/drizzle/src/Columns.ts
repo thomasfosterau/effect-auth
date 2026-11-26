@@ -318,7 +318,7 @@ export const defineSchema = <
   spec: AuthSchemaSpec<TSessions, TUsers, TIdentifiers>,
 ): AuthSchema => {
   const users = spec.users.columns;
-  const fixed: Readonly<Record<string, string | undefined>> = {
+  const fixed = {
     id: users.id,
     name: users.name,
     image: users.image,
@@ -326,7 +326,7 @@ export const defineSchema = <
     createdAt: users.createdAt,
     updatedAt: users.updatedAt,
     passwordHash: users.passwordHash,
-  };
+  } satisfies Readonly<Record<string, string | undefined>>;
   const clashes = R.collect(spec.users.promoted ?? {}, (attribute, key) =>
     R.findFirst(fixed, (mapped) => mapped === key).pipe(
       Option.map(([field]) => `"${attribute}" onto "${key}", the ${field} column`),
