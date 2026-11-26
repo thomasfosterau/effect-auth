@@ -70,6 +70,7 @@ const EXPECTED_PATHS = [
   "/device-sessions/{id}",
   "/device/code",
   "/device/token",
+  "/device-authorizations/lookups",
   "/device-authorizations/decisions",
   "/organizations",
   "/organizations/active",
@@ -275,6 +276,7 @@ describe("getOpenApiSpec", () => {
     expect(Struct.keys(paths["/api-keys"]?.post?.responses ?? {})).toContain("201");
     // Device approval carries the user code in the body: no path names it.
     expect(Struct.keys(paths).filter((path) => path.startsWith("/device-authorizations"))).toEqual([
+      "/device-authorizations/lookups",
       "/device-authorizations/decisions",
     ]);
   });

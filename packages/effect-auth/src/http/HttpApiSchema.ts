@@ -382,9 +382,9 @@ export const MultiSessionActionPayload = Schema.Struct({
 });
 export type MultiSessionActionPayload = typeof MultiSessionActionPayload.Type;
 
-/** Request body for starting a device authorization request. */
+/** Request body for starting a device authorization request: a registered client and the scopes it asks for. */
 export const DeviceCodePayload = Schema.Struct({
-  clientId: Schema.optional(TokenInput),
+  clientId: TokenInput,
   scopes: Schema.optional(Schema.Array(Schema.String)),
 });
 export type DeviceCodePayload = typeof DeviceCodePayload.Type;
@@ -405,11 +405,26 @@ export const DeviceTokenPayload = Schema.Struct({
 });
 export type DeviceTokenPayload = typeof DeviceTokenPayload.Type;
 
-/** Request body for approving/denying a device user code. */
+/** Request body for looking up, approving or denying a device user code. */
 export const DeviceUserCodePayload = Schema.Struct({
   userCode: TokenInput,
 });
 export type DeviceUserCodePayload = typeof DeviceUserCodePayload.Type;
+
+/**
+ * A device authorization request as the verification page shows it: the
+ * registered client, its display name, the scopes it asks for and the status.
+ * `id` is the device code's digest; `expiresAt` is epoch-ms.
+ */
+export const DeviceAuthorizationView = Schema.Struct({
+  id: Schema.String,
+  clientId: Schema.String,
+  clientName: Schema.String,
+  scopes: Schema.Array(Schema.String),
+  status: Schema.Literals(["pending", "approved", "denied"]),
+  expiresAt: Schema.Number,
+});
+export type DeviceAuthorizationView = typeof DeviceAuthorizationView.Type;
 
 /** Request body for signing in with a username + password. */
 export const UsernameSignInPayload = Schema.Struct({

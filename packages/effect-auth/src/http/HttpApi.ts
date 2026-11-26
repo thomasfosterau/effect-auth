@@ -1540,6 +1540,17 @@ export const tokensGroup = Group.make(
 );
 
 /**
+ * The body of `POST /device-authorizations/lookups`: the user code the device
+ * showed. The code travels in the body, never in the URL, so no access log or
+ * `Referer` carries it.
+ */
+export const DeviceAuthorizationLookupDocument = writeDocument(
+  "device-authorization-lookups",
+  Schema.Struct({ userCode: Schema.String }),
+);
+export type DeviceAuthorizationLookupDocument = typeof DeviceAuthorizationLookupDocument.Type;
+
+/**
  * The body of `POST /device-authorizations/decisions`: the user code the
  * device showed, and the decision. The code travels in the body, never in the
  * URL, so no access log or `Referer` carries it.
@@ -1553,30 +1564,44 @@ export const DeviceAuthorizationDecisionDocument = writeDocument(
 );
 export type DeviceAuthorizationDecisionDocument = typeof DeviceAuthorizationDecisionDocument.Type;
 
+const deviceAuthorizationErrors = [
+  E.BadRequest.wire,
+  E.Unauthorized.wire,
+  E.NotFound.wire,
+  E.TooManyRequests.wire,
+  E.InternalServerError.wire,
+];
+
 /**
  * `device-authorizations`: the verification page's side of the device grant
- * (RFC 8628 §3.3, which leaves its shape to the server).
+ * (RFC 8628 §3.3, which leaves its shape to the server). Both need a session.
  *
- * - `POST /device-authorizations/decisions`: approve (signed in: the device
- *   is granted the caller's session) or deny (no session needed) the pending
- *   authorization a user code names; `204`. An unknown or settled code
- *   answers `400`; each code allows 5 attempts per 15 minutes (`429`).
+ * - `POST /device-authorizations/lookups`: the pending request a user code
+ *   names, with the client and scopes it asks for, for the page to show
+ *   before the user decides; `200` with the `device-authorizations` resource.
+ * - `POST /device-authorizations/decisions`: approve (the device is granted a
+ *   session for the caller, recording the client and scopes) or deny the
+ *   pending request; `200` with the decided resource.
+ *
+ * An unknown, expired or already decided code answers `400`; each caller
+ * allows 10 lookups and decisions per 15 minutes together (`429`).
  *
  * The device's own endpoints (`/device/code`, `/device/token`) keep RFC
  * 8628's wire format. `404` when device authorization is not enabled.
  */
 export const deviceAuthorizationsGroup = Group.make(
   "device-authorizations",
+  HttpApiEndpoint.post("lookup", "/device-authorizations/lookups", {
+    payload: jsonApiPayload(DeviceAuthorizationLookupDocument),
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
+  })
+    .middleware(Middleware.ContentNegotiation)
+    .middleware(Middleware.SchemaErrors),
   HttpApiEndpoint.post("decide", "/device-authorizations/decisions", {
     payload: jsonApiPayload(DeviceAuthorizationDecisionDocument),
-    success: HttpApiSchema.NoContent,
-    error: [
-      E.BadRequest.wire,
-      E.Unauthorized.wire,
-      E.NotFound.wire,
-      E.TooManyRequests.wire,
-      E.InternalServerError.wire,
-    ],
+    success: MediaType.asJsonApi(Document.DataDocument(R.DeviceAuthorization), 200),
+    error: deviceAuthorizationErrors,
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -1593,7 +1618,8 @@ export const authGroup = HttpApiGroup.make("auth").add(
   HttpApiEndpoint.post("deviceCode", "/device/code", {
     payload: S.DeviceCodePayload,
     success: S.DeviceCodeView,
-    error: [S.NotFoundError, S.InternalError],
+    // An unknown client or scope: `invalid_client` / `invalid_scope`.
+    error: [S.NotFoundError, S.BadRequestError, S.InternalError],
   }),
   // Poll: RFC error codes (authorization_pending/slow_down/...) -> 400.
   HttpApiEndpoint.post("deviceToken", "/device/token", {

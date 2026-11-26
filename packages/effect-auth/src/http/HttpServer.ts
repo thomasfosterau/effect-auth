@@ -70,9 +70,9 @@ import { AnonymousService } from "../Anonymous.ts";
 import { PhoneOtpService } from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
 import {
+  type DeviceAuthorizationRequest,
   type DeviceCodeError,
   DeviceAuthorizationService,
-  normalizeUserCode,
 } from "../DeviceAuthorization.ts";
 import { EmailOtpService } from "../email/EmailOtp.ts";
 import { MultiFactorService } from "../multifactor/MultiFactor.ts";
@@ -1033,15 +1033,17 @@ const asRegistration = <A, R>(
   });
 
 /**
- * Per-user-code rate limit for device-authorization approve/deny endpoints
- * (RFC 8628 §5.2), through the `RateLimiter` in scope. `make` refuses to build
+ * Per-caller limit on device-authorization lookups and decisions (RFC 8628
+ * §5.2), through the `RateLimiter` in scope: one bucket per signed-in user,
+ * so guessing different codes spends the same bucket. `make` refuses to build
  * a handler whose `services` hold the device service and no `RateLimiter`.
- * Outside `make` (the exported group layers composed by hand), a
- * request with no `RateLimiter` in scope is refused with `429`, unless the
- * device service was built with `allowMissingRateLimiter: true`.
+ * Outside `make` (the exported group layers composed by hand), a request with
+ * no `RateLimiter` in scope is refused with `429`, unless the device service
+ * was built with `allowMissingRateLimiter: true`. The per-address endpoint
+ * rules count the same requests by client address.
  */
 const USER_CODE_RATE_LIMIT: RateLimitConfig = {
-  maxRequests: 5,
+  maxRequests: 10,
   windowMs: 15 * 60 * 1000,
   blockDurationMs: 30 * 60 * 1000,
 };
@@ -1072,7 +1074,7 @@ const consumeRateLimitToken = (
   );
 
 const applyUserCodeRateLimit = (
-  userCode: string,
+  callerId: string,
   device: typeof DeviceAuthorizationService.Service,
 ): Effect.Effect<void, S.TooManyRequests | S.InternalServerError> =>
   Effect.gen(function* () {
@@ -1082,7 +1084,7 @@ const applyUserCodeRateLimit = (
       if (device.allowMissingRateLimiter === true) return yield* Effect.void;
       return yield* refuseWithoutRateLimiter("the device user-code limit");
     }
-    const key = `device-user-code:${normalizeUserCode(userCode)}`;
+    const key = `device-user-code:user:${callerId}`;
     return yield* consumeRateLimitToken(rateLimiterOpt.value, key, USER_CODE_RATE_LIMIT);
   });
 
@@ -1205,7 +1207,7 @@ const rateLimiterError = (
       ? ["the dynamic client registration limit (POST /register)"]
       : []),
     ...(Option.isSome(device) && device.value.allowMissingRateLimiter !== true
-      ? ["the device user-code limit (approve and deny)"]
+      ? ["the device user-code limit (lookups and decisions)"]
       : []),
   ];
   if (Arr.isReadonlyArrayEmpty(configured)) return undefined;
@@ -3993,21 +3995,52 @@ export const tokensGroupLayer = (config?: CookieConfig, multiSession?: MultiSess
   );
 };
 
-/**
- * Settle a device authorization: done, or an unknown or settled code as
- * `400`, a store failure as `500`.
- */
-const deviceDecision = <R>(
-  decision: Effect.Effect<void, DeviceCodeError | AuthError, R>,
-): Effect.Effect<void, S.BadRequest | S.InternalServerError, R> =>
-  Effect.catchTags(decision, {
-    DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-    AuthError: (e) => internalServerError(e),
+/** A device authorization request as its `device-authorizations` resource. */
+const deviceAuthorizationResource = (request: DeviceAuthorizationRequest): R.DeviceAuthorization =>
+  R.DeviceAuthorization.make({
+    id: request.id,
+    attributes: {
+      clientId: request.clientId,
+      clientName: request.clientName,
+      scopes: [...request.scopes],
+      status: request.status,
+      expiresAt: request.expiresAt,
+    },
   });
 
 /**
+ * Run a lookup or decision on a device's user code for the signed-in caller:
+ * the caller's per-user limit first, then the step, answering the request as
+ * its resource; an unknown, expired or decided code is `400`, a store failure
+ * `500`.
+ */
+const deviceStep = (
+  request: HttpServerRequest.HttpServerRequest,
+  cfg: ResolvedCookieConfig,
+  step: (
+    device: typeof DeviceAuthorizationService.Service,
+    callerId: string,
+  ) => Effect.Effect<DeviceAuthorizationRequest, DeviceCodeError | AuthError>,
+) =>
+  Effect.gen(function* () {
+    // The verification page is signed in: approving grants the device a
+    // session for the caller, and denying or looking up a code without one
+    // would let anyone grief or probe pending requests.
+    const caller = (yield* requireSession(request, cfg)).user.id;
+    const device = yield* resolveDevice;
+    yield* applyUserCodeRateLimit(caller, device.service);
+    const answered = yield* step(device.service, caller).pipe(
+      Effect.catchTags({
+        DeviceCodeError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
+        AuthError: (e) => internalServerError(e),
+      }),
+    );
+    return Handlers.data(deviceAuthorizationResource(answered));
+  }).pipe(JsonApiErrors.mapHttpErrors);
+
+/**
  * Layer implementing the `device-authorizations` group: the verification
- * page's approval or denial of a device's user code (see
+ * page's lookup, approval or denial of a device's user code (see
  * `deviceAuthorizationsGroup` in `HttpApi.ts`).
  */
 export const deviceAuthorizationsGroupLayer = (
@@ -4017,25 +4050,18 @@ export const deviceAuthorizationsGroupLayer = (
   const cfg = resolveCookieConfig(config, multiSession);
 
   return HttpApiBuilder.group(AuthApi, "device-authorizations", (handlers) =>
-    handlers.handle("decide", ({ payload, request }) =>
-      Effect.gen(function* () {
+    handlers
+      .handle("lookup", ({ payload, request }) =>
+        deviceStep(request, cfg, (device) => device.lookup(payload.data.attributes.userCode)),
+      )
+      .handle("decide", ({ payload, request }) => {
         const { userCode, decision } = payload.data.attributes;
-        // Approving grants the device the caller's session, so it needs one;
-        // denying needs none.
-        const approver =
-          decision === "approved" ? (yield* requireSession(request, cfg)).user.id : undefined;
-        const device = yield* resolveDevice;
-        // Rate-limit user_code attempts per RFC 8628 §5.2: user codes are ~39
-        // bits, so without a per-code limit pending codes could be enumerated
-        // (approve) or griefed at scale (deny, which is unauthenticated).
-        yield* applyUserCodeRateLimit(userCode, device.service);
-        return yield* deviceDecision(
-          approver === undefined
-            ? device.service.deny(userCode)
-            : device.service.approve(userCode, approver),
+        return deviceStep(request, cfg, (device, callerId) =>
+          decision === "approved"
+            ? device.approve(userCode, callerId)
+            : device.deny(userCode, callerId),
         );
-      }).pipe(JsonApiErrors.mapHttpErrors),
-    ),
+      }),
   );
 };
 
@@ -4109,11 +4135,13 @@ export const authGroupLayer = (config?: CookieConfig, multiSession?: MultiSessio
           yield* noStore;
           return yield* device.service
             .begin({
-              ...(payload.clientId !== undefined && { clientId: payload.clientId }),
+              clientId: payload.clientId,
               ...(payload.scopes !== undefined && { scopes: payload.scopes }),
             })
             .pipe(
               Effect.catchTags({
+                // RFC 8628 §3.2: `invalid_client` / `invalid_scope` as the message.
+                DeviceClientError: (e) => Effect.fail(new S.BadRequest({ message: e.error })),
                 AuthError: (e) => internalServerError(e),
               }),
             );
@@ -5259,6 +5287,7 @@ const postRule = (
  * | `POST /google-one-tap-nonces`                                  | 20 req  | 10 min | 30 min |
  * | `POST /device/code`                                            | 10 req  | 10 min | 30 min |
  * | `POST /device/token` (polling)                                 | 300 req | 15 min | 15 min |
+ * | `POST /device-authorizations/lookups`                          | 20 req  | 10 min | 30 min |
  * | `POST /device-authorizations/decisions` (approve, deny)        | 20 req  | 10 min | 30 min |
  * | `POST /sso-authorizations` (SSO sign-in)                       | 20 req  | 10 min | 30 min |
  * | `POST /sso/callback`, `POST /sso/saml/acs/{providerId}`        | 20 req  | 10 min | 30 min |
@@ -5298,6 +5327,7 @@ export const defaultEndpointRules: ReadonlyArray<EndpointRateLimitRule> = [
   postRule("/device/code", 10, 10 * MINUTE_MS, 30 * MINUTE_MS),
   // A device polls every few seconds until the user decides.
   postRule("/device/token", 300, 15 * MINUTE_MS, 15 * MINUTE_MS),
+  postRule("/device-authorizations/lookups", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   postRule("/device-authorizations/decisions", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   postRule("/sso-authorizations", 20, 10 * MINUTE_MS, 30 * MINUTE_MS),
   {

@@ -105,11 +105,7 @@ import {
   PhoneOtpService,
 } from "../PhoneOtp.ts";
 import { UsernameService } from "../Username.ts";
-import {
-  DeviceAuthorizationStore,
-  type DeviceAuthorizationRecord,
-  DeviceAuthorizationService,
-} from "../DeviceAuthorization.ts";
+import { DeviceAuthorizationStore, DeviceAuthorizationService } from "../DeviceAuthorization.ts";
 import { generateHotp, generateTotp } from "../multifactor/Otp.ts";
 import type * as Types from "../Types.ts";
 import { ClientIP, type TrustedProxyConfig } from "../ClientIP.ts";
@@ -129,7 +125,7 @@ import { verifySequences, wrongCode } from "../testing/Passwordless.ts";
 import { expectSpecJson } from "../testing/WireFormat.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
 import { memoryMultiFactorStore, memoryOtpFailures } from "../testing/MemoryStores.ts";
-import { memorySessionStore } from "../testing/MemoryStores.ts";
+import { memoryDeviceAuthorizationStore, memorySessionStore } from "../testing/MemoryStores.ts";
 import type { SessionTouch } from "../SessionStore.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -597,37 +593,7 @@ const makeFixture = (
     createUser: (input) => Effect.sync(() => ({ user: createUser(input), created: true })),
   };
 
-  const deviceRecords = MutableHashMap.empty<string, DeviceAuthorizationRecord>();
-  const deviceStore: typeof DeviceAuthorizationStore.Service = {
-    create: (record) =>
-      Effect.sync(() => {
-        MutableHashMap.set(deviceRecords, record.deviceCode, record);
-        return record;
-      }),
-    getByDeviceCode: (deviceCode) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(deviceRecords, deviceCode))),
-    getByUserCode: (userCode) =>
-      Effect.sync(
-        () =>
-          Arr.fromIterable(MutableHashMap.values(deviceRecords)).find(
-            (r) => r.userCode === userCode,
-          ) ?? null,
-      ),
-    update: (record) =>
-      Effect.sync(() => {
-        MutableHashMap.set(deviceRecords, record.deviceCode, record);
-        return record;
-      }),
-    delete: (deviceCode) =>
-      Effect.sync(() => void MutableHashMap.remove(deviceRecords, deviceCode)),
-    claimApproval: (deviceCode) =>
-      Effect.sync(() => {
-        const record = Option.getOrUndefined(MutableHashMap.get(deviceRecords, deviceCode));
-        if (record === undefined || record.status !== "approved") return null;
-        MutableHashMap.remove(deviceRecords, deviceCode);
-        return record;
-      }),
-  };
+  const deviceStore = memoryDeviceAuthorizationStore();
 
   // Username handles are `username` identifiers (created verified); the old
   // dedicated UsernameStore no longer exists.
@@ -700,6 +666,7 @@ const makeFixture = (
     UsernameService.layer().pipe(Layer.provide(featureBase)),
     DeviceAuthorizationService.layer({
       verificationUri: "https://example.com/device",
+      clients: [{ id: "cli", name: "Example CLI", scopes: ["read"] }],
       // interval 0 so back-to-back polls in a single test don't hit slow_down.
       interval: 0,
       allowMissingRateLimiter: options.deviceAllowMissingRateLimiter,
@@ -1044,6 +1011,15 @@ const writeRequest = (
     headers: { "content-type": "application/vnd.api+json", ...headers },
     body: toJson(body),
   });
+
+/** `POST /device-authorizations/lookups`: the request a device's user code names. */
+const deviceLookupRequest = (userCode: string, headers: Record<string, string> = {}) =>
+  writeRequest(
+    "POST",
+    "/device-authorizations/lookups",
+    { data: { type: "device-authorization-lookups", attributes: { userCode } } },
+    headers,
+  );
 
 /** `POST /device-authorizations/decisions`: approve or deny a device's user code. */
 const deviceDecisionRequest = (
@@ -2491,7 +2467,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
   it("runs the full device flow: code -> approve -> token", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
 
-    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     expect(codeRes.status).toBe(200);
     const code = await jsonBody(
       codeRes,
@@ -2506,7 +2482,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
     // Approve from an authenticated verification page.
     const sid = await signUp(handler, "device-user@example.com");
     const approve = await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
-    expect(approve.status).toBe(204);
+    expect(approve.status).toBe(200);
 
     // Now the device gets a session.
     const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
@@ -2518,7 +2494,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
     const handler = handlerFor(makeFixture(), { features: true });
 
     // The device posts plain `application/json` and gets plain JSON back.
-    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     const code = await expectSpecJson(codeRes, "application/json", [
       "deviceCode",
       "userCode",
@@ -2537,7 +2513,7 @@ describe("HTTP device authorization (RFC 8628)", () => {
 
     const sid = await signUp(handler, "device-wire@example.com");
     expect((await handler(deviceDecisionRequest(userCode, "approved", asCookie(sid)))).status).toBe(
-      204,
+      200,
     );
     const token = await handler(jsonRequest("/device/token", { deviceCode }));
     expect(token.status).toBe(200);
@@ -2546,23 +2522,38 @@ describe("HTTP device authorization (RFC 8628)", () => {
 
   it("requires authentication to approve a code", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
     const res = await handler(deviceDecisionRequest(code.userCode, "approved"));
     expect(res.status).toBe(401);
   });
 
-  it("denies a code without a session, and the device's poll learns it", async () => {
+  it("requires a session to deny or look up a code", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const codeRes = await handler(jsonRequest("/device/code", {}));
+    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
+    const code = await jsonBody(codeRes, Schema.Struct({ userCode: Schema.String }));
+    expect((await handler(deviceDecisionRequest(code.userCode, "denied"))).status).toBe(401);
+    expect((await handler(deviceLookupRequest(code.userCode))).status).toBe(401);
+  });
+
+  it("denies a code as the signed-in user, and the device's poll learns it", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const codeRes = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     const code = await jsonBody(
       codeRes,
       Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
     );
-    const denied = await handler(deviceDecisionRequest(code.userCode, "denied"));
-    expect(denied.status).toBe(204);
+    const sid = await signUp(handler, "device-deny@example.com");
+    const denied = await handler(deviceDecisionRequest(code.userCode, "denied", asCookie(sid)));
+    expect(denied.status).toBe(200);
+    // A decided code cannot be decided again, nor turned into an approval.
+    expect(
+      (await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)))).status,
+    ).toBe(400);
     // An unknown code is refused.
-    expect((await handler(deviceDecisionRequest("ZZZZ-ZZZZ", "denied"))).status).toBe(400);
+    expect(
+      (await handler(deviceDecisionRequest("ZZZZ-ZZZZ", "denied", asCookie(sid)))).status,
+    ).toBe(400);
     const poll = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
     expect(poll.status).toBe(400);
     expect((await jsonBody(poll, MessageBody)).message).toBe("access_denied");
@@ -2572,9 +2563,78 @@ describe("HTTP device authorization (RFC 8628)", () => {
     );
   });
 
+  it("refuses an unregistered client or scope", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const unknown = await handler(jsonRequest("/device/code", { clientId: "intruder" }));
+    expect(unknown.status).toBe(400);
+    expect((await jsonBody(unknown, MessageBody)).message).toBe("invalid_client");
+    const scope = await handler(
+      jsonRequest("/device/code", { clientId: "cli", scopes: ["admin"] }),
+    );
+    expect(scope.status).toBe(400);
+    expect((await jsonBody(scope, MessageBody)).message).toBe("invalid_scope");
+    // A request without a client is malformed.
+    expect((await handler(jsonRequest("/device/code", {}))).status).toBe(400);
+  });
+
+  it("shows the client and scopes before approval, and records them on the session", async () => {
+    const handler = handlerFor(makeFixture(), { features: true });
+    const codeRes = await handler(
+      jsonRequest("/device/code", { clientId: "cli", scopes: ["read"] }),
+    );
+    const code = await jsonBody(
+      codeRes,
+      Schema.Struct({ deviceCode: Schema.String, userCode: Schema.String }),
+    );
+    const sid = await signUp(handler, "device-consent@example.com");
+    const Shown = Schema.Struct({
+      data: Schema.Struct({
+        type: Schema.Literal("device-authorizations"),
+        id: Schema.String,
+        attributes: Schema.Struct({
+          clientId: Schema.String,
+          clientName: Schema.String,
+          scopes: Schema.Array(Schema.String),
+          status: Schema.String,
+        }),
+      }),
+    });
+    const lookup = await handler(deviceLookupRequest(code.userCode, asCookie(sid)));
+    expect(lookup.status).toBe(200);
+    const shown = await jsonBody(lookup, Shown);
+    expect(shown.data.attributes).toEqual({
+      clientId: "cli",
+      clientName: "Example CLI",
+      scopes: ["read"],
+      status: "pending",
+    });
+    // The resource is named by the device code's digest, never the code.
+    expect(shown.data.id).not.toBe(code.deviceCode);
+
+    const approve = await handler(deviceDecisionRequest(code.userCode, "approved", asCookie(sid)));
+    expect((await jsonBody(approve, Shown)).data.attributes.status).toBe("approved");
+
+    const token = await handler(jsonRequest("/device/token", { deviceCode: code.deviceCode }));
+    expect(token.status).toBe(200);
+    const deviceSid = sessionIdFromSetCookie(token.headers.get("set-cookie"));
+    const current = await handler(getRequest("/sessions/current", asCookie(deviceSid)));
+    const session = await jsonBody(
+      current,
+      Schema.Struct({
+        data: Schema.Struct({
+          attributes: Schema.Struct({ attributes: Schema.Record(Schema.String, Schema.Json) }),
+        }),
+      }),
+    );
+    expect(session.data.attributes.attributes["deviceGrant"]).toEqual({
+      clientId: "cli",
+      scopes: ["read"],
+    });
+  });
+
   it("returns 404 when device authorization is not configured", async () => {
     const handler = handlerFor(makeFixture(), { features: false });
-    const res = await handler(jsonRequest("/device/code", {}));
+    const res = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     expect(res.status).toBe(404);
   });
 });
@@ -3265,7 +3325,7 @@ describe("every response carrying Set-Cookie is no-store", () => {
 
   it("a device token response, already no-store, keeps one directive", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    const issued = await handler(jsonRequest("/device/code", {}));
+    const issued = await handler(jsonRequest("/device/code", { clientId: "cli" }));
     // The device code is the secret the device polls with.
     expect(cacheControl(issued)).toBe("no-store");
     const code = await jsonBody(
@@ -4243,6 +4303,7 @@ const LIMITED_ENDPOINTS: ReadonlyArray<readonly [method: string, path: string, m
   ["POST", "/google-one-tap-nonces", 20],
   ["POST", "/device/code", 10],
   ["POST", "/device/token", 300],
+  ["POST", "/device-authorizations/lookups", 20],
   ["POST", "/device-authorizations/decisions", 20],
   ["POST", "/sso-authorizations", 20],
   ["POST", "/sso/callback", 20],
@@ -4608,33 +4669,46 @@ describe("rate limits need a RateLimiter when make is called", () => {
         services: fixture.featureServicesWithoutRateLimiter,
         cookie: { secure: false },
       }),
-    ).toThrow(/the device user-code limit \(approve and deny\) configured with no RateLimiter/);
+    ).toThrow(
+      /the device user-code limit \(lookups and decisions\) configured with no RateLimiter/,
+    );
   });
 
-  it("builds without a RateLimiter when the device service opts out, and leaves approve/deny unlimited", async () => {
+  it("builds without a RateLimiter when the device service opts out, and leaves lookups and decisions unlimited", async () => {
     const fixture = makeFixture({ deviceAllowMissingRateLimiter: true });
     const { handler } = HttpServer.make({
       ipRateLimit: false,
       services: fixture.featureServicesWithoutRateLimiter,
       cookie: { secure: false },
     });
+    const sid = await signUp(handler, "device-unlimited@example.com");
     // An unknown code is a 400 every time: no limiter, by explicit choice.
-    await Arr.reduce(Arr.range(1, 7), Promise.resolve(), async (previous) => {
+    await Arr.reduce(Arr.range(1, 12), Promise.resolve(), async (previous) => {
       await previous;
-      const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
+      const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied", asCookie(sid)));
       expect(res.status).toBe(400);
     });
   });
 
-  it("limits device approve/deny to 5 attempts per user code when a RateLimiter is in services", async () => {
+  it("limits device lookups and decisions to 10 per caller, whatever the codes", async () => {
     const handler = handlerFor(makeFixture(), { features: true });
-    await Arr.reduce(Arr.range(1, 5), Promise.resolve(), async (previous) => {
+    const sid = await signUp(handler, "device-guesser@example.com");
+    // Each guess names a different code: the bucket is the caller's, not the code's.
+    await Arr.reduce(Arr.range(1, 10), Promise.resolve(), async (previous, n) => {
       await previous;
-      const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
+      const guess = `BCDF-${String(n).padStart(4, "0")}`;
+      const res = await handler(
+        n % 2 === 0
+          ? deviceLookupRequest(guess, asCookie(sid))
+          : deviceDecisionRequest(guess, "denied", asCookie(sid)),
+      );
       expect(res.status).toBe(400);
     });
-    const sixth = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
-    expect(sixth.status).toBe(429);
+    const eleventh = await handler(deviceDecisionRequest("BCDF-9999", "approved", asCookie(sid)));
+    expect(eleventh.status).toBe(429);
+    // Another caller has a bucket of its own.
+    const other = await signUp(handler, "device-other@example.com");
+    expect((await handler(deviceLookupRequest("BCDF-9999", asCookie(other)))).status).toBe(400);
   });
 
   it("builds and serves when a RateLimiter is in services", async () => {
@@ -4806,7 +4880,7 @@ describe("IPRateLimitPlugin needs a client-address source under make", () => {
 });
 
 describe("the exported group layers outside make refuse rather than skip", () => {
-  it("refuses device approve/deny with 429 when no RateLimiter is in scope, and logs it as an error", async () => {
+  it("refuses device lookups and decisions with 429 when no RateLimiter is in scope, and logs it as an error", async () => {
     const logs: Array<{ readonly level: string; readonly message: string }> = [];
     const collector = Logger.make((options) => {
       logs.push({ level: options.logLevel, message: String(options.message) });
@@ -4814,7 +4888,8 @@ describe("the exported group layers outside make refuse rather than skip", () =>
     const handler = handBuiltHandler(
       Layer.merge(makeFixture().featureServicesWithoutRateLimiter, Logger.layer([collector])),
     );
-    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
+    const sid = await signUp(handler, "device-hand-built@example.com");
+    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied", asCookie(sid)));
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({
       errors: [{ detail: "No RateLimiter in services; this request cannot be rate limited" }],
@@ -4827,11 +4902,12 @@ describe("the exported group layers outside make refuse rather than skip", () =>
     });
   });
 
-  it("runs device approve/deny without the limit when the device service opts out", async () => {
+  it("runs device lookups and decisions without the limit when the device service opts out", async () => {
     const handler = handBuiltHandler(
       makeFixture({ deviceAllowMissingRateLimiter: true }).featureServicesWithoutRateLimiter,
     );
-    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied"));
+    const sid = await signUp(handler, "device-opt-out@example.com");
+    const res = await handler(deviceDecisionRequest("BCDF-GHJK", "denied", asCookie(sid)));
     expect(res.status).toBe(400);
   });
 

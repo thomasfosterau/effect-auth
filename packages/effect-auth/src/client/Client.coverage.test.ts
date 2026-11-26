@@ -23,6 +23,7 @@ import {
   createAuthClient,
 } from "./Client.ts";
 import {
+  FIXTURE_DEVICE_CLIENT,
   makeCookieJarFetch,
   makeServerFixture,
   type ServerFixtureOptions,
@@ -225,7 +226,7 @@ describe("device authorization", () => {
     const device = browser();
     const phone = browser();
 
-    const code = await device.device.code();
+    const code = await device.device.code({ clientId: FIXTURE_DEVICE_CLIENT.id, scopes: ["read"] });
     expect(code.verificationUri).toBe("https://client.test/device");
 
     // Polling before the user decides answers 400 authorization_pending.
@@ -234,7 +235,14 @@ describe("device authorization", () => {
     expect(pending.status).toBe(400);
 
     await phone.signUp({ email: "device@client.test", password: PW });
-    expect(await phone.device.approve({ userCode: code.userCode })).toEqual({ status: true });
+    // The verification page shows the client and scopes before the user decides.
+    expect(await phone.device.lookup({ userCode: code.userCode })).toMatchObject({
+      clientId: "fixture-device",
+      clientName: "Fixture device",
+      scopes: ["read"],
+      status: "pending",
+    });
+    expect((await phone.device.approve({ userCode: code.userCode })).status).toBe("approved");
 
     const authorized = await device.device.token({ deviceCode: code.deviceCode });
     expect(authorized.user.email).toBe("device@client.test");
@@ -1181,15 +1189,46 @@ describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
     });
   });
 
-  it("maps device approval and denial onto POST /device-authorizations/decisions", async () => {
-    const { calls, fetch } = routedFetch({});
+  it("maps device lookup, approval and denial onto the device-authorizations endpoints", async () => {
+    const resource = (status: string) => ({
+      data: {
+        type: "device-authorizations",
+        id: "digest",
+        attributes: {
+          clientId: "cli",
+          clientName: "CLI",
+          scopes: ["read"],
+          status,
+          expiresAt: 1,
+        },
+      },
+    });
+    const { calls, fetch } = routedFetch({
+      "POST /device-authorizations/lookups": resource("pending"),
+      "POST /device-authorizations/decisions": resource("approved"),
+    });
     const client = createAuthClient({ baseUrl: BASE, fetch });
 
-    expect(await client.device.approve({ userCode: "ABCD-EFGH" })).toEqual({ status: true });
-    expect(await client.device.deny({ userCode: "ABCD-EFGH" })).toEqual({ status: true });
+    expect(await client.device.lookup({ userCode: "ABCD-EFGH" })).toEqual({
+      id: "digest",
+      clientId: "cli",
+      clientName: "CLI",
+      scopes: ["read"],
+      status: "pending",
+      expiresAt: 1,
+    });
+    expect((await client.device.approve({ userCode: "ABCD-EFGH" })).status).toBe("approved");
+    await client.device.deny({ userCode: "ABCD-EFGH" });
 
-    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual(
-      ["approved", "denied"].map((decision) => ({
+    expect(calls.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      {
+        method: "POST",
+        path: "/device-authorizations/lookups",
+        body: {
+          data: { type: "device-authorization-lookups", attributes: { userCode: "ABCD-EFGH" } },
+        },
+      },
+      ...["approved", "denied"].map((decision) => ({
         method: "POST",
         path: "/device-authorizations/decisions",
         body: {
@@ -1199,6 +1238,6 @@ describe("api keys, JWT, admin, SSO and OIDC wiring", () => {
           },
         },
       })),
-    );
+    ]);
   });
 });

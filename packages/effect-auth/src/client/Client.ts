@@ -214,6 +214,8 @@ interface WireDeviceSession extends WireSession {
   readonly active: boolean;
 }
 
+type WireDeviceAuthorization = Omit<Http.DeviceAuthorizationView, "id">;
+
 type WireOrganization = Omit<Http.OrganizationView, "id">;
 
 type WireMember = Omit<Http.MemberView, "id" | "organizationId" | "userId">;
@@ -537,15 +539,21 @@ export interface AuthClient {
 
   /**
    * Device authorization grant (RFC 8628). `code`/`token` are called by the
-   * input-constrained device; `approve`/`deny` by the signed-in user on the
-   * verification page. 404 when unconfigured.
+   * input-constrained device with its registered `clientId`;
+   * `lookup`/`approve`/`deny` by the signed-in user on the verification page,
+   * which shows the client and scopes `lookup` answers before the user
+   * decides. 404 when unconfigured.
    */
   readonly device: {
-    readonly code: (payload?: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
+    readonly code: (payload: Http.DeviceCodePayload) => Promise<Http.DeviceCodeView>;
     /** Poll for the session. 400 while the user has not decided yet. */
     readonly token: (payload: Http.DeviceTokenPayload) => Promise<Http.AuthSuccess>;
-    readonly approve: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
-    readonly deny: (payload: Http.DeviceUserCodePayload) => Promise<Http.StatusResponse>;
+    /** The pending request a user code names: the client and the scopes it asks for. */
+    readonly lookup: (payload: Http.DeviceUserCodePayload) => Promise<Http.DeviceAuthorizationView>;
+    readonly approve: (
+      payload: Http.DeviceUserCodePayload,
+    ) => Promise<Http.DeviceAuthorizationView>;
+    readonly deny: (payload: Http.DeviceUserCodePayload) => Promise<Http.DeviceAuthorizationView>;
   };
 
   readonly multiFactor: {
@@ -978,17 +986,31 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       },
     );
 
+  /** A `device-authorizations` document as its view. */
+  const deviceAuthorizationView = ({
+    data,
+  }: DataDocument<WireDeviceAuthorization>): Http.DeviceAuthorizationView => ({
+    id: data.id,
+    ...data.attributes,
+  });
+
   /**
-   * Approve or deny a device's user code (`POST /device-authorizations/decisions`).
-   * The code travels in the body, never in the URL.
+   * Look up (`POST /device-authorizations/lookups`), approve or deny
+   * (`POST /device-authorizations/decisions`) a device's user code. The code
+   * travels in the body, never in the URL.
    */
+  const lookupDevice = (userCode: string): Promise<Http.DeviceAuthorizationView> =>
+    jsonApi<DataDocument<WireDeviceAuthorization>>("POST", "/device-authorizations/lookups", {
+      data: { type: "device-authorization-lookups", attributes: { userCode } },
+    }).then(deviceAuthorizationView);
+
   const decideDevice = (
     userCode: string,
     decision: "approved" | "denied",
-  ): Promise<Http.StatusResponse> =>
-    jsonApi<void>("POST", "/device-authorizations/decisions", {
+  ): Promise<Http.DeviceAuthorizationView> =>
+    jsonApi<DataDocument<WireDeviceAuthorization>>("POST", "/device-authorizations/decisions", {
       data: { type: "device-authorization-decisions", attributes: { userCode, decision } },
-    }).then(() => ({ status: true }));
+    }).then(deviceAuthorizationView);
 
   /** Redeem a second-factor challenge with a TOTP or backup code. */
   const verifySecondFactor = (
@@ -1217,9 +1239,10 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     },
 
     device: {
-      code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload ?? {}),
+      code: (payload) => request<Http.DeviceCodeView>("POST", "/device/code", payload),
       token: (payload) =>
         mutating(() => request<Http.AuthSuccess>("POST", "/device/token", payload)),
+      lookup: ({ userCode }) => lookupDevice(userCode),
       approve: ({ userCode }) => decideDevice(userCode, "approved"),
       deny: ({ userCode }) => decideDevice(userCode, "denied"),
     },
