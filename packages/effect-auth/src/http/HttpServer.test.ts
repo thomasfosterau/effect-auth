@@ -5172,14 +5172,6 @@ const macrotasks = async (count: number): Promise<void> => {
 
 class BootError extends Data.TaggedError("BootError")<{ readonly reason: string }> {}
 
-/** `services` whose build fails with a {@link BootError}, typed as `make` takes them. */
-const failingBoot = (layer: Layer.Layer<AuthServices, BootError>): Layer.Layer<AuthServices> => {
-  // SAFETY: `make` types `services` as infallible, yet it runs the build and
-  // surfaces the build's typed failure itself. The callers hand it a build
-  // that fails with a `BootError` on purpose, to check exactly that path.
-  return layer as Layer.Layer<AuthServices>;
-};
-
 describe("make builds services synchronously, up to their exit", () => {
   it("returns while a fiber that services forked keeps running, and dispose stops it", async () => {
     // A busy fiber the build forks and never awaits. make must not wait for it.
@@ -5472,10 +5464,8 @@ describe("make builds services synchronously, up to their exit", () => {
     );
     const failure = new BootError({ reason: "no database" });
     // provideMerge builds `counted` before the failing layer runs.
-    const services = failingBoot(
-      Layer.effectDiscard(Effect.fail(failure)).pipe(
-        Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
-      ),
+    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(Layer.merge(makeFixture().services, counted)),
     );
 
     expect(
@@ -5523,11 +5513,9 @@ describe("make builds services synchronously, up to their exit", () => {
       ).pipe(Effect.tap((fiber) => Effect.sync(() => void (detached = fiber)))),
     );
     const failure = new BootError({ reason: "after the fork" });
-    const services = failingBoot(
-      Layer.effectDiscard(Effect.fail(failure)).pipe(
-        Layer.provideMerge(spinner),
-        Layer.provideMerge(makeFixture().services),
-      ),
+    const services = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(spinner),
+      Layer.provideMerge(makeFixture().services),
     );
 
     expect(
@@ -5665,11 +5653,9 @@ describe("makeAsync builds services fully before it resolves", () => {
       ),
     );
     const failure = new BootError({ reason: "no database" });
-    const services = (): Layer.Layer<AuthServices> =>
-      failingBoot(
-        Layer.effectDiscard(Effect.fail(failure)).pipe(
-          Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
-        ),
+    const services = () =>
+      Layer.effectDiscard(Effect.fail(failure)).pipe(
+        Layer.provideMerge(Layer.merge(makeFixture().services, slowRelease)),
       );
 
     // Effect releases what the failed build acquired before the build ends, so
@@ -6042,8 +6028,8 @@ describe("make with strict", () => {
 
   it("throws a synchronous build's own failure, and its startup errors", () => {
     const failure = new BootError({ reason: "no database" });
-    const failing = failingBoot(
-      Layer.effectDiscard(Effect.fail(failure)).pipe(Layer.provideMerge(makeFixture().services)),
+    const failing = Layer.effectDiscard(Effect.fail(failure)).pipe(
+      Layer.provideMerge(makeFixture().services),
     );
     expect(
       thrownBy(() =>
@@ -6257,15 +6243,13 @@ describe("make with strict", () => {
     let released = false;
     // The step fails, and Effect runs its finalizer, which awaits, before the
     // build ends: the build has no exit when make has run it synchronously.
-    const failing = failingBoot(
-      Layer.effectDiscard(
-        Effect.acquireRelease(Effect.void, () =>
-          promiseOrDie(() => Promise.resolve()).pipe(
-            Effect.andThen(Effect.sync(() => void (released = true))),
-          ),
-        ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
-      ).pipe(Layer.provideMerge(makeFixture().services)),
-    );
+    const failing = Layer.effectDiscard(
+      Effect.acquireRelease(Effect.void, () =>
+        promiseOrDie(() => Promise.resolve()).pipe(
+          Effect.andThen(Effect.sync(() => void (released = true))),
+        ),
+      ).pipe(Effect.andThen(Effect.fail(new BootError({ reason: "no database" })))),
+    ).pipe(Layer.provideMerge(makeFixture().services));
 
     expect(
       thrownBy(() =>

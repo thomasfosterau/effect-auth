@@ -3,7 +3,7 @@ import { DateTime, Effect, Exit, Layer, Redacted } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import { HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import type * as Types from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
@@ -79,18 +79,22 @@ const ok = HttpServerResponse.empty({ status: 200 });
 type Cell<T> = { value: T | undefined };
 const cell = <T>(): Cell<T> => ({ value: undefined });
 
+const standInRoute = HttpRouter.route("GET", "/", ok);
+
 /**
- * `HttpApiMiddleware.Service` types its scheme handlers against the whole
- * `HttpApi` surface, which these unit tests deliberately do not build: the
- * handlers are called with a stand-in endpoint and group, which they ignore.
- * Their result also requires everything `HttpRouter.Provided` names, of which
- * the middleware reads only `HttpServerRequest`, so the result is narrowed to
- * that. The narrowed type keeps the effect's requirements honest (the
- * middleware leaves `SessionService`, `Hooks` and — on the cookie path —
- * `HttpServerRequest` to be provided below).
+ * A scheme handler's result requires everything `HttpRouter.Provided` names,
+ * as it would inside the router. These unit tests run it outside one, so they
+ * provide the request and stand-ins for the rest of the per-request services.
  */
-type MiddlewareResult<A, R> = Effect.Effect<A, unknown, R>;
-type PerRequestServices = SessionService | Hooks;
+const provideRouterServices =
+  (request: HttpServerRequest.HttpServerRequest) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      Effect.provideService(HttpServerRequest.ParsedSearchParams, {}),
+      Effect.provideService(HttpRouter.RouteContext, { params: {}, route: standInRoute }),
+      Effect.scoped,
+    );
 
 /**
  * The endpoint and group a middleware is told it wraps. The middleware never
@@ -135,15 +139,11 @@ describe("HttpMiddleware.layer – conduit_session handler", () => {
   const runCookiePath = (request: HttpServerRequest.HttpServerRequest, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
-      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.conduit_session(handler, {
         ...standIn,
         credential: Redacted.make(""),
-      }) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
-      return yield* applied.pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
-      );
+      });
+      return yield* applied.pipe(provideRouterServices(request));
     }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
   it("valid session cookie → CurrentSession and CurrentUser are provided", async () => {
@@ -261,13 +261,11 @@ describe("HttpMiddleware.layer – bearer handler", () => {
   const runBearerPath = (token: string, handler: AuthHandler) =>
     Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores;
-      // the bearer path reads nothing of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.bearer(handler, {
         ...standIn,
         credential: Redacted.make(token),
-      }) as MiddlewareResult<typeof ok, PerRequestServices>;
-      return yield* applied;
+      });
+      return yield* applied.pipe(provideRouterServices(makeWebRequest()));
     }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
   it("valid Bearer token → CurrentSession and CurrentUser are provided", async () => {
@@ -329,16 +327,14 @@ describe("HttpMiddleware.optionalLayer", () => {
     const maybeCell = cell<Option.Option<Types.SessionWithUser>>();
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
-      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           maybeCell.value = yield* MaybeCurrentSession;
           return ok;
         }),
         standIn,
-      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
-      yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+      );
+      yield* applied.pipe(provideRouterServices(request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { maybeCell, effect };
   };
@@ -385,16 +381,14 @@ describe("HttpMiddleware.optionalLayer", () => {
     const principalCell = cell<Option.Option<Entity.EntityRef>>();
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
-      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           principalCell.value = yield* Effect.serviceOption(CurrentPrincipal);
           return ok;
         }),
         standIn,
-      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
-      yield* applied.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request));
+      );
+      yield* applied.pipe(provideRouterServices(request));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
     return { principalCell, effect };
   };
@@ -443,8 +437,6 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* AuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
-      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc.conduit_session(
         Effect.gen(function* () {
           roleCell.value = yield* viewerRole;
@@ -454,13 +446,8 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
           ...standIn,
           credential: Redacted.make(""),
         },
-      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
-      yield* applied.pipe(
-        Effect.provideService(
-          HttpServerRequest.HttpServerRequest,
-          makeWebRequest({ cookie: RAW_TOKEN }),
-        ),
       );
+      yield* applied.pipe(provideRouterServices(makeWebRequest({ cookie: RAW_TOKEN })));
     }).pipe(Effect.provide(Layer.mergeAll(authLayer, baseLayer)));
 
     await Effect.runPromise(effect);
@@ -472,18 +459,14 @@ describe("MaybeCurrentSession is provided by both middlewares", () => {
 
     const effect = Effect.gen(function* () {
       const svc = yield* OptionalAuthMiddleware;
-      // SAFETY: the handler is called with the stand-in endpoint, which it ignores,
-      // and reads only `HttpServerRequest` of `HttpRouter.Provided` (see `MiddlewareResult`).
       const applied = svc(
         Effect.gen(function* () {
           roleCell.value = yield* viewerRole;
           return ok;
         }),
         standIn,
-      ) as MiddlewareResult<typeof ok, PerRequestServices | HttpServerRequest.HttpServerRequest>;
-      yield* applied.pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, makeWebRequest()),
       );
+      yield* applied.pipe(provideRouterServices(makeWebRequest()));
     }).pipe(Effect.provide(Layer.mergeAll(optionalLayer, baseLayer)));
 
     await Effect.runPromise(effect);
