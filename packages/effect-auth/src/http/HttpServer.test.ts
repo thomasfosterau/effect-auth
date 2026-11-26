@@ -2312,6 +2312,29 @@ describe("POST /otp-challenges hands its captchaToken to beforeSendCode", () => 
     expect((await handler(authRequest(flow, { ...fields, captchaToken: "ok" }))).status).toBe(202);
     expect(sent()).toBe(1);
   });
+
+  it("POST /password-resets answers 400 without a token and 202 with one, for any address", async () => {
+    const fixture = makeFixture({ hooks: captchaHooks });
+    const handler = handlerFor(fixture);
+    await signUp(handler, "cap@example.com");
+
+    const refused = await Promise.all(
+      ["cap@example.com", "nobody@example.com"].flatMap((email) => [
+        handler(authRequest("request-reset", { email })),
+        handler(authRequest("request-reset", { email, captchaToken: "bad" })),
+      ]),
+    );
+    expect(refused.map((res) => res.status)).toEqual([400, 400, 400, 400]);
+    expect(fixture.sentResetTokens).toHaveLength(0);
+    expect(
+      (
+        await handler(
+          authRequest("request-reset", { email: "cap@example.com", captchaToken: "ok" }),
+        )
+      ).status,
+    ).toBe(202);
+    expect(fixture.sentResetTokens).toHaveLength(1);
+  });
 });
 
 describe("email OTP", () => {

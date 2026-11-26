@@ -243,10 +243,19 @@ export const authenticationSubject = (attempt: AuthenticateAttempt): string | un
 };
 
 /**
+ * What a `beforeSendCode` send delivers: a one-time code or a magic link
+ * (a {@link PossessionMethod}), or a password-reset link.
+ *
+ * @since 0.9.0
+ */
+export type SendCodeMethod = PossessionMethod | "password-reset";
+
+/**
  * Named arguments for the `beforeSendCode` hook: one request to send a
- * one-time code or a magic link, fired by `EmailOtpService.send`,
- * `PhoneOtpService.send` and `MagicLinkService.send` before the address is
- * looked up and before anything is stored or sent. A plugin refuses the send
+ * one-time code, a magic link or a password-reset link, fired by
+ * `EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send` and
+ * `PasswordResetService.requestPasswordReset` before the address is looked up
+ * and before anything is stored or sent. A plugin refuses the send
  * by failing (`CaptchaPlugin` with `CaptchaError`); the flows read nothing
  * back from it.
  *
@@ -254,8 +263,11 @@ export const authenticationSubject = (attempt: AuthenticateAttempt): string | un
  * account, so the hook runs before the flow looks the address up.
  */
 export interface SendCodeAttempt {
-  readonly method: PossessionMethod;
-  /** The code's purpose (`"sign-in"`, `"forget-password"`, ...); a magic link's is `"sign-in"`. */
+  readonly method: SendCodeMethod;
+  /**
+   * The code's purpose (`"sign-in"`, `"forget-password"`, ...); a magic
+   * link's is `"sign-in"`, a password reset's `"password-reset"`.
+   */
   readonly purpose: string;
   /** Where the code goes, normalized: an email address or an E.164 phone number. */
   readonly address: string;
@@ -263,7 +275,10 @@ export interface SendCodeAttempt {
   readonly captchaToken?: string | undefined;
 }
 
-/** Options the send flows (`EmailOtpService.send`, `PhoneOtpService.send`, `MagicLinkService.send`) take. */
+/**
+ * Options the send flows (`EmailOtpService.send`, `PhoneOtpService.send`,
+ * `MagicLinkService.send`, `PasswordResetService.requestPasswordReset`) take.
+ */
 export interface SendCodeOptions {
   /** A captcha token, handed to the `beforeSendCode` hook (`CaptchaPlugin` verifies it). */
   readonly captchaToken?: string | undefined;
@@ -415,8 +430,8 @@ export class Hooks extends Context.Service<
      */
     readonly beforeAuthenticate: Transform<AuthenticateAttempt>;
     /**
-     * Fired by every one-time-code and magic-link send before it looks the
-     * address up; see {@link SendCodeAttempt}. Failing refuses the send.
+     * Fired by every one-time-code, magic-link and password-reset send
+     * before it looks the address up; see {@link SendCodeAttempt}. Failing refuses the send.
      * `CaptchaPlugin` guards it.
      */
     readonly beforeSendCode: Transform<SendCodeAttempt>;

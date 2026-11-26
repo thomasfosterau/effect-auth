@@ -5,7 +5,7 @@ import { IdentifierStore, resolveUserByIdentifier } from "../Identifier.ts";
 import { UserStore } from "../UserStore.ts";
 import { tokenHasher } from "../TokenHash.ts";
 import { makeDetachedSend } from "../DeliveryScheduler.ts";
-import { Hooks, type HookError } from "../Hooks.ts";
+import { Hooks, type HookError, type SendCodeOptions } from "../Hooks.ts";
 import { PasswordHasher } from "./Password.ts";
 import * as PlatformCrypto from "../PlatformCrypto.ts";
 import type { RateLimitStore } from "../RateLimit.ts";
@@ -97,8 +97,15 @@ export interface PasswordResetResult {
 export class PasswordResetService extends Context.Service<
   PasswordResetService,
   {
+    /**
+     * Send a reset link to the account holding `email`, answering alike
+     * whether or not one does. `beforeRequestPasswordReset` runs first, then
+     * the send gate `beforeSendCode` (with `options.captchaToken`, which
+     * `CaptchaPlugin` verifies), both before the address is looked up.
+     */
     readonly requestPasswordReset: (
       email: string,
+      options?: SendCodeOptions,
     ) => Effect.Effect<void, Errors.AuthError | Errors.PasswordResetError | HookError>;
 
     readonly resetPassword: (
@@ -182,6 +189,7 @@ export const make = (
     return {
       requestPasswordReset: Effect.fn("PasswordResetService.requestPasswordReset")(function* (
         rawEmail: string,
+        options?: SendCodeOptions,
       ) {
         const { email } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
 
@@ -190,6 +198,15 @@ export const make = (
         if (!normalizedEmail) {
           return;
         }
+
+        // The send gate (captcha) runs before the address is looked up, so
+        // it answers alike for every address.
+        yield* hooks.beforeSendCode({
+          method: "password-reset",
+          purpose: "password-reset",
+          address: normalizedEmail,
+          captchaToken: options?.captchaToken,
+        });
 
         // The per-recipient cap, counted before the lookup, so an
         // unknown email is capped exactly as a known one.

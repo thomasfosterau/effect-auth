@@ -452,7 +452,11 @@ export interface AuthClient {
   readonly getSession: () => Promise<Http.SessionWithUserView | null>;
   readonly sendVerificationEmail: (payload: { email: string }) => Promise<Http.StatusResponse>;
   readonly verifyEmail: (payload: { token: string }) => Promise<AuthResult>;
-  readonly passwordResetRequest: (payload: { email: string }) => Promise<Http.StatusResponse>;
+  readonly passwordResetRequest: (payload: {
+    email: string;
+    /** A captcha token, for a server running `CaptchaPlugin` with the `"sendCode"` endpoint. */
+    captchaToken?: string | undefined;
+  }) => Promise<Http.StatusResponse>;
   readonly passwordResetConfirm: (payload: {
     token: string;
     newPassword: string;
@@ -1121,9 +1125,12 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
           data: { type: "email-verification-redemptions", attributes: { token } },
         }).then(authResult),
       ),
-    passwordResetRequest: ({ email }) =>
+    passwordResetRequest: ({ email, captchaToken }) =>
       jsonApi<void>("POST", "/password-resets", {
-        data: { type: "password-resets", attributes: { email } },
+        data: {
+          type: "password-resets",
+          attributes: { email, ...(captchaToken !== undefined && { captchaToken }) },
+        },
       }).then(() => ({ status: true })),
     passwordResetConfirm: ({ token, newPassword }) =>
       jsonApi<void>("POST", "/password-resets/redemptions", {
