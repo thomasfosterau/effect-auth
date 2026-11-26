@@ -153,6 +153,7 @@ const allTargets: ReadonlyArray<Target> = [
   // those entries import like the rest.
   { dir: "effect-auth", peers: ["@thomasfosterau/effect-jsonapi", "@node-saml/node-saml"] },
   { dir: "argon2" },
+  { dir: "better-auth", peers: ["better-auth"] },
   { dir: "sveltekit" },
   { dir: "drizzle", peers: ["drizzle-orm"] },
   { dir: "alchemy-cloudflare", peers: ["alchemy", "@alchemy.run/cloudflare"] },

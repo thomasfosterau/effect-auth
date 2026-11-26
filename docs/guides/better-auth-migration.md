@@ -16,6 +16,12 @@ The practical consequences are worth internalising before you start:
 - Errors are values in the typed error channel, not thrown exceptions; every service method has `R = never` once its layer is built.
 - There is no CLI. No `@better-auth/cli generate`, no `migrate` command that inspects your config. `@thomasfosterau/effect-auth/sql` ships a fixed DDL list (`schemaStatements`) and a `migrate` effect; everything else is your migration pipeline's job.
 
+### Stage 1: keep Better Auth, adopt the kernel
+
+You don't have to move everything at once. [`@thomasfosterau/effect-auth-better-auth`](../../packages/better-auth/README.md) (not yet published) runs effect-auth's services over your existing Better Auth instance: sessions come from `auth.api.getSession` and Better Auth's internal adapter, users and identifiers from its `user` table. Better Auth keeps its runtime, tables, routes and browser client. You gain the authorization kernel (`Authorizer`, `Policy`, `Rbac` over the admin plugin's `role`, `Ladder`, `Guard`), `SessionContext` and the SvelteKit `handle` on top, with Effect services to call from your own code.
+
+It covers sessions, users, identifier reads and email or username sign-in. Everything else (OAuth, magic links, OTPs, two-factor, passkeys, password reset, organizations, admin, API keys) stays with Better Auth until stage 2, the move in §6. Its `PasswordHasher` verifies Better Auth's scrypt hashes, so the same seam keeps working after the data moves.
+
 ## 2. Concept map
 
 | Better Auth                                      | effect-auth                                                                                                                      |

@@ -32,6 +32,8 @@ catalog:
   "@vitest/coverage-istanbul": 5.1.0
   "@alchemy.run/cloudflare": 2.0.0-beta.87
   alchemy: 2.0.0-beta.87
+  # The release the backend package is tested against; its peer floor is `catalogs.better-auth-peers`.
+  better-auth: 1.7.28
   better-sqlite3: ^13.2.0
   # The tagged rc; `drizzleApplicationsPin` in scripts/check-dist.ts tracks the apps' build.
   drizzle-orm: 1.0.0-rc.6
@@ -62,6 +64,10 @@ catalogs:
     # Raised from ^4.0.0: the core uses `effect/crypto` (4.1) and its `Password` module (4.1.5).
     effect: ^4.1.5
     svelte: ^5.20.0
+  better-auth-peers:
+    # The latest release when the package was added (Nov 2026); its `internalAdapter` and
+    # `returnHeaders` call option are what the package is tested against.
+    better-auth: ^1.7.28
   drizzle-peers:
     drizzle-orm: ">=1.0.0-rc.5 <2"
   alchemy-peers:
@@ -85,6 +91,9 @@ overrides:
   # vite-plus's managed overrides.
   "vite@*": "catalog:"
   "vitest@*": "catalog:"
+  # Keeps vitest's optional coverage peer on the catalog's release, so every
+  # importer links one vitest.
+  "@vitest/coverage-istanbul": "catalog:"
 
 allowBuilds:
   better-sqlite3: true
