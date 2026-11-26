@@ -760,6 +760,12 @@ export interface AuthClient {
      * is the claim's own `id`. Resolves once it is gone.
      */
     readonly releaseDomain: (domainId: string) => Promise<void>;
+    /**
+     * Every organization's claim on `domain`, in any state, oldest first, each
+     * with its `attestedBy` (`GET /admin/organization-domains?filter[domain]=`):
+     * how the operator finds the claim to {@link releaseDomain} in a dispute.
+     */
+    readonly lookupDomain: (domain: string) => Promise<Http.OrganizationDomainListView>;
   };
 
   /** Enterprise SSO (this server as an OIDC/SAML relying party). */
@@ -1482,6 +1488,11 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
         }).then((document) => domainView(document.data)),
       releaseDomain: (domainId) =>
         jsonApi<void>("DELETE", `/admin/organization-domains/${encodeURIComponent(domainId)}`),
+      lookupDomain: (domain) =>
+        jsonApi<CollectionDocument<WireDomain>>(
+          "GET",
+          `/admin/organization-domains?${new URLSearchParams({ "filter[domain]": domain }).toString()}`,
+        ).then((document) => document.data.map(domainView)),
     },
 
     sso: {

@@ -3103,6 +3103,34 @@ describe("OrganizationService - domains", () => {
     expect(result.acmeDomains).toHaveLength(1);
   });
 
+  it("lets the operator look up every organization's claim on a domain", async () => {
+    const result = await runService({}, (service) =>
+      Effect.gen(function* () {
+        const acme = yield* service.createOrganization("owner-1", { name: "Acme", slug: "acme" });
+        const globex = yield* service.createOrganization("owner-2", {
+          name: "Globex",
+          slug: "globex",
+        });
+        const verified = yield* service.attestDomain(acme.id, "acme.test", {
+          attestedBy: "ops-1",
+        });
+        const pending = yield* service.addDomain("owner-2", globex.id, { domain: "acme.test" });
+        yield* service.addDomain("owner-1", acme.id, { domain: "other.test" });
+
+        const claims = yield* service.listDomainClaims(" ACME.test ");
+        const none = yield* service.listDomainClaims("unclaimed.test");
+        const invalid = yield* Effect.result(service.listDomainClaims("not-a-domain"));
+        return { verified, pending, claims, none, invalid };
+      }),
+    );
+
+    // Every organization's claim, in any state, oldest first.
+    expect(result.claims).toStrictEqual([result.verified, result.pending]);
+    expect(result.none).toEqual([]);
+    assert(Result.isFailure(result.invalid));
+    expect(result.invalid.failure.message).toBe("'not-a-domain' is not a valid domain");
+  });
+
   it("refuses domain operations when no OrganizationDomainStore is wired", async () => {
     const result = await runServiceIn(baseContext, {}, (service) =>
       Effect.gen(function* () {
@@ -3116,9 +3144,10 @@ describe("OrganizationService - domains", () => {
         );
         const attest = yield* Effect.result(service.attestDomain(organization.id, "acme.test"));
         const release = yield* Effect.result(service.releaseDomain(organization.id, "acme.test"));
+        const lookup = yield* Effect.result(service.listDomainClaims("acme.test"));
         // JIT is a no-op rather than a failure: it runs on a sign-in path.
         const jit = yield* service.provisionJitMembership("user-1", "user@acme.test");
-        return { list, add, attest, release, jit };
+        return { list, add, attest, release, lookup, jit };
       }),
     );
 
@@ -3126,6 +3155,7 @@ describe("OrganizationService - domains", () => {
     expect(result.add._tag).toBe("Failure");
     expect(result.attest._tag).toBe("Failure");
     expect(result.release._tag).toBe("Failure");
+    expect(result.lookup._tag).toBe("Failure");
     expect(result.jit).toBeNull();
   });
 });

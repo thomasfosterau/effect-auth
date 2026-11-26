@@ -711,7 +711,10 @@ export const OrganizationDomainView = Schema.Struct({
   verificationToken: Schema.optional(Schema.String),
   createdAt: Schema.Number,
   verifiedAt: Schema.optional(Schema.Number),
-  /** Who attested a `manual` claim (the platform admin's user id). */
+  /**
+   * Who attested a `manual` claim (the platform admin's user id). Only the
+   * platform-admin endpoints answer it; a tenant's read never carries it.
+   */
   attestedBy: Schema.optional(Schema.String),
 });
 export type OrganizationDomainView = typeof OrganizationDomainView.Type;
