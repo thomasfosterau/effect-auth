@@ -150,7 +150,7 @@ describe("the client/atoms subpath", () => {
     );
     expect(imports.toSorted()).toEqual([
       "./Client.ts",
-      "effect",
+      "effect/Effect",
       "effect/Option",
       "effect/Predicate",
       "effect/reactivity",
