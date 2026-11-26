@@ -1,6 +1,7 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { SqlClient } from "effect/sql";
 import type { RuntimeContext } from "alchemy/RuntimeContext";
@@ -128,7 +129,8 @@ describe("D1-backed effect-auth storage", () => {
         return yield* purgeExpired(database);
       }),
     );
-    expect(result).toEqual({ magicLinks: 1, emailOtps: 0, rateLimits: 0 });
+    expect(result.magicLinks).toBe(1);
+    expect(Arr.reduce(R.values(result), 0, (sum, n) => sum + n)).toBe(1);
   });
 
   /**

@@ -35,7 +35,7 @@
  * bearer token.
  */
 
-import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import { Clock, DateTime, Duration, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
@@ -1325,53 +1325,110 @@ export const makeEmailOtpUserStore: Effect.Effect<
 // ---------------------------------------------------------------------------
 
 /**
- * How many expired rows one {@link purgeExpired} run deleted, per table.
+ * How many expired rows one {@link purgeExpired} run deleted, per table. The
+ * companion tables (WebAuthn ceremonies, second-factor attempt counts,
+ * lockout attempt times) lose their orphaned rows in the same run, uncounted.
  */
 export interface PurgeExpiredResult {
+  /** Rows deleted from `auth_sessions`: past their `expires_at`. */
+  readonly sessions: number;
+  /** Rows deleted from `auth_oauth_states`. */
+  readonly oauthStates: number;
+  /** Rows deleted from `auth_webauthn_challenges`. */
+  readonly webauthnChallenges: number;
+  /** Rows deleted from `auth_pending_multi_factor`. */
+  readonly pendingMultiFactor: number;
+  /** Rows deleted from `auth_email_verifications`. */
+  readonly emailVerifications: number;
+  /** Rows deleted from `auth_password_resets`. */
+  readonly passwordResets: number;
   /** Rows deleted from `auth_magic_links`. */
   readonly magicLinks: number;
   /** Rows deleted from `auth_email_otps`. */
   readonly emailOtps: number;
+  /** Rows deleted from `auth_email_otp_failures`: no wrong code for `otpFailureRetention`. */
+  readonly emailOtpFailures: number;
   /** Rows deleted from `auth_rate_limits`: their window and block have both passed. */
   readonly rateLimits: number;
+  /** Rows deleted from `auth_account_lockouts`: a lock that has ended, or an idle counter. */
+  readonly accountLockouts: number;
 }
 
 /**
- * Delete the magic-link and email-OTP rows whose `expires_at` has passed, and
- * the rate-limit rows whose window and block have both passed; requires
- * `SqlClient`.
+ * Delete every expired row from the `./sql` stores; requires `SqlClient`.
  *
- * No store deletes these rows on its own: a record nobody redeems stays until
- * a later send for the same address replaces it, and the sends that hide
- * whether an account exists write one for any address. Schedule this from the
- * host (a cron trigger on Workers, a timer on a long-lived server) so the
- * tables stay bounded. An expired row is already refused by the services, so a
- * purge changes no outcome; it only reclaims the space: a row whose
- * `expires_at` equals the current time is still accepted, so it stays.
+ * No store deletes these rows on its own, and most are written for
+ * unauthenticated requests: an OAuth state per authorize redirect, a WebAuthn
+ * challenge per begin, a rate-limit row per key counted, a lockout row per
+ * identifier tried, a code or link per send (the sends that hide whether an
+ * account exists write one for any address). Schedule this from the host (a
+ * cron trigger on Workers, a timer on a long-lived server) so the tables stay
+ * bounded. Each table is one `DELETE`, run in turn, with expiry read from the
+ * `Clock`.
  *
- * A rate-limit row is one per key, IP and identifier ever counted, so
- * `auth_rate_limits` grows the same way. The purge deletes a row once
- * its `reset_at` is not after now and its `blocked_until` is unset or not after
- * now: the limiter then treats the key exactly as one it has never seen, so the
- * next request opens a fresh window either way. A row inside its window or
- * still blocked stays. Each table is one `DELETE`. Expiry is read from the
- * `Clock`. {@link purgeExpiredWith} is the same purge with a cap on the rows
- * each table loses per run.
+ * A purge changes no outcome; it only reclaims the space:
+ *
+ * - A session, OAuth state, WebAuthn challenge, pending second factor, email
+ *   verification, password reset, magic link or email OTP goes once its
+ *   `expires_at` is before now; the services already refuse it, and a row
+ *   whose `expires_at` equals now is still accepted, so it stays. Expired
+ *   sessions are purged too: `validateSession` refuses and deletes one anyway.
+ * - A rate-limit row goes once its `reset_at` is not after now and its
+ *   `blocked_until` is unset or not after now: the limiter then treats the key
+ *   as one it has never seen.
+ * - An account-lockout row goes once its lock has ended (the next attempt would
+ *   start again from 1), or, never locked, once its key has had no attempt for
+ *   `accountLockoutRetention`. A row from before attempt times were recorded
+ *   gets one at its first purge and is judged from then.
+ * - An email-OTP failure budget goes once its latest wrong code is
+ *   `otpFailureRetention` old: past the backoff cap the delay has fully
+ *   decayed, so a fresh start buys nothing a patient caller lacked.
+ *
+ * {@link purgeExpiredWith} is the same purge with a cap on the rows each table
+ * loses per run, and the two retentions.
  */
 export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
-  SqlClient.SqlClient.use((sql) =>
-    Clock.currentTimeMillis.pipe(Effect.flatMap((now) => purgeTables(sql, now, undefined))),
-  );
+  Effect.suspend(() => purgeExpiredWith());
 
 /** Options for {@link purgeExpiredWith}. */
 export interface PurgeExpiredOptions {
   /**
-   * The most rows the run deletes from each table: at most `limit`
-   * magic links, `limit` email OTPs and `limit` rate-limit rows. A positive
-   * integer; omitted, every expired row goes, as {@link purgeExpired} does.
+   * The most rows the run deletes from each table. A positive integer;
+   * omitted, every expired row goes, as {@link purgeExpired} does.
    */
   readonly limit?: number | undefined;
+  /**
+   * How long an email-OTP failure budget outlives its latest wrong code.
+   * Default 25 hours: the default backoff cap (`backoff.maxDelay`, a day) and
+   * an hour's margin. Keep it at least your `maxDelay`.
+   */
+  readonly otpFailureRetention?: Duration.Input | undefined;
+  /**
+   * How long an unlocked account-lockout counter outlives its key's latest
+   * attempt. Default a day. Keep it at least the plugin's `lockoutDurationMs`.
+   */
+  readonly accountLockoutRetention?: Duration.Input | undefined;
 }
+
+/** {@link PurgeExpiredOptions.otpFailureRetention}'s default. */
+export const DEFAULT_OTP_FAILURE_RETENTION: Duration.Duration = Duration.hours(25);
+/** {@link PurgeExpiredOptions.accountLockoutRetention}'s default. */
+export const DEFAULT_ACCOUNT_LOCKOUT_RETENTION: Duration.Duration = Duration.days(1);
+
+const retentionMillis = (
+  name: string,
+  input: Duration.Input | undefined,
+  fallback: Duration.Duration,
+): Effect.Effect<number, Auth.AuthError> => {
+  const millis = Duration.toMillis(input ?? fallback);
+  return Number.isFinite(millis) && millis >= 0
+    ? Effect.succeed(millis)
+    : Effect.fail(
+        new Auth.AuthError({
+          message: `purgeExpired ${name} must be a finite, non-negative duration`,
+        }),
+      );
+};
 
 /**
  * {@link purgeExpired} with options; requires `SqlClient`.
@@ -1381,9 +1438,9 @@ export interface PurgeExpiredOptions {
  * SQLite, D1 and PostgreSQL all run), so one run's work is bounded: a Workers
  * cron tick with a CPU budget calls it once per tick, or loops until every
  * count in the result is `0`. Which expired rows a capped run takes is
- * unspecified. Omitting `limit` is {@link purgeExpired} exactly. A `limit`
- * that is not a positive integer fails with `AuthError` before any statement
- * runs.
+ * unspecified. Omitting every option is {@link purgeExpired} exactly. A `limit`
+ * that is not a positive integer, or a retention that is negative or
+ * infinite, fails with `AuthError` before any statement runs.
  *
  * @example
  * ```ts
@@ -1404,9 +1461,26 @@ export const purgeExpiredWith = (
       }),
     );
   }
-  return SqlClient.SqlClient.use((sql) =>
-    Clock.currentTimeMillis.pipe(Effect.flatMap((now) => purgeTables(sql, now, limit))),
-  );
+  return Effect.gen(function* () {
+    const otpFailureRetention = yield* retentionMillis(
+      "otpFailureRetention",
+      options?.otpFailureRetention,
+      DEFAULT_OTP_FAILURE_RETENTION,
+    );
+    const accountLockoutRetention = yield* retentionMillis(
+      "accountLockoutRetention",
+      options?.accountLockoutRetention,
+      DEFAULT_ACCOUNT_LOCKOUT_RETENTION,
+    );
+    const sql = yield* SqlClient.SqlClient;
+    const now = yield* Clock.currentTimeMillis;
+    return yield* purgeTables(sql, {
+      now,
+      limit,
+      otpFailuresBefore: now - otpFailureRetention,
+      lockoutAttemptsBefore: now - accountLockoutRetention,
+    });
+  });
 };
 
 /**
@@ -1418,7 +1492,9 @@ export const purgeExpiredWith = (
  * READ COMMITTED a row the subquery picked can be refreshed concurrently (a
  * rate-limit window reopened, an OTP re-issued for the same address), and the
  * `DELETE` rechecks only its own `WHERE` after waiting on the row lock. Without
- * the predicate it would delete the fresh row.
+ * the predicate it would delete the fresh row. An `expired` that names the
+ * table itself (a correlated `NOT EXISTS`) resolves to the nearest `FROM`, so
+ * it reads right in both places.
  */
 const purgeTable = (
   sql: SqlClient.SqlClient,
@@ -1439,37 +1515,151 @@ const purgeTable = (
   return allRows(options.label, statement).pipe(Effect.map((rows) => rows.length));
 };
 
-const purgeTables = (
+/** A purge of the rows whose `expires_at` is before `now`. */
+const purgeByExpiresAt = (
   sql: SqlClient.SqlClient,
+  table: string,
+  key: string,
   now: number,
   limit: number | undefined,
-): Effect.Effect<PurgeExpiredResult, Auth.AuthError> =>
-  Effect.all(
-    {
-      magicLinks: purgeTable(sql, {
-        label: "purgeExpired.magicLinks",
-        table: "auth_magic_links",
-        key: "token",
-        expired: sql`expires_at < ${now}`,
-        limit,
-      }),
-      emailOtps: purgeTable(sql, {
-        label: "purgeExpired.emailOtps",
-        table: "auth_email_otps",
-        key: "email, purpose",
-        expired: sql`expires_at < ${now}`,
-        limit,
-      }),
-      rateLimits: purgeTable(sql, {
-        label: "purgeExpired.rateLimits",
-        table: "auth_rate_limits",
-        key: "key",
-        expired: sql`reset_at <= ${now} AND (blocked_until IS NULL OR blocked_until <= ${now})`,
-        limit,
-      }),
-    },
-    { concurrency: 1 },
+) =>
+  purgeTable(sql, {
+    label: `purgeExpired.${table}`,
+    table,
+    key,
+    expired: sql`expires_at < ${now}`,
+    limit,
+  });
+
+/** A purge of a companion table's rows whose parent row is gone. */
+const purgeOrphans = (
+  sql: SqlClient.SqlClient,
+  table: string,
+  parent: string,
+  key: string,
+  limit: number | undefined,
+) =>
+  purgeTable(sql, {
+    label: `purgeExpired.${table}`,
+    table,
+    key,
+    expired: sql`NOT EXISTS (SELECT 1 FROM ${sql.literal(parent)} p WHERE p.${sql.literal(key)} = ${sql.literal(table)}.${sql.literal(key)})`,
+    limit,
+  });
+
+const purgeTables = (
+  sql: SqlClient.SqlClient,
+  options: {
+    readonly now: number;
+    readonly limit: number | undefined;
+    readonly otpFailuresBefore: number;
+    readonly lockoutAttemptsBefore: number;
+  },
+): Effect.Effect<PurgeExpiredResult, Auth.AuthError> => {
+  const { now, limit } = options;
+  // A lockout row from before attempt times were recorded starts its idle
+  // clock here, so it is judged like any other from the next purge on.
+  const seedLockoutAttempts = asVoid(
+    "purgeExpired.auth_account_lockout_attempts",
+    sql`INSERT INTO auth_account_lockout_attempts (key, last_attempt_at)
+          SELECT l.key, ${now} FROM auth_account_lockouts l
+          WHERE NOT EXISTS (SELECT 1 FROM auth_account_lockout_attempts a WHERE a.key = l.key)
+          ${limit === undefined ? sql`` : sql`LIMIT ${limit}`}
+          ON CONFLICT(key) DO NOTHING`,
   );
+  return Effect.gen(function* () {
+    const sessions = yield* purgeByExpiresAt(sql, "auth_sessions", "id", now, limit);
+    const oauthStates = yield* purgeByExpiresAt(sql, "auth_oauth_states", "state", now, limit);
+    const webauthnChallenges = yield* purgeByExpiresAt(
+      sql,
+      "auth_webauthn_challenges",
+      "challenge",
+      now,
+      limit,
+    );
+    yield* purgeOrphans(
+      sql,
+      "auth_webauthn_challenge_ceremonies",
+      "auth_webauthn_challenges",
+      "challenge",
+      limit,
+    );
+    const pendingMultiFactor = yield* purgeByExpiresAt(
+      sql,
+      "auth_pending_multi_factor",
+      "token",
+      now,
+      limit,
+    );
+    yield* purgeOrphans(
+      sql,
+      "auth_pending_multi_factor_attempts",
+      "auth_pending_multi_factor",
+      "token",
+      limit,
+    );
+    const emailVerifications = yield* purgeByExpiresAt(
+      sql,
+      "auth_email_verifications",
+      "token",
+      now,
+      limit,
+    );
+    const passwordResets = yield* purgeByExpiresAt(
+      sql,
+      "auth_password_resets",
+      "token",
+      now,
+      limit,
+    );
+    const magicLinks = yield* purgeByExpiresAt(sql, "auth_magic_links", "token", now, limit);
+    const emailOtps = yield* purgeByExpiresAt(sql, "auth_email_otps", "email, purpose", now, limit);
+    const emailOtpFailures = yield* purgeTable(sql, {
+      label: "purgeExpired.auth_email_otp_failures",
+      table: "auth_email_otp_failures",
+      key: "email, purpose",
+      expired: sql`last_failure_at < ${options.otpFailuresBefore}`,
+      limit,
+    });
+    const rateLimits = yield* purgeTable(sql, {
+      label: "purgeExpired.auth_rate_limits",
+      table: "auth_rate_limits",
+      key: "key",
+      expired: sql`reset_at <= ${now} AND (blocked_until IS NULL OR blocked_until <= ${now})`,
+      limit,
+    });
+    yield* seedLockoutAttempts;
+    const accountLockouts = yield* purgeTable(sql, {
+      label: "purgeExpired.auth_account_lockouts",
+      table: "auth_account_lockouts",
+      key: "key",
+      expired: sql`(locked_until IS NOT NULL AND locked_until <= ${now})
+        OR (locked_until IS NULL AND EXISTS (SELECT 1 FROM auth_account_lockout_attempts a
+          WHERE a.key = auth_account_lockouts.key AND a.last_attempt_at < ${options.lockoutAttemptsBefore}))`,
+      limit,
+    });
+    yield* purgeOrphans(
+      sql,
+      "auth_account_lockout_attempts",
+      "auth_account_lockouts",
+      "key",
+      limit,
+    );
+    return {
+      sessions,
+      oauthStates,
+      webauthnChallenges,
+      pendingMultiFactor,
+      emailVerifications,
+      passwordResets,
+      magicLinks,
+      emailOtps,
+      emailOtpFailures,
+      rateLimits,
+      accountLockouts,
+    } satisfies PurgeExpiredResult;
+  });
+};
 
 // ---------------------------------------------------------------------------
 // MultiFactorStore + PendingMultiFactorStore
@@ -1883,10 +2073,22 @@ export const makeAccountLockoutStore: Effect.Effect<
             message: "accountLockout.registerAttempt returned no row",
           });
         }
+        // Only `purgeExpired` reads this, to tell an idle counter from a live one.
+        yield* asVoid(
+          "accountLockout.registerAttempt",
+          sql`INSERT INTO auth_account_lockout_attempts (key, last_attempt_at) VALUES (${key}, ${now})
+                ON CONFLICT(key) DO UPDATE SET last_attempt_at = excluded.last_attempt_at`,
+        );
         return rowToLockout(row);
       }),
     delete: (key) =>
-      asVoid("accountLockout.delete", sql`DELETE FROM auth_account_lockouts WHERE key = ${key}`),
+      Effect.andThen(
+        asVoid("accountLockout.delete", sql`DELETE FROM auth_account_lockouts WHERE key = ${key}`),
+        asVoid(
+          "accountLockout.delete",
+          sql`DELETE FROM auth_account_lockout_attempts WHERE key = ${key}`,
+        ),
+      ),
   } satisfies typeof Auth.Plugins.AccountLockoutStore.Service;
 });
 

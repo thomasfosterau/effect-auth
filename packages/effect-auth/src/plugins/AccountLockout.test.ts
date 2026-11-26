@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { DateTime, Duration, Effect, Layer, MutableHashMap } from "effect";
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { Hooks, type AuthenticateAttempt, type HookError } from "../Hooks.ts";
 import {
@@ -351,5 +352,35 @@ describe("AccountLockoutPlugin", () => {
     const result = await h.attemptResult(byEmail("user@example.com"));
     expect(result).not.toBeInstanceOf(AuthError);
     expect(result).toEqual(byEmail("user@example.com"));
+  });
+});
+
+describe("memoryAccountLockoutStore", () => {
+  it("stays bounded: drops ended locks and idle counters once it grows, and keeps active locks", () => {
+    const records = MutableHashMap.empty<string, AccountLockoutRecord>();
+    const store = memoryAccountLockoutStore(records);
+    const options = (now: number) => ({ maxAttempts: 2, lockoutDurationMs: 60_000, now });
+    const attemptEach = (prefix: string, count: number, now: number) =>
+      Effect.forEach(
+        Arr.range(0, count - 1),
+        (i) => store.registerAttempt(`${prefix}-${i}`, options(now)),
+        { concurrency: 1, discard: true },
+      );
+    Effect.runSync(
+      Effect.gen(function* () {
+        yield* store.registerAttempt("locked", options(0));
+        yield* store.registerAttempt("locked", options(120_000));
+        yield* store.registerAttempt("locked", options(120_000));
+        // One attempt each for a flood of identifiers, all long idle by the end.
+        yield* attemptEach("flood", 1100, 0);
+        // A second flood later doubles the map, and the attempt that does so
+        // prunes the first.
+        yield* attemptEach("late", 1000, 170_000);
+      }),
+    );
+    expect(MutableHashMap.size(records)).toBeLessThanOrEqual(1001);
+    expect(Option.isNone(MutableHashMap.get(records, "flood-0"))).toBe(true);
+    expect(Option.getOrNull(MutableHashMap.get(records, "locked"))?.lockedUntil).toBe(180_000);
+    expect(Option.isSome(MutableHashMap.get(records, "late-999"))).toBe(true);
   });
 });

@@ -81,6 +81,7 @@
  */
 import { Clock, Context, Duration, Effect, MutableHashMap } from "effect";
 import * as Option from "effect/Option";
+import { makeAmortizedPrune } from "../AmortizedPrune.ts";
 import * as Errors from "../Errors.ts";
 import {
   type AuthenticateAttempt,
@@ -178,20 +179,45 @@ const transition = (
  * multi-instance deployments need a shared store with an atomic
  * `registerAttempt` (e.g. the SQL implementation).
  *
+ * Bounded by its live entries: each identifier tried adds one, so once the
+ * map has doubled since it was last pruned, an attempt drops every entry whose
+ * lock has ended, or which was never locked and has had no attempt for
+ * `lockoutDurationMs`. An active lock always stays.
+ *
  * Pass your own `MutableHashMap` to inspect or pre-seed state in tests.
  */
 export const memoryAccountLockoutStore = (
   records: MutableHashMap.MutableHashMap<string, AccountLockoutRecord> = MutableHashMap.empty(),
-): typeof AccountLockoutStore.Service => ({
-  get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key))),
-  registerAttempt: (key, options) =>
-    Effect.sync(() => {
-      const next = transition(Option.getOrNull(MutableHashMap.get(records, key)), options);
-      MutableHashMap.set(records, key, next);
-      return next;
-    }),
-  delete: (key) => Effect.sync(() => void MutableHashMap.remove(records, key)),
-});
+): typeof AccountLockoutStore.Service => {
+  const lastAttemptAt = MutableHashMap.empty<string, number>();
+  const prune = makeAmortizedPrune(records);
+  return {
+    get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key))),
+    registerAttempt: (key, options) =>
+      Effect.sync(() => {
+        prune((record, staleKey) => {
+          const stale =
+            record.lockedUntil === undefined
+              ? Option.match(MutableHashMap.get(lastAttemptAt, staleKey), {
+                  onNone: () => false,
+                  onSome: (at) => at + options.lockoutDurationMs <= options.now,
+                })
+              : record.lockedUntil <= options.now;
+          if (stale) MutableHashMap.remove(lastAttemptAt, staleKey);
+          return stale;
+        });
+        const next = transition(Option.getOrNull(MutableHashMap.get(records, key)), options);
+        MutableHashMap.set(records, key, next);
+        MutableHashMap.set(lastAttemptAt, key, options.now);
+        return next;
+      }),
+    delete: (key) =>
+      Effect.sync(() => {
+        MutableHashMap.remove(records, key);
+        MutableHashMap.remove(lastAttemptAt, key);
+      }),
+  };
+};
 
 /** Configuration for {@link AccountLockoutPlugin}. */
 export interface AccountLockoutConfig {
