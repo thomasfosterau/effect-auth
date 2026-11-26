@@ -29,7 +29,7 @@ catalog:
   "@types/pg": ^8.15.0
   "@types/semver": ^7.8.0
   # Must equal the vitest vite-plus bundles.
-  "@vitest/coverage-istanbul": 5.1.0
+  "@vitest/coverage-istanbul": 5.1.1
   "@alchemy.run/cloudflare": 2.0.0-beta.87
   alchemy: 2.0.0-beta.87
   # The release the backend package is tested against; its peer floor is `catalogs.better-auth-peers`.
@@ -43,15 +43,13 @@ catalog:
   semver: ^7.8.6
   svelte: ^5.59.2
   svelte-check: ^4.7.8
-  # Only for @effect/docgen, which spawns it.
-  tsx: ^4.23.15
   # TS6 for JS-API consumers (svelte-check, docgen, editors); `@typescript/native` is TS7.
   typescript: "npm:@typescript/typescript6@6.0.2"
   "@typescript/native": "npm:typescript@7.0.2"
   # `vite` and `vitest` equal what vite-plus depends on (`npm view vite-plus@<v>
   # dependencies`), not vite-plus itself; the devcontainer image tag follows vite-plus.
-  vite-plus: 1.7.0
-  vite: npm:@voidzero-dev/vite-plus-core@8.3.8000
+  vite-plus: 1.8.0
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
   vitest: 5.1.1
   workerd: 1.20261125.1
   xml-crypto: ^6.4.0
@@ -80,14 +78,6 @@ catalogs:
 
 overrides:
   effect: "catalog:"
-  # Advisory floors for transitive dev-toolchain dependencies (`pnpm audit`).
-  "brace-expansion@5": ">=5.0.11"
-  "js-yaml@3": ">=3.15.2"
-  "nanoid@3": ">=3.3.18"
-  "postcss@8": ">=8.5.18"
-  "launch-editor@2": ">=2.14.2"
-  "shell-quote@1": ">=1.11.0"
-  "source-map-js@1": ">=1.2.2"
   # vite-plus's managed overrides.
   "vite@*": "catalog:"
   "vitest@*": "catalog:"
@@ -117,3 +107,15 @@ skills:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - "@thomasfosterau/*"
+# Vite+ selects Node.js (.node-version) and pnpm (packageManager); pnpm
+# must not download or switch to its own.
+runtimeOnFail: ignore
+pmOnFail: ignore
+
+# docgen runs its examples with `tsx`, which scripts/bin/tsx stands in for
+# (through vpx), so its `tsx` peer is optional and never installed.
+packageExtensions:
+  "@effect/docgen":
+    peerDependenciesMeta:
+      tsx:
+        optional: true

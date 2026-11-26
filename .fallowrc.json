@@ -49,7 +49,6 @@
     "@vitest/coverage-istanbul",
     "fallow",
     "svelte-check",
-    "tsx",
     "typescript",
     "vite",
     "vite-plus",
