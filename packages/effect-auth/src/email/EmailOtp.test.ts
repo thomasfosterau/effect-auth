@@ -85,8 +85,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -117,7 +116,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const addUser = (user: User) => {
@@ -172,7 +171,7 @@ const emailOtpStore = {
   get: (email: string, purpose: EmailOtpPurpose) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return Option.getOrNull(MutableHashMap.get(otpRecords, recordKey(email, purpose)));
+      return MutableHashMap.get(otpRecords, recordKey(email, purpose));
     }),
 
   delete: (email: string, purpose: EmailOtpPurpose) =>
@@ -194,7 +193,7 @@ const emailOtpStore = {
       }
       const updated = { ...record, attempts: record.attempts + 1 };
       MutableHashMap.set(otpRecords, recordKey(email, purpose), updated);
-      return updated.attempts;
+      return Option.some(updated.attempts);
     }),
 
   ...recordingOtpFailures<EmailOtpPurpose>(otpFailures, storeOps),

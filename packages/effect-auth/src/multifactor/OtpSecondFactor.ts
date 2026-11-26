@@ -7,6 +7,7 @@
  * @module otp-second-factor
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "../Errors.ts";
 import { generateOtp } from "../email/EmailOtp.ts";
@@ -62,20 +63,20 @@ export class OtpSecondFactorStore extends Context.Service<
     ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
     readonly get: (
       pendingToken: string,
-    ) => Effect.Effect<OtpSecondFactorRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<OtpSecondFactorRecord>, Errors.AuthError>;
     readonly update: (
       record: OtpSecondFactorRecord,
     ) => Effect.Effect<OtpSecondFactorRecord, Errors.AuthError>;
     /**
      * Count one attempt against the challenge, atomically, and return the new
-     * `attempts`, or `null` when there is no such challenge. The
+     * `attempts`, or `None` when there is no such challenge. The
      * service counts before it compares, so two calls must never return the
      * same number: a get followed by an `update` would let a burst of
      * concurrent guesses all be compared under `maxAttempts`.
      */
     readonly incrementAttempts: (
       pendingToken: string,
-    ) => Effect.Effect<number | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<number>, Errors.AuthError>;
     readonly delete: (pendingToken: string) => Effect.Effect<void, Errors.AuthError>;
   }
 >()("@effect-auth/OtpSecondFactorStore") {}
@@ -240,13 +241,14 @@ export const make = (
         otp: string,
         options?: OtpSecondFactorVerifyOptions,
       ) {
-        const record = pendingToken && otp ? yield* store.get(pendingToken) : null;
-        if (!record) {
+        const foundRecord = pendingToken && otp ? yield* store.get(pendingToken) : Option.none();
+        if (Option.isNone(foundRecord)) {
           // Unkeyed: the challenge names no user, but the per-IP limit still
           // counts the attempt.
           yield* hooks.beforeAuthenticate({ method: "second-factor" });
           return yield* invalidOtp();
         }
+        const record = foundRecord.value;
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(pendingToken);
@@ -263,9 +265,10 @@ export const make = (
 
         // Count the attempt before comparing, so concurrent guesses
         // each get their own count and at most `maxAttempts` are compared.
-        // `null`: a concurrent request spent or exhausted the challenge.
-        const attempts = yield* store.incrementAttempts(pendingToken);
-        if (attempts === null) return yield* invalidOtp();
+        // `None`: a concurrent request spent or exhausted the challenge.
+        const foundAttempts = yield* store.incrementAttempts(pendingToken);
+        if (Option.isNone(foundAttempts)) return yield* invalidOtp();
+        const attempts = foundAttempts.value;
         if (attempts > maxAttempts) {
           yield* store.delete(pendingToken);
           return yield* new OtpSecondFactorError({ message: "Too many attempts" });

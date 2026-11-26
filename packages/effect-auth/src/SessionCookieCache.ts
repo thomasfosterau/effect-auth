@@ -201,7 +201,7 @@ export const encodeSessionCacheCookie = (
   });
 
 /**
- * Verify + parse a cache cookie. Returns `null` (falling back to store
+ * Verify + parse a cache cookie. Answers `None` (falling back to store
  * validation) on a bad signature, a version, epoch or expiry mismatch, an
  * encryption setting the cookie was not issued under, an expired underlying
  * session, a `sid` that doesn't match `primarySessionId`, or a user holding
@@ -214,49 +214,48 @@ export const decodeSessionCacheCookie = (
   now: number,
   primarySessionId: string,
   gateAttributes: HashSet.HashSet<string> = defaultGate,
-): Effect.Effect<Types.SessionWithUser | null, never, Mac.Mac | Aead.Aead> =>
+): Effect.Effect<Option.Option<Types.SessionWithUser>, never, Mac.Mac | Aead.Aead> =>
   Effect.gen(function* () {
     const dot = cookie.lastIndexOf(".");
-    if (dot <= 0) return null;
+    if (dot <= 0) return Option.none();
     const encoded = cookie.slice(0, dot);
     const signature = cookie.slice(dot + 1);
     const expected = yield* Effect.option(sign(encoded, cache.secret));
-    if (Option.isNone(expected) || !timingSafeEqualStr(signature, expected.value)) return null;
+    if (Option.isNone(expected) || !timingSafeEqualStr(signature, expected.value))
+      return Option.none();
 
     const json = yield* payloadJson(encoded, cache);
-    if (json === null) return null;
-
-    const parsed = decodePayloadJson(json);
-    if (Option.isNone(parsed)) return null;
-    return restoreSnapshot(parsed.value, cache, now, primarySessionId, gateAttributes);
+    return Option.flatMap(Option.flatMap(json, decodePayloadJson), (payload) =>
+      restoreSnapshot(payload, cache, now, primarySessionId, gateAttributes),
+    );
   });
 
 /** The signed body's JSON: decrypted under `cache.encrypt`, else base64url-decoded. */
 const payloadJson = (
   encoded: string,
   cache: ResolvedSessionCache,
-): Effect.Effect<string | null, never, Aead.Aead | Mac.Mac> =>
+): Effect.Effect<Option.Option<string>, never, Aead.Aead | Mac.Mac> =>
   Effect.gen(function* () {
-    if (encoded.startsWith(ENCRYPTED_PREFIX) !== cache.encrypt) return null;
-    if (!cache.encrypt) return Result.getOrNull(Base64Url.decodeString(encoded));
+    if (encoded.startsWith(ENCRYPTED_PREFIX) !== cache.encrypt) return Option.none();
+    if (!cache.encrypt) return Result.getSuccess(Base64Url.decodeString(encoded));
     const key = yield* Effect.option(encryptionKey(cache.secret));
-    if (Option.isNone(key)) return null;
+    if (Option.isNone(key)) return Option.none();
     return yield* Cipher.aes256GcmOpen(key.value, encoded.slice(ENCRYPTED_PREFIX.length));
   });
 
-/** The snapshot a verified payload carries, or `null` when it may not be served. */
+/** The snapshot a verified payload carries, or `None` when it may not be served. */
 const restoreSnapshot = (
   payload: typeof SerializedPayload.Type,
   cache: ResolvedSessionCache,
   now: number,
   primarySessionId: string,
   gateAttributes: HashSet.HashSet<string>,
-): Types.SessionWithUser | null => {
-  if (now >= payload.exp) return null;
-  if ((payload.e ?? "") !== cache.version) return null;
+): Option.Option<Types.SessionWithUser> => {
+  if (now >= payload.exp) return Option.none();
+  if ((payload.e ?? "") !== cache.version) return Option.none();
 
   // Reject if the cache was issued for a different primary session.
-  if (payload.sid !== primarySessionId) return null;
+  if (payload.sid !== primarySessionId) return Option.none();
 
   const ss = payload.session;
   const session: Types.Session = {
@@ -268,7 +267,7 @@ const restoreSnapshot = (
     attributes: ss.attributes,
   };
   // Honour the session's own expiry even within the cache window.
-  if (now > session.expiresAt.getTime()) return null;
+  if (now > session.expiresAt.getTime()) return Option.none();
 
   const su = payload.user;
   const user: Types.User = {
@@ -280,7 +279,7 @@ const restoreSnapshot = (
     attributes: su.attributes,
   };
   // An authorization-bearing attribute is never served from a snapshot.
-  if (holdsGateAttribute(user, gateAttributes)) return null;
+  if (holdsGateAttribute(user, gateAttributes)) return Option.none();
 
-  return { session, user };
+  return Option.some({ session, user });
 };

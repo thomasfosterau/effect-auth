@@ -22,8 +22,7 @@ describe("static service layers", () => {
           MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
-      get: (sessionId) =>
-        Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+      get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
       update: (session) =>
         Effect.sync(() => {
           MutableHashMap.set(sessions, session.id, session);
@@ -40,7 +39,7 @@ describe("static service layers", () => {
     };
 
     const userStore: typeof Auth.UserStore.Service = {
-      get: (userId) => Effect.succeed(userId === user.id ? user : null),
+      get: (userId) => Effect.succeed(Option.fromNullishOr(userId === user.id ? user : null)),
     };
 
     const config: Auth.SessionConfig = {
@@ -82,7 +81,7 @@ describe("static service layers", () => {
       attributes: {},
     };
     const store: typeof Auth.UserServiceStore.Service = {
-      get: (userId) => Effect.succeed(userId === user.id ? user : null),
+      get: (userId) => Effect.succeed(Option.fromNullishOr(userId === user.id ? user : null)),
       update: (u) => Effect.succeed(u),
       delete: () => Effect.void,
     };

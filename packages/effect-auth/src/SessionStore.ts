@@ -1,4 +1,5 @@
 import { Context, Effect } from "effect";
+import * as Option from "effect/Option";
 import type * as Types from "./Types.ts";
 import * as Errors from "./Errors.ts";
 
@@ -34,9 +35,11 @@ export class SessionStore extends Context.Service<
     readonly create: (session: Types.Session) => Effect.Effect<Types.Session, Errors.AuthError>;
 
     /**
-     * Get a session by its token hash, or `null` when no such session exists.
+     * Get a session by its token hash, or `None` when no such session exists.
      */
-    readonly get: (sessionId: string) => Effect.Effect<Types.Session | null, Errors.AuthError>;
+    readonly get: (
+      sessionId: string,
+    ) => Effect.Effect<Option.Option<Types.Session>, Errors.AuthError>;
 
     /**
      * Write `expiresAt`, `lastActivityAt` and `attributes` of the stored
@@ -51,14 +54,14 @@ export class SessionStore extends Context.Service<
      * Slide a session's expiry in one atomic step: set `lastActivityAt` and
      * `expiresAt`, and nothing else, on the session with this id whose
      * `expiresAt` is not before `touch.lastActivityAt`. Returns the session as
-     * stored afterwards, or `null` when no session matched (revoked or expired
+     * stored afterwards, or `None` when no session matched (revoked or expired
      * meanwhile). It never creates a session, and never writes `attributes`, so
      * a concurrent `update` is not undone by a stale read.
      */
     readonly touch: (
       sessionId: string,
       touch: SessionTouch,
-    ) => Effect.Effect<Types.Session | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Types.Session>, Errors.AuthError>;
 
     /**
      * Delete a session

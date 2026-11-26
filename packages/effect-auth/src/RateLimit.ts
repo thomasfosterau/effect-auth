@@ -3,6 +3,7 @@
  */
 
 import { Clock, Context, Duration, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { RateLimitError, type AuthError } from "./Errors.ts";
 import * as Obs from "./Observability.ts";
@@ -43,7 +44,7 @@ export interface RateLimitEntry {
 export class RateLimitStore extends Context.Service<
   RateLimitStore,
   {
-    readonly get: (key: string) => Effect.Effect<RateLimitEntry | null, AuthError>;
+    readonly get: (key: string) => Effect.Effect<Option.Option<RateLimitEntry>, AuthError>;
     readonly set: (
       key: string,
       entry: RateLimitEntry,
@@ -121,6 +122,12 @@ export const RATE_LIMIT_EXCEEDED_MESSAGE = "Rate limit exceeded";
 const retryAfter = (until: number, now: number): Duration.Duration =>
   Duration.millis(Math.max(0, until - now));
 
+/** The end of a block still in force at `now`, if the entry has one. */
+const activeBlock = (entry: Option.Option<RateLimitEntry>, now: number) =>
+  Option.flatMap(entry, (found) =>
+    Option.filter(Option.fromUndefinedOr(found.blockedUntil), (until) => now < until),
+  );
+
 /**
  * Create a rate limiter service
  */
@@ -128,24 +135,26 @@ export const make: Effect.Effect<typeof RateLimiter.Service, never, RateLimitSto
   RateLimitStore.useSync((store) => ({
     checkLimit: Effect.fn("RateLimiter.checkLimit")((key: string, config: RateLimitConfig) =>
       Effect.gen(function* () {
-        const entry = yield* store.get(key);
+        const stored = yield* store.get(key);
 
         const now = yield* Clock.currentTimeMillis;
 
         // Check if blocked
-        if (entry?.blockedUntil && now < entry.blockedUntil) {
+        const blockedUntil = activeBlock(stored, now);
+        if (Option.isSome(blockedUntil)) {
           return yield* new RateLimitError({
             message: RATE_LIMIT_EXCEEDED_MESSAGE,
             key,
-            retryAfter: retryAfter(entry.blockedUntil, now),
+            retryAfter: retryAfter(blockedUntil.value, now),
           });
         }
 
         // Check if window expired
-        if (!entry || now >= entry.resetAt) {
+        if (Option.isNone(stored) || now >= stored.value.resetAt) {
           // Window expired or no entry, allow request
           return true;
         }
+        const entry = stored.value;
 
         // Check if limit exceeded
         if (entry.count >= config.maxRequests) {
@@ -175,12 +184,12 @@ export const make: Effect.Effect<typeof RateLimiter.Service, never, RateLimitSto
 
         // A block outlives the window it was set in, so it is checked
         // before the window is.
-        const entry = yield* store.get(key);
-        if (entry?.blockedUntil && now < entry.blockedUntil) {
+        const blockedUntil = activeBlock(yield* store.get(key), now);
+        if (Option.isSome(blockedUntil)) {
           return yield* new RateLimitError({
             message: RATE_LIMIT_EXCEEDED_MESSAGE,
             key,
-            retryAfter: retryAfter(entry.blockedUntil, now),
+            retryAfter: retryAfter(blockedUntil.value, now),
           });
         }
 
@@ -192,7 +201,10 @@ export const make: Effect.Effect<typeof RateLimiter.Service, never, RateLimitSto
         if (count <= config.maxRequests) return yield* Effect.void;
 
         const current = yield* store.get(key);
-        const resetAt = current?.resetAt ?? now + config.windowMs;
+        const resetAt = Option.match(current, {
+          onNone: () => now + config.windowMs,
+          onSome: (entry) => entry.resetAt,
+        });
 
         // Apply block if configured
         if (config.blockDurationMs) {
@@ -223,11 +235,11 @@ export const make: Effect.Effect<typeof RateLimiter.Service, never, RateLimitSto
     ) {
       const entry = yield* store.get(key);
 
-      if (!entry || (yield* Clock.currentTimeMillis) >= entry.resetAt) {
+      if (Option.isNone(entry) || (yield* Clock.currentTimeMillis) >= entry.value.resetAt) {
         return config.maxRequests;
       }
 
-      return Math.max(0, config.maxRequests - entry.count);
+      return Math.max(0, config.maxRequests - entry.value.count);
     }),
   }));
 

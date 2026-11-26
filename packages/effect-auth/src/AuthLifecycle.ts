@@ -1,4 +1,5 @@
 import { Context, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
 import { normalizeEmail } from "./utils.ts";
 import { makeDetachedSend } from "./DeliveryScheduler.ts";
@@ -257,12 +258,20 @@ export const make = (
               // The address `EmailPasswordService.signUp` found taken: the one
               // its `beforeSignUp` hooks returned, not the raw input.
               const email = e.email ?? normalizeEmail(input.email);
-              const identifier = yield* lookupIdentifier(identifiers, "email", email);
-              const existing = identifier === null ? null : yield* userStore.get(identifier.userId);
+              const foundIdentifier = yield* lookupIdentifier(identifiers, "email", email);
+              const foundExisting = Option.isNone(foundIdentifier)
+                ? Option.none()
+                : yield* userStore.get(foundIdentifier.value.userId);
 
-              if (!identifier || !existing || identifier.verified) {
+              if (
+                Option.isNone(foundIdentifier) ||
+                Option.isNone(foundExisting) ||
+                foundIdentifier.value.verified
+              ) {
                 return yield* e;
               }
+              const identifier = foundIdentifier.value;
+              const existing = foundExisting.value;
 
               // Unverified duplicate: resend to the holder (also invalidates
               // stale tokens, matching FIX 5 behaviour).
@@ -343,14 +352,18 @@ export const make = (
           "EmailNotVerifiedError",
           (error) =>
             Effect.gen(function* () {
-              const identifier = yield* lookupIdentifier(identifiers, "email", error.email);
-              const user = identifier === null ? null : yield* userStore.get(identifier.userId);
+              const foundIdentifier = yield* lookupIdentifier(identifiers, "email", error.email);
+              const foundUser = Option.isNone(foundIdentifier)
+                ? Option.none()
+                : yield* userStore.get(foundIdentifier.value.userId);
 
-              if (identifier === null || user === null) {
+              if (Option.isNone(foundIdentifier) || Option.isNone(foundUser)) {
                 return yield* new Errors.InvalidCredentialsError({
                   message: "Invalid email or password",
                 });
               }
+              const identifier = foundIdentifier.value;
+              const user = foundUser.value;
 
               // FIX 5: use resendVerification (which invalidates prior tokens
               // via deleteByUserId) instead of createVerification.
@@ -399,12 +412,16 @@ export const make = (
         // identifiers — a stale token for a since-removed address must not
         // verify anything.
         const tokenEmail = normalizeEmail(verificationRecord.email);
-        const identifier = yield* lookupIdentifier(identifiers, "email", tokenEmail);
-        if (identifier === null || identifier.userId !== verificationRecord.userId) {
+        const foundIdentifier = yield* lookupIdentifier(identifiers, "email", tokenEmail);
+        if (
+          Option.isNone(foundIdentifier) ||
+          foundIdentifier.value.userId !== verificationRecord.userId
+        ) {
           return yield* new Errors.EmailVerificationError({
             message: "Verification token is no longer valid for this email address",
           });
         }
+        const identifier = foundIdentifier.value;
 
         // The address's first proof. Until now no one had shown
         // they own it, so the password, the other credentials and the

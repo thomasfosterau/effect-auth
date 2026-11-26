@@ -33,16 +33,20 @@ export class PasswordResetStore extends Context.Service<
     readonly create: (
       reset: PasswordResetToken,
     ) => Effect.Effect<PasswordResetToken, Errors.AuthError>;
-    readonly get: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
+    readonly get: (
+      token: string,
+    ) => Effect.Effect<Option.Option<PasswordResetToken>, Errors.AuthError>;
     /**
      * Atomically take the record for `token`: delete it and return it, or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (token: string) => Effect.Effect<PasswordResetToken | null, Errors.AuthError>;
+    readonly consume: (
+      token: string,
+    ) => Effect.Effect<Option.Option<PasswordResetToken>, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -227,13 +231,12 @@ export const make = (
         // store work tells them apart. The marker's owner is derived from the
         // address and names no user, so a repeat replaces it; were its token
         // ever guessed, redeeming it would find no account.
-        const owner =
-          resolved === null
-            ? {
-                userId: `${UNKNOWN_ADDRESS_OWNER}${yield* hashToken(normalizedEmail)}`,
-                email: normalizedEmail,
-              }
-            : { userId: resolved.user.id, email: resolved.identifier.value };
+        const owner = Option.isNone(resolved)
+          ? {
+              userId: `${UNKNOWN_ADDRESS_OWNER}${yield* hashToken(normalizedEmail)}`,
+              email: normalizedEmail,
+            }
+          : { userId: resolved.value.user.id, email: resolved.value.identifier.value };
 
         yield* resetStore.deleteByUserId(owner.userId);
 
@@ -254,7 +257,7 @@ export const make = (
         // send goes off the response path. The token is bound to the
         // identifier's owner, so it goes only to the identifier's own address,
         // never to the one the caller typed.
-        if (resolved !== null) {
+        if (Option.isSome(resolved)) {
           yield* detached("password-reset", config.sendResetPassword(owner.email, rawToken));
         }
 
@@ -281,12 +284,16 @@ export const make = (
         yield* validatePasswordLength(newPassword, minPasswordLength, maxPasswordLength);
 
         const tokenHash = yield* hashToken(token);
-        const reset = yield* resetStore.get(tokenHash);
-        if (!reset || reset.userId.startsWith(UNKNOWN_ADDRESS_OWNER)) {
+        const foundReset = yield* resetStore.get(tokenHash);
+        if (
+          Option.isNone(foundReset) ||
+          foundReset.value.userId.startsWith(UNKNOWN_ADDRESS_OWNER)
+        ) {
           return yield* new Errors.PasswordResetError({
             message: "Invalid or expired password reset token",
           });
         }
+        const reset = foundReset.value;
 
         if ((yield* Clock.currentTimeMillis) > reset.expiresAt) {
           yield* resetStore.delete(tokenHash);
@@ -299,7 +306,7 @@ export const make = (
 
         // Spend the token atomically before the password is written:
         // of concurrent resets with one token, only one sets a password.
-        if ((yield* resetStore.consume(tokenHash)) === null) {
+        if (Option.isNone(yield* resetStore.consume(tokenHash))) {
           return yield* new Errors.PasswordResetError({
             message: "Invalid or expired password reset token",
           });

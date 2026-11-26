@@ -6,6 +6,7 @@
  * the prototype's members.
  */
 import { describe, expect, it } from "vite-plus/test";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Condition from "./Condition.ts";
@@ -58,7 +59,7 @@ describe("prototype-member names", () => {
 
   describe("Entity", () => {
     it.each(prototypeNames)("getAttribute(%s) is null", (name) => {
-      expect(Entity.getAttribute(slice, doc, name)).toBeNull();
+      expect(Option.isNone(Entity.getAttribute(slice, doc, name))).toBe(true);
     });
 
     it.each(prototypeNames)("attributeValueEquals reads only own keys (%s)", (name) => {

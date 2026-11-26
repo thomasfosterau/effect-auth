@@ -23,7 +23,7 @@ import {
   IdentifierStore,
   lookupIdentifier,
   makeIdentifier,
-  primaryEmail,
+  primaryEmailValue,
   type Identifier,
 } from "./Identifier.ts";
 import {
@@ -136,7 +136,7 @@ export interface ScimConnection {
  *
  * {@link getByTokenHash} is the authentication path, so index the `tokenHash`
  * column: it is looked up on every SCIM request. Conventions match the rest of
- * the library — `null` on a miss, no-op deletes, `AuthError` for infrastructure
+ * the library — `None` on a miss, no-op deletes, `AuthError` for infrastructure
  * failures.
  */
 export class ScimConnectionStore extends Context.Service<
@@ -145,11 +145,13 @@ export class ScimConnectionStore extends Context.Service<
     readonly create: (
       connection: ScimConnection,
     ) => Effect.Effect<ScimConnection, Errors.AuthError>;
-    readonly getById: (id: string) => Effect.Effect<ScimConnection | null, Errors.AuthError>;
+    readonly getById: (
+      id: string,
+    ) => Effect.Effect<Option.Option<ScimConnection>, Errors.AuthError>;
     /** Resolve a connection by the digest of its provisioning token. */
     readonly getByTokenHash: (
       tokenHash: string,
-    ) => Effect.Effect<ScimConnection | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<ScimConnection>, Errors.AuthError>;
     readonly listByOrganization: (
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<ScimConnection>, Errors.AuthError>;
@@ -178,13 +180,10 @@ export const memoryScimConnectionStore = (
 ): typeof ScimConnectionStore.Service => ({
   create: (connection) =>
     Effect.sync(() => (MutableHashMap.set(records, connection.id, connection), connection)),
-  getById: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, id))),
+  getById: (id) => Effect.sync(() => MutableHashMap.get(records, id)),
   getByTokenHash: (tokenHash) =>
-    Effect.sync(
-      () =>
-        Arr.fromIterable(MutableHashMap.values(records)).find(
-          (record) => record.tokenHash === tokenHash,
-        ) ?? null,
+    Effect.sync(() =>
+      Arr.findFirst(MutableHashMap.values(records), (record) => record.tokenHash === tokenHash),
     ),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
@@ -232,7 +231,7 @@ export class ScimUserStore extends Context.Service<
        */
       readonly identifier?: NewUserIdentifier | undefined;
     }) => Effect.Effect<CreateUserResult, Errors.AuthError>;
-    readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly get: (userId: string) => Effect.Effect<Option.Option<Types.User>, Errors.AuthError>;
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
   }
 >()("@effect-auth/ScimUserStore") {}
@@ -740,9 +739,11 @@ export const make = (
     const provisioningRole = (organizationId: string): Effect.Effect<string, Errors.AuthError> =>
       config.defaultRole !== undefined
         ? Effect.succeed(config.defaultRole)
-        : Effect.map(
-            orgs.getOrganizationById(organizationId),
-            (organization) => organization?.defaultRole ?? "member",
+        : Effect.map(orgs.getOrganizationById(organizationId), (organization) =>
+            Option.getOrElse(
+              Option.flatMap(organization, (o) => Option.fromUndefinedOr(o.defaultRole)),
+              () => "member",
+            ),
           );
 
     // --- Reads -------------------------------------------------------------
@@ -768,7 +769,7 @@ export const make = (
       const userName =
         P.isString(pinned) && emails.some((e) => e.value === pinned)
           ? pinned
-          : (primaryEmail(all)?.value ?? emails[0]?.value ?? user.id);
+          : Option.getOrElse(primaryEmailValue(all), () => emails[0]?.value ?? user.id);
       const externalId = user.attributes[SCIM_EXTERNAL_ID_ATTRIBUTE];
       return {
         id: user.id,
@@ -819,20 +820,26 @@ export const make = (
      */
     const requireUser = (connection: ScimConnection, userId: string) =>
       Effect.gen(function* () {
-        const member = yield* orgs.getMember(connection.organizationId, userId);
-        if (member === null) return yield* notFound(`User "${userId}" not found`);
-        const user = yield* users.get(userId);
-        if (user === null) return yield* notFound(`User "${userId}" not found`);
+        const foundMember = yield* orgs.getMember(connection.organizationId, userId);
+        if (Option.isNone(foundMember)) return yield* notFound(`User "${userId}" not found`);
+        const member = foundMember.value;
+        const foundUser = yield* users.get(userId);
+        if (Option.isNone(foundUser)) return yield* notFound(`User "${userId}" not found`);
+        const user = foundUser.value;
         const domains = yield* verifiedDomains(domainStore, connection.organizationId);
         return yield* targetOf(connection, member, user, domains);
       });
 
     const requireTeam = (connection: ScimConnection, groupId: string) =>
       Effect.gen(function* () {
-        const team = yield* orgs.getTeam(groupId);
-        if (team === null || team.organizationId !== connection.organizationId) {
+        const foundTeam = yield* orgs.getTeam(groupId);
+        if (
+          Option.isNone(foundTeam) ||
+          foundTeam.value.organizationId !== connection.organizationId
+        ) {
           return yield* notFound(`Group "${groupId}" not found`);
         }
+        const team = foundTeam.value;
         return team;
       });
 
@@ -852,10 +859,10 @@ export const make = (
       domains: ReadonlyArray<string>,
     ) =>
       Effect.flatMap(users.get(member.userId), (user) =>
-        user === null
+        Option.isNone(user)
           ? Effect.succeed(Option.none<ScimUserResource>())
           : Effect.asSome(
-              Effect.flatMap(targetOf(connection, member, user, domains), readUserResource),
+              Effect.flatMap(targetOf(connection, member, user.value, domains), readUserResource),
             ),
       );
 
@@ -870,10 +877,12 @@ export const make = (
       domains: ReadonlyArray<string>,
     ) =>
       Effect.gen(function* () {
-        const identifier = yield* lookupIdentifier(identifiers, "email", userName);
-        if (identifier === null) return Option.none<ScimUserResource>();
-        const member = yield* orgs.getMember(connection.organizationId, identifier.userId);
-        if (member === null) return Option.none<ScimUserResource>();
+        const foundIdentifier = yield* lookupIdentifier(identifiers, "email", userName);
+        if (Option.isNone(foundIdentifier)) return Option.none<ScimUserResource>();
+        const identifier = foundIdentifier.value;
+        const foundMember = yield* orgs.getMember(connection.organizationId, identifier.userId);
+        if (Option.isNone(foundMember)) return Option.none<ScimUserResource>();
+        const member = foundMember.value;
         const resource = yield* memberResource(connection, member, domains);
         // The address may be one of the user's other emails, not its userName.
         return Option.filter(resource, (found) => found.userName.toLowerCase() === userName);
@@ -974,7 +983,10 @@ export const make = (
           ...member,
           status: "inactive",
           previousRole: member.role,
-          role: organization?.defaultRole ?? "member",
+          role: Option.getOrElse(
+            Option.flatMap(organization, (o) => Option.fromUndefinedOr(o.defaultRole)),
+            () => "member",
+          ),
         });
       });
 
@@ -1048,7 +1060,7 @@ export const make = (
     const addTeamMemberScoped = (connection: ScimConnection, teamId: string, userId: string) =>
       Effect.gen(function* () {
         const member = yield* orgs.getMember(connection.organizationId, userId);
-        if (member === null) {
+        if (Option.isNone(member)) {
           return yield* badRequest(
             `User "${userId}" is not a member of this organization`,
             "invalidValue",
@@ -1140,8 +1152,9 @@ export const make = (
     /** Claim one email address for the user; another user's address is a `409`. */
     const addUserEmail = (target: ScimTarget, email: string) =>
       Effect.gen(function* () {
-        const existing = yield* lookupIdentifier(identifiers, "email", email);
-        if (existing !== null) {
+        const foundExisting = yield* lookupIdentifier(identifiers, "email", email);
+        if (Option.isSome(foundExisting)) {
+          const existing = foundExisting.value;
           if (existing.userId === target.user.id) return yield* Effect.void;
           return yield* conflict(`The email "${email}" is already in use`);
         }
@@ -1239,12 +1252,13 @@ export const make = (
     /** Rename a team; a team that vanished meanwhile is a `404`. */
     const renameTeam = (groupId: string, team: Team, displayName: string) =>
       Effect.gen(function* () {
-        const renamed = yield* orgs.updateTeam({
+        const foundRenamed = yield* orgs.updateTeam({
           ...team,
           name: displayName,
           updatedAt: yield* Clock.currentTimeMillis,
         });
-        if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
+        if (Option.isNone(foundRenamed)) return yield* notFound(`Group "${groupId}" not found`);
+        const renamed = foundRenamed.value;
         return renamed;
       });
 
@@ -1366,8 +1380,9 @@ export const make = (
           status: 401,
         });
         if (token.trim() === "") return yield* unauthorized;
-        const connection = yield* connections.getByTokenHash(yield* hashToken(token));
-        if (connection === null) return yield* unauthorized;
+        const foundConnection = yield* connections.getByTokenHash(yield* hashToken(token));
+        if (Option.isNone(foundConnection)) return yield* unauthorized;
+        const connection = foundConnection.value;
         // Best-effort activity stamp: a failed touch must not fail the request
         // the IdP actually made.
         yield* connections
@@ -1398,10 +1413,7 @@ export const make = (
           discard: true,
         });
         const taken = yield* Effect.findFirst([userName, ...extras], (email) =>
-          Effect.map(
-            lookupIdentifier(identifiers, "email", email),
-            (existing) => existing !== null,
-          ),
+          Effect.map(lookupIdentifier(identifiers, "email", email), Option.isSome),
         );
         if (Option.isSome(taken)) {
           return yield* conflict(`The email "${taken.value}" is already in use`);
@@ -1441,16 +1453,16 @@ export const make = (
         });
 
         const existingMember = yield* orgs.getMember(connection.organizationId, user.id);
-        const member: Member =
-          existingMember ??
-          (yield* orgs.createMember({
-            id: yield* randomId(),
-            organizationId: connection.organizationId,
-            userId: user.id,
-            role: yield* provisioningRole(connection.organizationId),
-            status: "active",
-            createdAt: yield* Clock.currentTimeMillis,
-          }));
+        const member: Member = Option.isSome(existingMember)
+          ? existingMember.value
+          : yield* orgs.createMember({
+              id: yield* randomId(),
+              organizationId: connection.organizationId,
+              userId: user.id,
+              role: yield* provisioningRole(connection.organizationId),
+              status: "active",
+              createdAt: yield* Clock.currentTimeMillis,
+            });
 
         return yield* readUserResource({ user, member, domains, managed: true });
       }),
@@ -1685,12 +1697,13 @@ export const make = (
         if (displayName === "") {
           return yield* badRequest("displayName is required", "invalidValue");
         }
-        const renamed = yield* orgs.updateTeam({
+        const foundRenamed = yield* orgs.updateTeam({
           ...team,
           name: displayName,
           updatedAt: yield* Clock.currentTimeMillis,
         });
-        if (renamed === null) return yield* notFound(`Group "${groupId}" not found`);
+        if (Option.isNone(foundRenamed)) return yield* notFound(`Group "${groupId}" not found`);
+        const renamed = foundRenamed.value;
 
         if (input.members !== undefined) {
           yield* replaceTeamMembers(

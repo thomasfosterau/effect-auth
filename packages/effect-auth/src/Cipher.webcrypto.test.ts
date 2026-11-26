@@ -5,6 +5,7 @@
 import * as crypto from "node:crypto";
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Cipher from "./Cipher.ts";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
@@ -39,12 +40,14 @@ describe("aes256GcmSeal / aes256GcmOpen", () => {
     const key = await run(Cipher.sha256("key"));
     const other = await run(Cipher.sha256("other"));
     const sealed = await run(Cipher.aes256GcmSeal(key, "payload"));
-    expect(await run(Cipher.aes256GcmOpen(key, sealed))).toBe("payload");
-    expect(await run(Cipher.aes256GcmOpen(other, sealed))).toBeNull();
+    expect(await run(Cipher.aes256GcmOpen(key, sealed))).toEqual(Option.some("payload"));
+    expect(Option.isNone(await run(Cipher.aes256GcmOpen(other, sealed)))).toBe(true);
     const tampered = Buffer.from(sealed, "base64url");
     tampered[tampered.length - 1] ^= 1;
-    expect(await run(Cipher.aes256GcmOpen(key, tampered.toString("base64url")))).toBeNull();
-    expect(await run(Cipher.aes256GcmOpen(key, "dG9vc2hvcnQ"))).toBeNull();
+    expect(
+      Option.isNone(await run(Cipher.aes256GcmOpen(key, tampered.toString("base64url")))),
+    ).toBe(true);
+    expect(Option.isNone(await run(Cipher.aes256GcmOpen(key, "dG9vc2hvcnQ")))).toBe(true);
   });
 
   it("stores iv || tag || ciphertext, which node:crypto opens", async () => {
@@ -62,7 +65,7 @@ describe("aes256GcmSeal / aes256GcmOpen", () => {
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
     const ct = Buffer.concat([cipher.update("from-node", "utf8"), cipher.final()]);
     const sealed = Buffer.concat([iv, cipher.getAuthTag(), ct]).toString("base64url");
-    expect(await run(Cipher.aes256GcmOpen(key, sealed))).toBe("from-node");
+    expect(await run(Cipher.aes256GcmOpen(key, sealed))).toEqual(Option.some("from-node"));
   });
 });
 

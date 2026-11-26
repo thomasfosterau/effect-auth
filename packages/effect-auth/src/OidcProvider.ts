@@ -107,7 +107,9 @@ export class OidcClientStore extends Context.Service<
   OidcClientStore,
   {
     readonly create: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
-    readonly getByClientId: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
+    readonly getByClientId: (
+      clientId: string,
+    ) => Effect.Effect<Option.Option<OidcClient>, AuthError>;
     readonly update: (client: OidcClient) => Effect.Effect<OidcClient, AuthError>;
     readonly delete: (clientId: string) => Effect.Effect<void, AuthError>;
     readonly list: Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
@@ -144,16 +146,20 @@ export class OidcCodeStore extends Context.Service<
     readonly create: (
       code: OidcAuthorizationCode,
     ) => Effect.Effect<OidcAuthorizationCode, AuthError>;
-    readonly get: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
+    readonly get: (
+      codeHash: string,
+    ) => Effect.Effect<Option.Option<OidcAuthorizationCode>, AuthError>;
     /**
      * Atomically take the record for `codeHash`: delete it and return it, or
-     * return `null` when there is none. Of two concurrent callers
+     * return `None` when there is none. Of two concurrent callers
      * passing the same code, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (codeHash: string) => Effect.Effect<OidcAuthorizationCode | null, AuthError>;
+    readonly consume: (
+      codeHash: string,
+    ) => Effect.Effect<Option.Option<OidcAuthorizationCode>, AuthError>;
     readonly delete: (codeHash: string) => Effect.Effect<void, AuthError>;
   }
 >()("@effect-auth/OidcCodeStore") {}
@@ -194,17 +200,17 @@ export class OidcTokenStore extends Context.Service<
   OidcTokenStore,
   {
     readonly create: (token: OidcToken) => Effect.Effect<OidcToken, AuthError>;
-    readonly get: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
+    readonly get: (tokenHash: string) => Effect.Effect<Option.Option<OidcToken>, AuthError>;
     /**
      * Atomically take the record for `tokenHash`: delete it and return it, or
-     * return `null` when there is none. Refresh rotation spends the presented token with it, so two
+     * return `None` when there is none. Refresh rotation spends the presented token with it, so two
      * concurrent refreshes cannot both rotate one token. Of two concurrent callers
      * passing the same refresh token, at most one receives the record; the other
-     * gets `null`. Must be one indivisible operation (`DELETE … RETURNING`,
+     * gets `None`. Must be one indivisible operation (`DELETE … RETURNING`,
      * Redis `GETDEL`, a conditional delete checked by its affected-row
      * count), never a `get` then a `delete`.
      */
-    readonly consume: (tokenHash: string) => Effect.Effect<OidcToken | null, AuthError>;
+    readonly consume: (tokenHash: string) => Effect.Effect<Option.Option<OidcToken>, AuthError>;
     readonly delete: (tokenHash: string) => Effect.Effect<void, AuthError>;
     /**
      * Delete every access and refresh token issued to `userId`, for every
@@ -244,7 +250,7 @@ export class OidcConsentStore extends Context.Service<
     readonly get: (
       userId: string,
       clientId: string,
-    ) => Effect.Effect<OidcConsent | null, AuthError>;
+    ) => Effect.Effect<Option.Option<OidcConsent>, AuthError>;
     readonly upsert: (consent: OidcConsent) => Effect.Effect<OidcConsent, AuthError>;
     readonly delete: (userId: string, clientId: string) => Effect.Effect<void, AuthError>;
     /**
@@ -608,7 +614,7 @@ export class OidcProviderService extends Context.Service<
     readonly dynamicRegistration: OidcDynamicRegistrationInfo;
 
     /** Look up a client (trusted config clients first, then the store). */
-    readonly getClient: (clientId: string) => Effect.Effect<OidcClient | null, AuthError>;
+    readonly getClient: (clientId: string) => Effect.Effect<Option.Option<OidcClient>, AuthError>;
 
     /** List registered clients (store-backed only). */
     readonly listClients: Effect.Effect<ReadonlyArray<OidcClient>, AuthError>;
@@ -911,7 +917,7 @@ export const make = (
     const getClient = (clientId: string) =>
       Effect.gen(function* () {
         const trusted = HashMap.get(trustedClients, clientId);
-        if (Option.isSome(trusted)) return trusted.value;
+        if (Option.isSome(trusted)) return trusted;
         return yield* clientStore.getByClientId(clientId);
       });
 
@@ -938,17 +944,17 @@ export const make = (
      * claims resolve the user's email identifier; omitted when none exists.
      */
     /**
-     * The user a token is for, or `null` when they are gone or no longer in
+     * The user a token is for, or `None` when they are gone or no longer in
      * good standing (banned, SCIM-deactivated). A user refused for their
      * standing has every OIDC token revoked, so a lapsed ban restores none.
      */
     const activeUser = (userId: string) =>
       Effect.gen(function* () {
         const user = yield* userStore.get(userId);
-        if (user === null) return null;
-        if (yield* isInGoodStanding(user)) return user;
+        if (Option.isNone(user)) return user;
+        if (yield* isInGoodStanding(user.value)) return user;
         yield* tokenStore.deleteByUserId(userId);
-        return null;
+        return Option.none();
       });
 
     /**
@@ -981,14 +987,21 @@ export const make = (
     const revokeIfRotated = (presentedHash: string) =>
       Effect.gen(function* () {
         const rotated = yield* tokenStore.get(yield* rotationRecordKey(presentedHash));
-        if (rotated?.kind === "rotated" && rotated.familyId !== undefined) {
-          yield* revokeFamily(rotated.familyId, rotated);
+        if (
+          Option.isSome(rotated) &&
+          rotated.value.kind === "rotated" &&
+          rotated.value.familyId !== undefined
+        ) {
+          yield* revokeFamily(rotated.value.familyId, rotated.value);
         }
       });
 
     /** Whether `clientId` names a client that may still use its tokens. */
     const clientActive = (clientId: string) =>
-      Effect.map(getClient(clientId), (client) => client !== null && !client.disabled);
+      Effect.map(
+        getClient(clientId),
+        Option.exists((client) => !client.disabled),
+      );
 
     const claimsFor = (
       user: Types.User,
@@ -997,7 +1010,7 @@ export const make = (
       Effect.gen(function* () {
         const email = scopes.includes("email")
           ? anyEmail(yield* identifierStore.listByUser(user.id))
-          : null;
+          : Option.none();
         return {
           sub: user.id,
           ...(scopes.includes("profile") && {
@@ -1005,9 +1018,9 @@ export const make = (
             ...(user.image !== undefined && { picture: user.image }),
             updated_at: Math.floor(user.updatedAt.getTime() / 1000),
           }),
-          ...(email !== null && {
-            email: email.value,
-            email_verified: email.verified,
+          ...(Option.isSome(email) && {
+            email: email.value.value,
+            email_verified: email.value.verified,
           }),
         };
       });
@@ -1029,17 +1042,18 @@ export const make = (
         // Every grant loads the user, whatever its scopes: a user deleted,
         // banned or SCIM-deactivated since the code or refresh token was
         // issued gets no tokens, and a refused user's tokens are revoked.
-        const user = yield* activeUser(grant.userId).pipe(
+        const foundUser = yield* activeUser(grant.userId).pipe(
           Effect.mapError(
             (e) => new OidcTokenError({ error: "invalid_grant", description: e.message }),
           ),
         );
-        if (user === null) {
+        if (Option.isNone(foundUser)) {
           return yield* new OidcTokenError({
             error: "invalid_grant",
             description: "Unknown user",
           });
         }
+        const user = foundUser.value;
         const familyId = grant.familyId ?? (yield* randomToken());
 
         // Mint the id_token FIRST — a signing failure here must not leave
@@ -1115,13 +1129,14 @@ export const make = (
             description: "Missing client_id",
           });
         }
-        const client = yield* getClient(request.clientId);
-        if (client === null || client.disabled) {
+        const foundClient = yield* getClient(request.clientId);
+        if (Option.isNone(foundClient) || foundClient.value.disabled) {
           return yield* new OidcTokenError({
             error: "invalid_client",
             description: "Unknown client",
           });
         }
+        const client = foundClient.value;
         if (client.clientSecretHash !== undefined) {
           if (
             request.clientSecret === undefined ||
@@ -1280,17 +1295,21 @@ export const make = (
      */
     const authenticateRegistrationAccess = (clientId: string, token: string) =>
       Effect.gen(function* () {
-        const client = yield* clientStore.getByClientId(clientId);
+        const foundClient = yield* clientStore.getByClientId(clientId);
         if (
-          client === null ||
-          client.registrationAccessTokenHash === undefined ||
-          !(yield* secretEquals(yield* hashSecret(token), client.registrationAccessTokenHash))
+          Option.isNone(foundClient) ||
+          foundClient.value.registrationAccessTokenHash === undefined ||
+          !(yield* secretEquals(
+            yield* hashSecret(token),
+            foundClient.value.registrationAccessTokenHash,
+          ))
         ) {
           return yield* new OidcRegistrationError({
             error: "invalid_token",
             description: "Invalid registration access token",
           });
         }
+        const client = foundClient.value;
         return client;
       });
 
@@ -1466,10 +1485,11 @@ export const make = (
             message: "Trusted clients are configured statically and cannot be updated",
           });
         }
-        const existing = yield* clientStore.getByClientId(clientId);
-        if (existing === null) {
+        const foundExisting = yield* clientStore.getByClientId(clientId);
+        if (Option.isNone(foundExisting)) {
           return yield* new OidcProviderError({ message: "Client not found" });
         }
+        const existing = foundExisting.value;
         return yield* clientStore.update({
           ...existing,
           ...(input.name !== undefined && { name: input.name }),
@@ -1482,8 +1502,7 @@ export const make = (
       }),
 
       deleteClient: Effect.fn("OidcProviderService.deleteClient")(function* (clientId: string) {
-        const existing = yield* clientStore.getByClientId(clientId);
-        if (existing === null) {
+        if (Option.isNone(yield* clientStore.getByClientId(clientId))) {
           return yield* new OidcProviderError({ message: "Client not found" });
         }
         yield* clientStore.delete(clientId);
@@ -1495,10 +1514,11 @@ export const make = (
         (user: Types.User, request: OidcAuthorizeRequest) =>
           Effect.gen(function* () {
             // Unknown client / unregistered redirect_uri: NEVER redirect (RFC 6749 §4.1.2.1).
-            const client = yield* getClient(request.clientId);
-            if (client === null || client.disabled) {
+            const foundClient = yield* getClient(request.clientId);
+            if (Option.isNone(foundClient) || foundClient.value.disabled) {
               return yield* new OidcProviderError({ message: "Unknown client" });
             }
+            const client = foundClient.value;
             if (!client.redirectUris.includes(request.redirectUri)) {
               return yield* new OidcProviderError({ message: "Unregistered redirect_uri" });
             }
@@ -1563,7 +1583,11 @@ export const make = (
             let consentNeeded = !client.skipConsent;
             if (consentNeeded && request.prompt !== "consent") {
               const existing = yield* consentStore.get(user.id, client.clientId);
-              if (existing !== null && scopes.every((s) => existing.scopes.includes(s))) {
+              if (
+                Option.exists(existing, (consent) =>
+                  scopes.every((s) => consent.scopes.includes(s)),
+                )
+              ) {
                 consentNeeded = false;
               }
             }
@@ -1606,20 +1630,21 @@ export const make = (
       consent: Effect.fn("OidcProviderService.consent")(
         (userId: string, consentCode: string, accept: boolean) =>
           Effect.gen(function* () {
-            const pending = yield* codeStore.get(yield* hashSecret(consentCode));
+            const foundPending = yield* codeStore.get(yield* hashSecret(consentCode));
             if (
-              pending === null ||
-              pending.kind !== "pending_consent" ||
-              pending.userId !== userId ||
-              (yield* Clock.currentTimeMillis) > pending.expiresAt
+              Option.isNone(foundPending) ||
+              foundPending.value.kind !== "pending_consent" ||
+              foundPending.value.userId !== userId ||
+              (yield* Clock.currentTimeMillis) > foundPending.value.expiresAt
             ) {
               return yield* new OidcProviderError({
                 message: "Consent request not found or expired",
               });
             }
+            const pending = foundPending.value;
             // Spend the consent request atomically: of concurrent
             // answers to one request, only one proceeds.
-            if ((yield* codeStore.consume(pending.codeHash)) === null) {
+            if (Option.isNone(yield* codeStore.consume(pending.codeHash))) {
               return yield* new OidcProviderError({
                 message: "Consent request not found or expired",
               });
@@ -1640,8 +1665,11 @@ export const make = (
               userId,
               clientId: pending.clientId,
               // Accumulate scopes across grants so consent is asked once per scope.
-              scopes: Arr.dedupe([...(existing?.scopes ?? []), ...pending.scopes]),
-              createdAt: existing?.createdAt ?? now,
+              scopes: Arr.dedupe([
+                ...Option.match(existing, { onNone: () => [], onSome: (c) => c.scopes }),
+                ...pending.scopes,
+              ]),
+              createdAt: Option.match(existing, { onNone: () => now, onSome: (c) => c.createdAt }),
               updatedAt: now,
             });
 
@@ -1683,19 +1711,20 @@ export const make = (
                 description: "Missing code",
               });
             }
-            const record = yield* codeStore.get(yield* hashSecret(request.code));
+            const foundRecord = yield* codeStore.get(yield* hashSecret(request.code));
             if (
-              record === null ||
-              record.kind !== "authorization_code" ||
-              record.clientId !== client.clientId
+              Option.isNone(foundRecord) ||
+              foundRecord.value.kind !== "authorization_code" ||
+              foundRecord.value.clientId !== client.clientId
             ) {
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
+            const record = foundRecord.value;
             // Single use: burn the code before any further checks so a replay
             // (even with corrected parameters) always fails. `consume` is
             // atomic, so of concurrent redemptions of one code only one
             // gets past here (RFC 6749 §4.1.2).
-            if ((yield* codeStore.consume(record.codeHash)) === null) {
+            if (Option.isNone(yield* codeStore.consume(record.codeHash))) {
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
             if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
@@ -1748,12 +1777,13 @@ export const make = (
             }
 
             const presentedHash = yield* hashSecret(request.refreshToken);
-            const record = yield* tokenStore.get(presentedHash);
+            const foundRecord = yield* tokenStore.get(presentedHash);
 
-            if (record === null) {
+            if (Option.isNone(foundRecord)) {
               yield* revokeIfRotated(presentedHash);
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
+            const record = foundRecord.value;
             if (record.kind !== "refresh" || record.clientId !== client.clientId) {
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
@@ -1778,14 +1808,14 @@ export const make = (
               absoluteExpiresAt,
             });
 
-            // Rotation: burn the presented token, atomically. A `null` means a
+            // Rotation: burn the presented token, atomically. A `None` means a
             // concurrent refresh spent it first. That is reuse as surely as a
             // later replay (timing must not decide whether a stolen token's
             // family survives), so the family goes. A client that
             // double-submits a refresh (a retry, two tabs) is signed out by
             // this, by design. The winner's own tokens go too (`revokeFamily`),
             // though the winner may already have answered with them.
-            if ((yield* tokenStore.consume(record.tokenHash)) === null) {
+            if (Option.isNone(yield* tokenStore.consume(record.tokenHash))) {
               yield* revokeFamily(familyId, record);
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
@@ -1820,7 +1850,7 @@ export const make = (
             });
             // A concurrent refresh with the same token lost the race and
             // revoked the family; these tokens belong to it too.
-            if ((yield* tokenStore.get(yield* revokedFamilyKey(familyId))) !== null) {
+            if (Option.isSome(yield* tokenStore.get(yield* revokedFamilyKey(familyId)))) {
               yield* tokenStore.deleteByFamily(familyId);
               return yield* new OidcTokenError({ error: "invalid_grant" });
             }
@@ -1837,23 +1867,24 @@ export const make = (
 
       userinfo: Effect.fn("OidcProviderService.userinfo")((accessToken: string) =>
         Effect.gen(function* () {
-          const record = yield* tokenStore.get(yield* hashSecret(accessToken));
+          const foundRecord = yield* tokenStore.get(yield* hashSecret(accessToken));
           if (
-            record === null ||
-            record.kind !== "access" ||
-            (yield* Clock.currentTimeMillis) > record.expiresAt
+            Option.isNone(foundRecord) ||
+            foundRecord.value.kind !== "access" ||
+            (yield* Clock.currentTimeMillis) > foundRecord.value.expiresAt
           ) {
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
+          const record = foundRecord.value;
           // A disabled or deleted client's tokens, and a user's who is gone,
           // banned or deactivated, answer as an invalid token.
           const user = (yield* clientActive(record.clientId))
             ? yield* activeUser(record.userId)
-            : null;
-          if (user === null) {
+            : Option.none();
+          if (Option.isNone(user)) {
             return yield* new OidcProviderError({ message: "Invalid or expired access token" });
           }
-          return yield* claimsFor(user, record.scopes);
+          return yield* claimsFor(user.value, record.scopes);
         }).pipe(Effect.withSpan(Obs.spanNames.oidcUserinfo)),
       ),
 

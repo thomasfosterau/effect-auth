@@ -58,7 +58,7 @@ export class AccountManagementStore extends Context.Service<
   AccountManagementStore,
   {
     readonly create: (token: AccountToken) => Effect.Effect<AccountToken, Errors.AuthError>;
-    readonly get: (token: string) => Effect.Effect<AccountToken | null, Errors.AuthError>;
+    readonly get: (token: string) => Effect.Effect<Option.Option<AccountToken>, Errors.AuthError>;
     readonly delete: (token: string) => Effect.Effect<void, Errors.AuthError>;
     readonly deleteByUserId: (userId: string) => Effect.Effect<void, Errors.AuthError>;
   }
@@ -85,12 +85,12 @@ export interface AccountManagementConfig {
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
    * Deliver the account-deletion confirmation token to the user's address.
-   * `email` is the user's resolved email identifier value, or `null` when the
+   * `email` is the user's resolved email identifier value, or `None` when the
    * user has no email on file (deliver via another channel or fail).
    */
   readonly sendDeleteAccountVerification: (params: {
     readonly user: Types.User;
-    readonly email: string | null;
+    readonly email: Option.Option<string>;
     readonly token: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -119,7 +119,8 @@ export interface AccountManagementConfig {
    */
   readonly notifyEmailChanged?: (params: {
     readonly user: Types.User;
-    readonly oldEmail: string | null;
+    /** The address the account held before the change, `None` when it held none. */
+    readonly oldEmail: Option.Option<string>;
     readonly newEmail: string;
   }) => Effect.Effect<void, Errors.AuthError>;
   /**
@@ -314,9 +315,10 @@ const make = (
       userId: string,
       proof: EmailChangeReauthentication,
     ) {
-      const passwordHash =
-        passwords === undefined ? null : yield* passwords.getPasswordHash(userId);
-      if (passwordHash !== null) {
+      const storedHash =
+        passwords === undefined ? Option.none() : yield* passwords.getPasswordHash(userId);
+      if (Option.isSome(storedHash)) {
+        const passwordHash = storedHash.value;
         if (proof.currentPassword === undefined) {
           return yield* new Errors.ReauthenticationRequiredError({
             message: "Enter your current password to change your email address",
@@ -353,23 +355,24 @@ const make = (
         rawNewEmail: string,
         proof: EmailChangeReauthentication,
       ) {
-        const user = yield* users.get(userId);
-        if (user === null) {
+        const foundUser = yield* users.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
         yield* reauthenticate(userId, proof);
         const newEmail = normalizeEmail(rawNewEmail);
 
         // Tell the current address before anything else, so an attempt is
         // reported whether or not the new address turns out to be free.
         const oldEmail = anyEmailValue(yield* identifiers.listByUser(userId));
-        if (oldEmail !== null && oldEmail !== newEmail) {
-          yield* config.sendEmailChangeNotice({ user, oldEmail, newEmail });
+        if (Option.isSome(oldEmail) && oldEmail.value !== newEmail) {
+          yield* config.sendEmailChangeNotice({ user, oldEmail: oldEmail.value, newEmail });
         }
 
         // Uniqueness: reject if another account already owns the address.
         const existing = yield* lookupIdentifier(identifiers, "email", newEmail);
-        if (existing !== null && existing.userId !== userId) {
+        if (Option.exists(existing, (held) => held.userId !== userId)) {
           return yield* new Errors.EmailInUseError({
             message: "Email already in use",
             email: newEmail,
@@ -395,8 +398,13 @@ const make = (
       confirmEmailChange: Effect.fn("AccountManagementService.confirmEmailChange")(function* (
         token: string,
       ) {
-        const record = yield* store.get(token);
-        if (record === null || record.purpose !== "change-email" || record.newEmail === undefined) {
+        const foundRecord = yield* store.get(token);
+        if (Option.isNone(foundRecord) || foundRecord.value.purpose !== "change-email") {
+          return yield* new AccountTokenError({ message: "Invalid or expired token" });
+        }
+        const record = foundRecord.value;
+        const newEmail = record.newEmail;
+        if (newEmail === undefined) {
           return yield* new AccountTokenError({ message: "Invalid or expired token" });
         }
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
@@ -404,22 +412,22 @@ const make = (
           return yield* new AccountTokenError({ message: "Token has expired" });
         }
 
-        const user = yield* users.get(record.userId);
-        if (user === null) {
+        const foundUser = yield* users.get(record.userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({
             message: "User not found",
             userId: record.userId,
           });
         }
+        const user = foundUser.value;
         const currentIdentifiers = yield* identifiers.listByUser(user.id);
         const current = anyEmail(currentIdentifiers);
-        const oldEmail = current?.value ?? null;
-        const newEmail = record.newEmail;
+        const oldEmail = Option.map(current, (identifier) => identifier.value);
 
         // Re-check uniqueness at confirm time (the address may have been
         // taken between request and confirm).
         const clash = yield* lookupIdentifier(identifiers, "email", newEmail);
-        if (clash !== null && clash.userId !== user.id) {
+        if (Option.exists(clash, (held) => held.userId !== user.id)) {
           yield* store.delete(token);
           return yield* new AccountTokenError({ message: "Email already in use" });
         }
@@ -429,11 +437,11 @@ const make = (
         // it releases the previous one, or does both at once. A failed claim,
         // whether another account took the address meanwhile or the store
         // failed, leaves the user's previous address in place and verified.
-        let replaced: string | null = null;
+        let replaced: Option.Option<string> = Option.none();
         let held = currentIdentifiers;
         // The identifier holding the confirmed address once this user has it.
         let confirmed: Identifier;
-        if (clash === null) {
+        if (Option.isNone(clash)) {
           const verifiedAt = yield* DateTime.nowAsDate;
           const next = makeIdentifier({
             userId: user.id,
@@ -444,13 +452,13 @@ const make = (
             now: verifiedAt,
           });
           const outcome = yield* (
-            current === null
+            Option.isNone(current)
               ? claimIdentifier(identifiers, next).pipe(
                   Effect.catchTag("IdentifierRefusedError", (error) =>
                     Effect.fail(refusalAuthError(error)),
                   ),
                 )
-              : replaceIdentifier(identifiers, current, next)
+              : replaceIdentifier(identifiers, current.value, next)
           ).pipe(
             Effect.map((identifier) => ({ identifier, converged: null })),
             Effect.catchTags({
@@ -459,12 +467,11 @@ const make = (
               // for this user first: finish that change as this request's own.
               IdentifierTakenError: () =>
                 Effect.gen(function* () {
-                  const found =
-                    current === null
-                      ? yield* lookupIdentifier(identifiers, "email", newEmail)
-                      : null;
-                  if (found !== null && found.userId === user.id) {
-                    return { identifier: found, converged: currentIdentifiers };
+                  const found = Option.isNone(current)
+                    ? yield* lookupIdentifier(identifiers, "email", newEmail)
+                    : Option.none();
+                  if (Option.isSome(found) && found.value.userId === user.id) {
+                    return { identifier: found.value, converged: currentIdentifiers };
                   }
                   return yield* new AccountTokenError({ message: "Email already in use" });
                 }),
@@ -484,11 +491,12 @@ const make = (
                 }),
             }),
           );
-          if (outcome.converged === null) replaced = current?.id ?? null;
+          if (outcome.converged === null)
+            replaced = Option.map(current, (identifier) => identifier.id);
           else held = outcome.converged;
           confirmed = outcome.identifier;
         } else {
-          confirmed = clash;
+          confirmed = clash.value;
         }
 
         // The token proves ownership, so the confirmed address ends verified,
@@ -498,7 +506,7 @@ const make = (
         // keep the token, so the user can confirm again.
         if (!confirmed.verified) {
           const verified = yield* identifiers.setVerified(confirmed.id, yield* DateTime.nowAsDate);
-          if (verified === null) {
+          if (Option.isNone(verified)) {
             return yield* new AccountTokenError({
               message: "The account's email changed during the confirmation; try again",
             });
@@ -513,7 +521,8 @@ const make = (
         yield* Effect.forEach(
           Arr.filter(
             held,
-            (id) => id.type === "email" && id.value !== newEmail && id.id !== replaced,
+            (id) =>
+              id.type === "email" && id.value !== newEmail && !Option.contains(replaced, id.id),
           ),
           (id) => identifiers.delete(id.id),
           { concurrency: 1, discard: true },
@@ -540,10 +549,11 @@ const make = (
 
       requestAccountDeletion: Effect.fn("AccountManagementService.requestAccountDeletion")(
         function* (userId: string) {
-          const user = yield* users.get(userId);
-          if (user === null) {
+          const foundUser = yield* users.get(userId);
+          if (Option.isNone(foundUser)) {
             return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
           }
+          const user = foundUser.value;
 
           const token = yield* generateToken();
           const now = yield* Clock.currentTimeMillis;
@@ -564,22 +574,24 @@ const make = (
 
       confirmAccountDeletion: Effect.fn("AccountManagementService.confirmAccountDeletion")(
         function* (token: string) {
-          const record = yield* store.get(token);
-          if (record === null || record.purpose !== "delete-account") {
+          const foundRecord = yield* store.get(token);
+          if (Option.isNone(foundRecord) || foundRecord.value.purpose !== "delete-account") {
             return yield* new AccountTokenError({ message: "Invalid or expired token" });
           }
+          const record = foundRecord.value;
           if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
             yield* store.delete(token);
             return yield* new AccountTokenError({ message: "Token has expired" });
           }
 
-          const user = yield* users.get(record.userId);
-          if (user === null) {
+          const foundUser = yield* users.get(record.userId);
+          if (Option.isNone(foundUser)) {
             return yield* new Errors.UserNotFoundError({
               message: "User not found",
               userId: record.userId,
             });
           }
+          const user = foundUser.value;
 
           // App-data cleanup while the user still exists (a failure aborts).
           if (config.beforeDelete !== undefined) {
@@ -609,7 +621,7 @@ const make = (
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect, Layer } from "effect"
+ * import { Effect, Layer, Option } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
@@ -619,7 +631,7 @@ const make = (
  *   yield* (yield* Auth.UserServiceStore).update(ada)
  *   const { key } = yield* (yield* Auth.ApiKeyService).create(ada.id)
  *   yield* (yield* Auth.UserService).deleteUser(ada.id)
- *   assert.equal(yield* (yield* Auth.UserServiceStore).get(ada.id), null)
+ *   assert.ok(Option.isNone(yield* (yield* Auth.UserServiceStore).get(ada.id)))
  *   assert.deepEqual(yield* (yield* Auth.ApiKeyStore).listByUserId(ada.id), [])
  *   assert.equal((yield* (yield* Auth.ApiKeyService).verify(key)).valid, false)
  * })

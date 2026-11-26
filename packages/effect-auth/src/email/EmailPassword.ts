@@ -83,7 +83,9 @@ export class EmailPasswordStore extends Context.Service<
      */
     readonly newUserId?: (() => Effect.Effect<string, Errors.AuthError>) | undefined;
 
-    readonly getPasswordHash: (userId: string) => Effect.Effect<string | null, Errors.AuthError>;
+    readonly getPasswordHash: (
+      userId: string,
+    ) => Effect.Effect<Option.Option<string>, Errors.AuthError>;
 
     readonly setPasswordHash: (
       userId: string,
@@ -91,7 +93,7 @@ export class EmailPasswordStore extends Context.Service<
     ) => Effect.Effect<void, Errors.AuthError>;
 
     /**
-     * Remove the user's password, so `getPasswordHash` returns `null` and the
+     * Remove the user's password, so `getPasswordHash` returns `None` and the
      * account has no password to sign in with. A no-op when it has none.
      * `AuthLifecycleService.verifyEmail` calls it through
      * {@link EmailPasswordService.clearPassword} on an address's first
@@ -397,9 +399,9 @@ export const answeredByStandIn = (
       "email",
       result.identifier?.value ?? normalizeEmail(email),
     );
-    return holder !== null
-      ? holder.userId !== result.user.id
-      : (yield* users.get(result.user.id)) === null;
+    return Option.isSome(holder)
+      ? holder.value.userId !== result.user.id
+      : Option.isNone(yield* users.get(result.user.id));
   });
 
 /** Input to {@link EmailPasswordService.changePassword}. */
@@ -635,7 +637,7 @@ export const make = (
           });
 
           const taken = yield* lookupIdentifier(identifiers, "email", email);
-          if (taken) return yield* addressTaken(input, email);
+          if (Option.isSome(taken)) return yield* addressTaken(input, email);
 
           // The identifier's unique (type, value) index is the real claim; a
           // lost race, or a store reporting `created: false`, gets the same
@@ -724,14 +726,15 @@ export const make = (
             "email",
             email,
           );
-          const user = resolvedUser?.user ?? null;
           yield* hooks.beforeAuthenticate({
             method: "email-password",
             identifier: { type: "email", value: email },
-            userId: user?.id,
+            userId: Option.getOrUndefined(Option.map(resolvedUser, (found) => found.user.id)),
             captchaToken: input.captchaToken,
           });
-          const passwordHash = user !== null ? yield* store.getPasswordHash(user.id) : null;
+          const passwordHash = Option.isSome(resolvedUser)
+            ? yield* store.getPasswordHash(resolvedUser.value.user.id)
+            : Option.none<string>();
           // Always verify against a real or decoy hash so timing is constant
           // regardless of whether the account exists.
           const isValid = yield* verifyPasswordOrDecoy(
@@ -740,32 +743,32 @@ export const make = (
             passwordHash,
             getDecoyHash,
           );
-          // `user` is null exactly when `resolvedUser` is; checking both narrows both.
-          if (resolvedUser === null || user === null || passwordHash === null || !isValid) {
+          if (Option.isNone(resolvedUser) || Option.isNone(passwordHash) || !isValid) {
             return yield* new Errors.InvalidCredentialsError({
               message: "Invalid email or password",
             });
           }
+          const { user, identifier: signInIdentifier } = resolvedUser.value;
 
           // Silently upgrade the stored hash when the current hasher considers
           // it outdated (e.g. iteration count raised, algorithm switched).  A
           // failure here must never abort sign-in — the user is already
           // authenticated at this point.
-          if (passwordHasher.needsRehash?.(passwordHash)) {
+          if (passwordHasher.needsRehash?.(passwordHash.value)) {
             yield* passwordHasher.hash(input.password).pipe(
               Effect.flatMap((newHash) => store.setPasswordHash(user.id, newHash.hash)),
               Effect.ignore,
             );
           }
 
-          if (resolved.requireEmailVerification && !resolvedUser.identifier.verified) {
+          if (resolved.requireEmailVerification && !signInIdentifier.verified) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
               email,
             });
           }
 
-          const handle = { type: "email" as const, value: resolvedUser.identifier.value };
+          const handle = { type: "email" as const, value: signInIdentifier.value };
 
           // Second factor: when a gate is present and required for this user,
           // return a challenge instead of a session.
@@ -821,12 +824,13 @@ export const make = (
           maxPasswordLength: resolved.maxPasswordLength,
         });
 
-        const currentHash = yield* store.getPasswordHash(input.userId);
-        if (!currentHash) {
+        const foundCurrentHash = yield* store.getPasswordHash(input.userId);
+        if (Option.isNone(foundCurrentHash)) {
           return yield* new Errors.InvalidCredentialsError({
             message: "Invalid password",
           });
         }
+        const currentHash = foundCurrentHash.value;
 
         const isValid = yield* verifyStoredPassword(input.currentPassword, currentHash);
         if (!isValid) {
@@ -865,7 +869,7 @@ export const make = (
         rawNewPassword: string,
       ) {
         const currentHash = yield* store.getPasswordHash(userId);
-        if (currentHash) {
+        if (Option.isSome(currentHash)) {
           return yield* new Errors.PasswordAlreadySetError({
             message: "User already has a password; use changePassword instead",
           });

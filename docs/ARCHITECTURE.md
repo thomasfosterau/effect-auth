@@ -246,7 +246,7 @@ tier.
 
 Users persist state by implementing plain store interfaces (DESIGN.md D3):
 
-- Stores are **dumb persistence**: lookups return `X | null` when a row may legitimately be absent; services convert misses into typed domain errors.
+- Stores are **dumb persistence**: lookups return `Option<X>` when a row may legitimately be absent; services convert misses into typed domain errors.
 - The store error channel is `AuthError` (infrastructure failure only).
 - Vocabulary: `create`, `get`, `getBy<Key>`, `list()`/`listBy<Key>` (arrays), `update`, `upsert`, `delete`, `deleteBy<Key>`.
 

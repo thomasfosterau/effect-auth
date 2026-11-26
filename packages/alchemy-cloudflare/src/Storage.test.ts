@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { Clock, DateTime, Effect, Layer, Order } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -83,10 +84,10 @@ describe("D1-backed effect-auth storage", () => {
       }),
     );
     expect(result.user.attributes).toEqual({ plan: "pro" });
-    expect(result.loaded?.userId).toBe(result.user.id);
-    expect(result.loaded?.attributes).toEqual({ device: "laptop" });
-    expect(result.loaded?.expiresAt).toBeInstanceOf(Date);
-    expect(result.deleted).toBeNull();
+    expect(Option.getOrUndefined(result.loaded)?.userId).toBe(result.user.id);
+    expect(Option.getOrUndefined(result.loaded)?.attributes).toEqual({ device: "laptop" });
+    expect(Option.getOrUndefined(result.loaded)?.expiresAt).toBeInstanceOf(Date);
+    expect(Option.isNone(result.deleted)).toBe(true);
   });
 
   it("runs the atomic single-statement upserts (ON CONFLICT / RETURNING)", async () => {
@@ -102,7 +103,7 @@ describe("D1-backed effect-auth storage", () => {
     );
     expect(result.first).toBe(1);
     expect(result.second).toBe(2);
-    expect(result.deleted).toBeNull();
+    expect(Option.isNone(result.deleted)).toBe(true);
   });
 
   it("purges expired magic links and email OTPs through the binding", async () => {
@@ -183,13 +184,15 @@ describe("D1-backed effect-auth storage", () => {
         return { challenge, state, replayed, attempts };
       }),
     );
-    expect(Array.from(result.challenge?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
-    expect(result.challenge?.ceremony).toBe("authentication");
-    expect(result.challenge?.userId).toBeUndefined();
-    expect(result.state?.codeVerifier).toBe("cv");
+    expect(Array.from(Option.getOrUndefined(result.challenge)?.challenge ?? [])).toEqual([
+      0, 1, 2, 250, 255,
+    ]);
+    expect(Option.getOrUndefined(result.challenge)?.ceremony).toBe("authentication");
+    expect(Option.getOrUndefined(result.challenge)?.userId).toBeUndefined();
+    expect(Option.getOrUndefined(result.state)?.codeVerifier).toBe("cv");
     // `consume` is one `DELETE … RETURNING`: the state is handed out once.
-    expect(result.replayed).toBeNull();
-    expect(result.attempts).toBe(1);
+    expect(Option.isNone(result.replayed)).toBe(true);
+    expect(result.attempts).toEqual(Option.some(1));
   });
 
   /**
@@ -268,7 +271,7 @@ describe("D1-backed effect-auth storage", () => {
     expect(result.listed.map((identifier) => [identifier.value, identifier.verified])).toEqual([
       ["ada-new@example.com", true],
     ]);
-    expect(result.grace?.userId).toBe("user-2");
+    expect(Option.getOrUndefined(result.grace)?.userId).toBe("user-2");
   });
 
   /**
@@ -306,10 +309,12 @@ describe("D1-backed effect-auth storage", () => {
         return { outcomes, listed: yield* identifiers.listByUser("user-1") };
       }),
     );
-    const won = result.outcomes.filter((outcome) => outcome !== null);
+    const won = result.outcomes.filter((outcome) => Option.isSome(outcome));
     const [winner] = won;
-    assert(won.length === 1 && winner !== undefined, "exactly one replace wins");
-    expect(result.listed.map((identifier) => identifier.value)).toEqual([winner.value]);
+    assert(won.length === 1 && Option.isSome(winner), "exactly one replace wins");
+    expect(result.listed.map((identifier) => identifier.value)).toEqual([
+      Option.getOrUndefined(winner)?.value,
+    ]);
   });
 
   it("keeps epoch-millisecond timestamps intact through BIGINT columns", async () => {
@@ -329,7 +334,7 @@ describe("D1-backed effect-auth storage", () => {
         return yield* sessions.get("sess-bigint");
       }),
     );
-    expect(loaded?.expiresAt.getTime()).toBe(farFuture);
+    expect(Option.getOrUndefined(loaded)?.expiresAt.getTime()).toBe(farFuture);
   });
 });
 

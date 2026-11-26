@@ -19,7 +19,7 @@ const identifierRecords = MutableHashMap.empty<string, Identifier>();
 const identifiers = memoryIdentifierStore(identifierRecords);
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 
   update: (user: UserRecord) =>
     Effect.sync(() => {
@@ -92,9 +92,9 @@ describe("UserService", () => {
       ),
     );
 
-    assert(result !== null, "the identifier resolves to its user");
-    expect(result.user.id).toBe("user-1");
-    expect(result.identifier.value).toBe("user@example.com");
+    assert(Option.isSome(result), "the identifier resolves to its user");
+    expect(Option.getOrUndefined(result)?.user.id).toBe("user-1");
+    expect(Option.getOrUndefined(result)?.identifier.value).toBe("user@example.com");
   });
 
   it("should merge attributes when updating user", async () => {
@@ -194,16 +194,16 @@ describe("UserService", () => {
         Effect.gen(function* () {
           const store = yield* IdentifierStore;
           const identifier = yield* store.getByValue("email", "user@example.com");
-          assert(identifier !== null, "the email identifier exists");
-          yield* store.setVerified(identifier.id, yield* DateTime.nowAsDate);
+          assert(Option.isSome(identifier), "the email identifier exists");
+          yield* store.setVerified(identifier.value.id, yield* DateTime.nowAsDate);
           return yield* store.getByValue("email", "user@example.com");
         }),
         Context.make(IdentifierStore, identifiers),
       ),
     );
 
-    expect(result?.verified).toBe(true);
-    expect(result?.verifiedAt).toBeInstanceOf(Date);
+    expect(Option.getOrUndefined(result)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result)?.verifiedAt).toBeInstanceOf(Date);
   });
 
   it("deleteUser deletes the account through AccountDeletion", async () => {

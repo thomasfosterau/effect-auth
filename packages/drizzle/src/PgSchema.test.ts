@@ -8,6 +8,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { getTableName } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -186,9 +187,9 @@ describe("Schema", () => {
       "app_tokens",
       "app_users",
     ]);
-    expect(result.session?.attributes).toEqual({ via: "custom" });
-    expect(result.user?.id).toBe("user-1");
-    expect(result.identifier?.id).toBe("identifier-1");
+    expect(Option.getOrUndefined(result.session)?.attributes).toEqual({ via: "custom" });
+    expect(Option.getOrUndefined(result.user)?.id).toBe("user-1");
+    expect(Option.getOrUndefined(result.identifier)?.id).toBe("identifier-1");
   });
 
   it("emits DDL matching the requested table names", () => {

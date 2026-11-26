@@ -22,6 +22,7 @@
  */
 
 import { Context, Effect, Layer, RequestResolver } from "effect";
+import * as Option from "effect/Option";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import type { SchemaInput } from "./Columns.ts";
 import type { DrizzleDatabase } from "./Database.ts";
@@ -76,23 +77,23 @@ export const layer = (
 
 /**
  * Read a session by id (the SHA-256 hash of the bearer token), batched with
- * every other concurrent session read. `null` on a miss.
+ * every other concurrent session read. `None` on a miss.
  */
 export const getSession = (
   id: string,
-): Effect.Effect<Auth.Session | null, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.Session>, Auth.AuthError, AuthRequests> =>
   Effect.request<SessionStore.GetSession, never, AuthRequests>(
     new SessionStore.GetSession({ id }),
     Effect.map(AuthRequests, (requests) => requests.session),
   );
 
 /**
- * Read a user by id, batched with every other concurrent user read. `null` on
+ * Read a user by id, batched with every other concurrent user read. `None` on
  * a miss.
  */
 export const getUser = (
   id: string,
-): Effect.Effect<Auth.User | null, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.User>, Auth.AuthError, AuthRequests> =>
   Effect.request<UserStore.GetUser, never, AuthRequests>(
     new UserStore.GetUser({ id }),
     Effect.map(AuthRequests, (requests) => requests.user),
@@ -100,12 +101,12 @@ export const getUser = (
 
 /**
  * Resolve an identifier by its `(type, value)` pair, batched with every other
- * concurrent pair lookup. `null` on a miss.
+ * concurrent pair lookup. `None` on a miss.
  */
 export const getIdentifierByValue = (
   type: Auth.IdentifierType,
   value: string,
-): Effect.Effect<Auth.Identifier | null, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.Identifier>, Auth.AuthError, AuthRequests> =>
   Effect.request<IdentifierStore.GetIdentifierByValue, never, AuthRequests>(
     new IdentifierStore.GetIdentifierByValue({ type, value }),
     Effect.map(AuthRequests, (requests) => requests.identifierByValue),

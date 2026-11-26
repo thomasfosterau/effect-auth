@@ -39,8 +39,7 @@ const makeFixture = () => {
         MutableHashMap.set(usersById, user.id, user);
         return { user, created: true };
       }),
-    getPasswordHash: (userId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+    getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
     clearPasswordHash: (userId: string) =>
       Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
     setPasswordHash: (userId, hash) =>
@@ -48,8 +47,7 @@ const makeFixture = () => {
   };
   const sessionStore: typeof SessionStore.Service = {
     create: (s) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
-    get: (sessionId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+    get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
     update: (s) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),
@@ -58,7 +56,7 @@ const makeFixture = () => {
     listByUserId: () => Effect.succeed([]),
   };
   const userStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
 
   const stores = Layer.mergeAll(

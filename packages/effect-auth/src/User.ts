@@ -1,7 +1,6 @@
 import { Context, DateTime, Effect, HashSet, Layer } from "effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import { AccountDeletion } from "./AccountDeletion.ts";
 import * as Errors from "./Errors.ts";
@@ -12,7 +11,7 @@ export class UserServiceStore extends Context.Service<
   UserServiceStore,
   {
     /** Get a user by ID, or `null` when no such user exists. */
-    readonly get: (userId: string) => Effect.Effect<Types.User | null, Errors.AuthError>;
+    readonly get: (userId: string) => Effect.Effect<Option.Option<Types.User>, Errors.AuthError>;
 
     readonly update: (user: Types.User) => Effect.Effect<Types.User, Errors.AuthError>;
 
@@ -197,10 +196,13 @@ const getUserOrFail = (
   store: typeof UserServiceStore.Service,
   userId: string,
 ): Effect.Effect<Types.User, Errors.AuthError | Errors.UserNotFoundError> =>
-  Effect.filterOrFail(
+  Effect.flatMap(
     store.get(userId),
-    P.isNotNull,
-    () => new Errors.UserNotFoundError({ message: "User not found", userId }),
+    Option.match({
+      onNone: () =>
+        Effect.fail(new Errors.UserNotFoundError({ message: "User not found", userId })),
+      onSome: Effect.succeed,
+    }),
   );
 
 export const make = (

@@ -60,12 +60,12 @@ import { UserServiceStore } from "../User.ts";
 import { type CreateUserResult, UserStore } from "../UserStore.ts";
 
 /**
- * Remove `key` from `map` and return what it held, or `null`: a single-use
+ * Remove `key` from `map` and return what it held, if anything: a single-use
  * store's `consume`, atomic because it runs in one synchronous step.
  */
-const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): A | null => {
-  const found = Option.getOrNull(MutableHashMap.get(map, key));
-  if (found !== null) MutableHashMap.remove(map, key);
+const take = <A>(map: MutableHashMap.MutableHashMap<string, A>, key: string): Option.Option<A> => {
+  const found = MutableHashMap.get(map, key);
+  if (Option.isSome(found)) MutableHashMap.remove(map, key);
   return found;
 };
 
@@ -132,7 +132,7 @@ const insertUser = (
 export const memoryUserStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof UserStore.Service => ({
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.users, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(table.users, userId)),
 });
 
 /**
@@ -146,7 +146,7 @@ export const memoryUserStore = (
 export const memoryUserServiceStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof UserServiceStore.Service => ({
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.users, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(table.users, userId)),
   update: (user) => Effect.sync(() => (MutableHashMap.set(table.users, user.id, user), user)),
   delete: (userId) =>
     Effect.sync(() => {
@@ -167,8 +167,7 @@ export const memoryEmailPasswordStore = (
   table: MemoryUserTable = memoryUserTable(),
 ): typeof EmailPasswordStore.Service => ({
   createUser: (input) => Effect.map(DateTime.nowAsDate, (now) => insertUser(table, input, now)),
-  getPasswordHash: (userId) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(table.passwordHashes, userId))),
+  getPasswordHash: (userId) => Effect.sync(() => MutableHashMap.get(table.passwordHashes, userId)),
   setPasswordHash: (userId, hash) =>
     Effect.sync(() => void MutableHashMap.set(table.passwordHashes, userId, hash)),
   clearPasswordHash: (userId) =>
@@ -224,7 +223,7 @@ export const memorySessionStore = (
 ): typeof SessionStore.Service => ({
   create: (session) =>
     Effect.sync(() => (MutableHashMap.set(sessions, session.id, session), session)),
-  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
   // Never creates: a session deleted since the caller read it stays deleted.
   update: (session) =>
     Effect.sync(() => {
@@ -234,15 +233,13 @@ export const memorySessionStore = (
     }),
   touch: (sessionId, touch) =>
     Effect.sync(() =>
-      Option.getOrNull(
-        MutableHashMap.get(sessions, sessionId).pipe(
-          Option.filter((session) => session.expiresAt.getTime() >= touch.lastActivityAt.getTime()),
-          Option.map((session) => {
-            const touched = { ...session, ...touch };
-            MutableHashMap.set(sessions, sessionId, touched);
-            return touched;
-          }),
-        ),
+      MutableHashMap.get(sessions, sessionId).pipe(
+        Option.filter((session) => session.expiresAt.getTime() >= touch.lastActivityAt.getTime()),
+        Option.map((session) => {
+          const touched = { ...session, ...touch };
+          MutableHashMap.set(sessions, sessionId, touched);
+          return touched;
+        }),
       ),
     ),
   delete: (sessionId) => Effect.sync(() => void MutableHashMap.remove(sessions, sessionId)),
@@ -271,19 +268,16 @@ export const memoryApiKeyStore = (
   keys: MutableHashMap.MutableHashMap<string, ApiKey> = MutableHashMap.empty(),
 ): typeof ApiKeyStore.Service => ({
   create: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
-  get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(keys, id))),
+  get: (id) => Effect.sync(() => MutableHashMap.get(keys, id)),
   getByHash: (keyHash) =>
-    Effect.sync(() =>
-      Option.getOrNull(
-        Arr.findFirst(MutableHashMap.values(keys), (key) => key.keyHash === keyHash),
-      ),
-    ),
+    Effect.sync(() => Arr.findFirst(MutableHashMap.values(keys), (key) => key.keyHash === keyHash)),
   update: (key) => Effect.sync(() => (MutableHashMap.set(keys, key.id, key), key)),
   recordUse: (id, use) =>
     Effect.sync(() => {
-      const stored = Option.getOrNull(MutableHashMap.get(keys, id));
-      const spent = stored === null ? null : applyApiKeyUse(stored, use);
-      if (spent !== null) MutableHashMap.set(keys, id, spent);
+      const spent = Option.flatMap(MutableHashMap.get(keys, id), (stored) =>
+        applyApiKeyUse(stored, use),
+      );
+      if (Option.isSome(spent)) MutableHashMap.set(keys, id, spent.value);
       return spent;
     }),
   delete: (id) => Effect.sync(() => void MutableHashMap.remove(keys, id)),
@@ -310,10 +304,9 @@ export const memoryCredentialStore = (
 ): typeof CredentialStore.Service => ({
   create: (credential) =>
     Effect.sync(() => (MutableHashMap.set(credentials, credential.id, credential), credential)),
-  get: (credentialId) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(credentials, credentialId))),
+  get: (credentialId) => Effect.sync(() => MutableHashMap.get(credentials, credentialId)),
   getByCredentialId: (credentialId) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(credentials, credentialId))),
+    Effect.sync(() => MutableHashMap.get(credentials, credentialId)),
   update: (credential) =>
     Effect.sync(() => (MutableHashMap.set(credentials, credential.id, credential), credential)),
   delete: (credentialId) =>
@@ -342,7 +335,7 @@ export const memoryAccountManagementStore = (
   tokens: MutableHashMap.MutableHashMap<string, AccountToken> = MutableHashMap.empty(),
 ): typeof AccountManagementStore.Service => ({
   create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.token, token), token)),
-  get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+  get: (token) => Effect.sync(() => MutableHashMap.get(tokens, token)),
   delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
@@ -359,7 +352,7 @@ export const memoryAccountManagementStore = (
 export const memoryMultiFactorStore = (
   records: MutableHashMap.MutableHashMap<string, MultiFactorRecord> = MutableHashMap.empty(),
 ): typeof MultiFactorStore.Service => ({
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(records, userId)),
   upsert: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.userId, record), record)),
   delete: (userId) => Effect.sync(() => void MutableHashMap.remove(records, userId)),
@@ -397,8 +390,7 @@ export const memoryTrustedDeviceStore = (
 ): typeof TrustedDeviceStore.Service => ({
   upsert: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.tokenHash, record), record)),
-  getByTokenHash: (tokenHash) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, tokenHash))),
+  getByTokenHash: (tokenHash) => Effect.sync(() => MutableHashMap.get(records, tokenHash)),
   delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(records, tokenHash)),
   deleteByUserId: (userId) =>
     Effect.sync(() => {
@@ -417,16 +409,15 @@ export const memoryOtpSecondFactorStore = (
 ): typeof OtpSecondFactorStore.Service => ({
   create: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
-  get: (pendingToken) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, pendingToken))),
+  get: (pendingToken) => Effect.sync(() => MutableHashMap.get(records, pendingToken)),
   update: (record) =>
     Effect.sync(() => (MutableHashMap.set(records, record.pendingToken, record), record)),
   incrementAttempts: (pendingToken) =>
     Effect.sync(() => {
-      const record = Option.getOrNull(MutableHashMap.get(records, pendingToken));
-      if (record === null) return null;
-      MutableHashMap.set(records, pendingToken, { ...record, attempts: record.attempts + 1 });
-      return record.attempts + 1;
+      return Option.map(MutableHashMap.get(records, pendingToken), (record) => {
+        MutableHashMap.set(records, pendingToken, { ...record, attempts: record.attempts + 1 });
+        return record.attempts + 1;
+      });
     }),
   delete: (pendingToken) => Effect.sync(() => void MutableHashMap.remove(records, pendingToken)),
 });
@@ -443,7 +434,7 @@ export const memoryOtpSecondFactorStore = (
 export const memoryRateLimitStore = (
   entries: MutableHashMap.MutableHashMap<string, RateLimitEntry> = MutableHashMap.empty(),
 ): typeof RateLimitStore.Service => ({
-  get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(entries, key))),
+  get: (key) => Effect.sync(() => MutableHashMap.get(entries, key)),
   set: (key, entry) => Effect.sync(() => void MutableHashMap.set(entries, key, entry)),
   increment: (key, ttl) =>
     Effect.flatMap(Clock.currentTimeMillis, (now) =>
@@ -468,7 +459,7 @@ export const memoryRateLimitStore = (
  * @category constructors
  */
 export const memoryJwtKeyStore = (keys: Array<JwtKeyPair> = []): typeof JwtKeyStore.Service => ({
-  getActive: Effect.sync(() => keys.at(-1) ?? null),
+  getActive: Effect.sync(() => Arr.last(keys)),
   create: (pair) => Effect.sync(() => (keys.push(pair), pair)),
   list: Effect.sync(() => [...keys]),
 });
@@ -493,7 +484,7 @@ export const memoryOtpFailures = <P extends string>(
   failures: MutableHashMap.MutableHashMap<string, Types.OtpFailures> = MutableHashMap.empty(),
 ): Types.OtpFailureBudget<P> => ({
   getFailures: (address, purpose) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(failures, codeKey(address, purpose)))),
+    Effect.sync(() => MutableHashMap.get(failures, codeKey(address, purpose))),
   recordFailure: (address, purpose, at) =>
     Effect.sync(() => {
       const count = Option.match(MutableHashMap.get(failures, codeKey(address, purpose)), {
@@ -525,17 +516,17 @@ export const memoryPhoneOtpStore = (
       return record;
     }),
   get: (phoneNumber, purpose) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)))),
+    Effect.sync(() => MutableHashMap.get(records, codeKey(phoneNumber, purpose))),
   delete: (phoneNumber, purpose) =>
     Effect.sync(() => void MutableHashMap.remove(records, codeKey(phoneNumber, purpose))),
   incrementAttempts: (phoneNumber, purpose) =>
-    Effect.suspend(() => {
-      const record = Option.getOrNull(MutableHashMap.get(records, codeKey(phoneNumber, purpose)));
-      if (record === null) return Effect.succeed(null);
-      const updated: PhoneOtpRecord = { ...record, attempts: record.attempts + 1 };
-      MutableHashMap.set(records, codeKey(phoneNumber, purpose), updated);
-      return Effect.succeed(updated.attempts);
-    }),
+    Effect.sync(() =>
+      Option.map(MutableHashMap.get(records, codeKey(phoneNumber, purpose)), (record) => {
+        const updated: PhoneOtpRecord = { ...record, attempts: record.attempts + 1 };
+        MutableHashMap.set(records, codeKey(phoneNumber, purpose), updated);
+        return updated.attempts;
+      }),
+    ),
   ...memoryOtpFailures<PhoneOtpPurpose>(failures),
 });
 
@@ -570,9 +561,7 @@ export const memoryOAuthAccountStore = (
           )
         : Effect.sync(() => (put(account), account)),
     get: (provider, providerId) =>
-      Effect.sync(() =>
-        Option.getOrNull(MutableHashMap.get(accounts, accountKey(provider, providerId))),
-      ),
+      Effect.sync(() => MutableHashMap.get(accounts, accountKey(provider, providerId))),
     getByUserId: (userId) =>
       Effect.sync(() =>
         Arr.fromIterable(MutableHashMap.values(accounts)).filter(
@@ -585,7 +574,7 @@ export const memoryOAuthAccountStore = (
           MutableHashMap.values(accounts),
           (candidate) => candidate.id === account.id,
         );
-        if (Option.isNone(stored)) return null;
+        if (Option.isNone(stored)) return Option.none();
         // Every field from `account` but the link's identity and owner.
         const updated: OAuthAccount = {
           ...account,
@@ -595,7 +584,7 @@ export const memoryOAuthAccountStore = (
           createdAt: stored.value.createdAt,
         };
         put(updated);
-        return updated;
+        return Option.some(updated);
       }),
     linkToUser: (userId, account) =>
       Effect.suspend(() => {
@@ -646,8 +635,7 @@ export const memoryOidcClientStore = (
 ): typeof OidcClientStore.Service => ({
   create: (client) =>
     Effect.sync(() => (MutableHashMap.set(clients, client.clientId, client), client)),
-  getByClientId: (clientId) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(clients, clientId))),
+  getByClientId: (clientId) => Effect.sync(() => MutableHashMap.get(clients, clientId)),
   update: (client) =>
     Effect.sync(() => (MutableHashMap.set(clients, client.clientId, client), client)),
   delete: (clientId) => Effect.sync(() => void MutableHashMap.remove(clients, clientId)),
@@ -664,7 +652,7 @@ export const memoryOidcCodeStore = (
   codes: MutableHashMap.MutableHashMap<string, OidcAuthorizationCode> = MutableHashMap.empty(),
 ): typeof OidcCodeStore.Service => ({
   create: (code) => Effect.sync(() => (MutableHashMap.set(codes, code.codeHash, code), code)),
-  get: (codeHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(codes, codeHash))),
+  get: (codeHash) => Effect.sync(() => MutableHashMap.get(codes, codeHash)),
   consume: (codeHash) => Effect.sync(() => take(codes, codeHash)),
   delete: (codeHash) => Effect.sync(() => void MutableHashMap.remove(codes, codeHash)),
 });
@@ -679,7 +667,7 @@ export const memoryOidcTokenStore = (
   tokens: MutableHashMap.MutableHashMap<string, OidcToken> = MutableHashMap.empty(),
 ): typeof OidcTokenStore.Service => ({
   create: (token) => Effect.sync(() => (MutableHashMap.set(tokens, token.tokenHash, token), token)),
-  get: (tokenHash) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, tokenHash))),
+  get: (tokenHash) => Effect.sync(() => MutableHashMap.get(tokens, tokenHash)),
   consume: (tokenHash) => Effect.sync(() => take(tokens, tokenHash)),
   delete: (tokenHash) => Effect.sync(() => void MutableHashMap.remove(tokens, tokenHash)),
   deleteByUserId: (userId) =>
@@ -708,7 +696,7 @@ export const memoryOidcConsentStore = (
   const key = (userId: string, clientId: string) => `${userId}\u0000${clientId}`;
   return {
     get: (userId, clientId) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(consents, key(userId, clientId)))),
+      Effect.sync(() => MutableHashMap.get(consents, key(userId, clientId))),
     upsert: (consent) =>
       Effect.sync(
         () => (
@@ -751,35 +739,37 @@ export const memoryDeviceAuthorizationStore = (
         MutableHashMap.set(records, record.deviceCode, record);
         return record;
       }),
-    getByDeviceCode: (deviceCode) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, deviceCode))),
-    getByUserCode: (userCode) => Effect.sync(() => Option.getOrNull(byUserCode(userCode))),
+    getByDeviceCode: (deviceCode) => Effect.sync(() => MutableHashMap.get(records, deviceCode)),
+    getByUserCode: (userCode) => Effect.sync(() => byUserCode(userCode)),
     settle: (userCode, decision, now) =>
       Effect.sync(() => {
-        const record = Option.getOrNull(byUserCode(userCode));
-        if (record === null || record.status !== "pending" || record.expiresAt < now) return null;
+        const found = byUserCode(userCode);
+        if (Option.isNone(found)) return Option.none();
+        const record = found.value;
+        if (record.status !== "pending" || record.expiresAt < now) return Option.none();
         const settled: DeviceAuthorizationRecord = {
           ...record,
           status: decision.status,
           userId: decision.userId,
         };
         MutableHashMap.set(records, record.deviceCode, settled);
-        return settled;
+        return Option.some(settled);
       }),
     touch: (deviceCode, touch) =>
       Effect.sync(() => {
-        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
-        if (record === null) return null;
-        const touched: DeviceAuthorizationRecord = { ...record, ...touch };
-        MutableHashMap.set(records, deviceCode, touched);
-        return touched;
+        return Option.map(MutableHashMap.get(records, deviceCode), (record) => {
+          const touched: DeviceAuthorizationRecord = { ...record, ...touch };
+          MutableHashMap.set(records, deviceCode, touched);
+          return touched;
+        });
       }),
     delete: (deviceCode) => Effect.sync(() => void MutableHashMap.remove(records, deviceCode)),
     claimApproval: (deviceCode) =>
       Effect.sync(() => {
-        const record = Option.getOrNull(MutableHashMap.get(records, deviceCode));
-        if (record === null || record.status !== "approved") return null;
-        MutableHashMap.remove(records, deviceCode);
+        const record = MutableHashMap.get(records, deviceCode).pipe(
+          Option.filter((found) => found.status === "approved"),
+        );
+        if (Option.isSome(record)) MutableHashMap.remove(records, deviceCode);
         return record;
       }),
   };
@@ -834,14 +824,14 @@ export type MemoryStores =
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { Effect } from "effect"
+ * import { Effect, Option } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * const program = Effect.gen(function* () {
  *   const sessions = yield* Auth.SessionStore
  *   const users = yield* Auth.UserStore
- *   assert.equal(yield* users.get("nobody"), null)
+ *   assert.ok(Option.isNone(yield* users.get("nobody")))
  *   assert.deepEqual(yield* sessions.listByUserId("nobody"), [])
  * })
  *

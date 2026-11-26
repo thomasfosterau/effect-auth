@@ -30,6 +30,7 @@
  * @module trusted-device
  */
 import { Clock, Config, Context, Effect, Layer, Redacted } from "effect";
+import * as Option from "effect/Option";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import { Hex } from "effect/encoding";
 import * as Cipher from "./Cipher.ts";
@@ -126,10 +127,12 @@ export class TrustedDeviceService extends Context.Service<
 
     /**
      * Verify a device cookie value. Returns the associated `userId` if the
-     * token is valid (HMAC matches, not expired, not revoked), or `null`
-     * otherwise. Never throws on invalid tokens — returns `null` instead.
+     * token is valid (HMAC matches, not expired, not revoked), or `None`
+     * otherwise. Never fails on an invalid token: it answers `None` instead.
      */
-    readonly verify: (cookieValue: string) => Effect.Effect<string | null, Errors.AuthError>;
+    readonly verify: (
+      cookieValue: string,
+    ) => Effect.Effect<Option.Option<string>, Errors.AuthError>;
 
     /**
      * Revoke a single device token by its cookie value.
@@ -241,22 +244,23 @@ export const make = (
 
       verify: Effect.fn("TrustedDeviceService.verify")(function* (cookieValue: string) {
         const parsed = parseCookie(cookieValue);
-        if (!parsed) return null;
+        if (!parsed) return Option.none<string>();
 
         // Verify HMAC before touching the DB (forgery protection)
         const expectedHmac = yield* computeHmac(parsed.rawToken);
-        if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return null;
+        if (!timingSafeHexEqual(expectedHmac, parsed.hmac)) return Option.none<string>();
 
         const tokenHash = yield* hashToken(parsed.rawToken);
-        const record = yield* store.getByTokenHash(tokenHash);
-        if (!record) return null;
+        const found = yield* store.getByTokenHash(tokenHash);
+        if (Option.isNone(found)) return Option.none<string>();
+        const record = found.value;
 
         if ((yield* Clock.currentTimeMillis) > record.expiresAt) {
           yield* store.delete(tokenHash);
-          return null;
+          return Option.none<string>();
         }
 
-        return record.userId;
+        return Option.some(record.userId);
       }),
 
       revoke: Effect.fn("TrustedDeviceService.revoke")(function* (cookieValue: string) {
@@ -294,7 +298,7 @@ export const gate = (
       const cookie = yield* TrustedDeviceCookieRef;
       if (cookie !== undefined && cookie !== "") {
         const userId = yield* service.verify(cookie);
-        if (userId === user.id) return false;
+        if (Option.contains(userId, user.id)) return false;
       }
       return yield* inner.required(user);
     }),

@@ -293,7 +293,7 @@ export const generateTotp = (
  * @param token - The OTP token to verify
  * @param secret - Base32-encoded secret or raw bytes
  * @param config - TOTP configuration
- * @returns Effect that produces the matched time-step counter, or `null` if
+ * @returns Effect that produces the matched time-step counter, or `None` if
  *   the token is invalid. Callers should persist the counter and reject
  *   subsequent submissions with the same or lower counter to prevent replay.
  */
@@ -301,7 +301,7 @@ export const verifyTotp = (
   token: string,
   secret: string | Uint8Array,
   config: TotpConfig = {},
-): Effect.Effect<number | null, Errors.HashingError> =>
+): Effect.Effect<Option.Option<number>, Errors.HashingError> =>
   Effect.gen(function* () {
     // Validate and normalize period
     let period = config?.period ?? 30;
@@ -342,7 +342,7 @@ export const verifyTotp = (
         ),
     );
 
-    return Option.getOrNull(matched);
+    return matched;
   });
 
 /**

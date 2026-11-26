@@ -25,7 +25,7 @@ const makeStore = (...entries: ReadonlyArray<RateLimitEntry>) => {
     get: (key) =>
       Effect.andThen(
         Effect.yieldNow,
-        Effect.sync(() => Option.getOrNull(MutableHashMap.get(stored, key))),
+        Effect.sync(() => MutableHashMap.get(stored, key)),
       ),
     set: (key, entry) =>
       Effect.andThen(

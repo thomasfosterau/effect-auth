@@ -301,7 +301,7 @@ export interface OrganizationDomain {
  * ambient context and answers "Organization domains are not enabled" when it
  * is absent, exactly as the SAML pieces do in `Sso.ts`.
  *
- * Conventions: lookups answer `null` when the record does not exist, deletes of
+ * Conventions: lookups answer `None` when the record does not exist, deletes of
  * unknown ids are no-ops, and failures are reported as `AuthError`. Put a
  * unique index on `(organizationId, domain)` and, where the database has
  * partial indexes, a unique index on `domain` over the `verified` rows: the
@@ -321,15 +321,15 @@ export class OrganizationDomainStore extends Context.Service<
     ) => Effect.Effect<OrganizationDomain, Errors.AuthError>;
     readonly getById: (
       domainId: string,
-    ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<OrganizationDomain>, Errors.AuthError>;
     /**
      * The `verified` claim on a normalized domain, across every organization;
-     * `null` when no claim on it is verified. Unverified claims are never
+     * `None` when no claim on it is verified. Unverified claims are never
      * answered here.
      */
     readonly getVerifiedByDomain: (
       domain: string,
-    ) => Effect.Effect<OrganizationDomain | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<OrganizationDomain>, Errors.AuthError>;
     readonly listByOrganization: (
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<OrganizationDomain>, Errors.AuthError>;
@@ -359,13 +359,13 @@ export const memoryOrganizationDomainStore = (
   records: MutableHashMap.MutableHashMap<string, OrganizationDomain> = MutableHashMap.empty(),
 ): typeof OrganizationDomainStore.Service => ({
   create: (domain) => Effect.sync(() => (MutableHashMap.set(records, domain.id, domain), domain)),
-  getById: (domainId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, domainId))),
+  getById: (domainId) => Effect.sync(() => MutableHashMap.get(records, domainId)),
   getVerifiedByDomain: (domain) =>
-    Effect.sync(
-      () =>
-        Arr.fromIterable(MutableHashMap.values(records)).find(
-          (record) => record.domain === domain && record.verificationState === "verified",
-        ) ?? null,
+    Effect.sync(() =>
+      Arr.findFirst(
+        MutableHashMap.values(records),
+        (record) => record.domain === domain && record.verificationState === "verified",
+      ),
     ),
   listByOrganization: (organizationId) =>
     Effect.sync(() =>
@@ -452,7 +452,7 @@ export const defaultOrganizationRoles: Record<string, ReadonlyArray<string>> = {
  * and custom roles ({@link OrgRole}) as well. `deleteTeam` cascades too: it
  * must remove the team's team-member rows along with the team.
  *
- * Conventions: lookups answer `null` when the record does not exist, deletes
+ * Conventions: lookups answer `None` when the record does not exist, deletes
  * of unknown ids are no-ops, and failures are reported as `AuthError`.
  */
 export class OrganizationStore extends Context.Service<
@@ -463,10 +463,10 @@ export class OrganizationStore extends Context.Service<
     ) => Effect.Effect<Organization, Errors.AuthError>;
     readonly getOrganizationById: (
       organizationId: string,
-    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Organization>, Errors.AuthError>;
     readonly getOrganizationBySlug: (
       slug: string,
-    ) => Effect.Effect<Organization | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Organization>, Errors.AuthError>;
     readonly updateOrganization: (
       organization: Organization,
     ) => Effect.Effect<Organization, Errors.AuthError>;
@@ -476,13 +476,15 @@ export class OrganizationStore extends Context.Service<
     readonly getMember: (
       organizationId: string,
       userId: string,
-    ) => Effect.Effect<Member | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Member>, Errors.AuthError>;
     /**
      * The membership whose {@link Member.id} is `memberId`, in whatever
-     * organization it belongs to; `null` when there is none. The HTTP tier
+     * organization it belongs to; `None` when there is none. The HTTP tier
      * addresses a membership by this id (`/organization-members/:id`).
      */
-    readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
+    readonly getMemberById: (
+      memberId: string,
+    ) => Effect.Effect<Option.Option<Member>, Errors.AuthError>;
     readonly updateMember: (member: Member) => Effect.Effect<Member, Errors.AuthError>;
     readonly deleteMember: (memberId: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listMembersByOrganization: (
@@ -512,7 +514,7 @@ export class OrganizationStore extends Context.Service<
     ) => Effect.Effect<Invitation, Errors.AuthError>;
     readonly getInvitation: (
       invitationId: string,
-    ) => Effect.Effect<Invitation | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Invitation>, Errors.AuthError>;
     readonly updateInvitation: (
       invitation: Invitation,
     ) => Effect.Effect<Invitation, Errors.AuthError>;
@@ -524,9 +526,9 @@ export class OrganizationStore extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<Invitation>, Errors.AuthError>;
 
     readonly createTeam: (team: Team) => Effect.Effect<Team, Errors.AuthError>;
-    readonly getTeam: (teamId: string) => Effect.Effect<Team | null, Errors.AuthError>;
+    readonly getTeam: (teamId: string) => Effect.Effect<Option.Option<Team>, Errors.AuthError>;
     /** Persist an updated team; answers `null` when the team no longer exists. */
-    readonly updateTeam: (team: Team) => Effect.Effect<Team | null, Errors.AuthError>;
+    readonly updateTeam: (team: Team) => Effect.Effect<Option.Option<Team>, Errors.AuthError>;
     /** Delete a team *and* its team-member rows. A no-op for unknown ids. */
     readonly deleteTeam: (teamId: string) => Effect.Effect<void, Errors.AuthError>;
     readonly listTeams: (
@@ -537,12 +539,12 @@ export class OrganizationStore extends Context.Service<
     readonly addTeamMember: (teamMember: TeamMember) => Effect.Effect<TeamMember, Errors.AuthError>;
     /**
      * The team membership whose {@link TeamMember.id} is `teamMemberId`, in
-     * whatever team it belongs to; `null` when there is none. The HTTP tier
+     * whatever team it belongs to; `None` when there is none. The HTTP tier
      * addresses a team membership by this id (`/team-members/:id`).
      */
     readonly getTeamMemberById: (
       teamMemberId: string,
-    ) => Effect.Effect<TeamMember | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<TeamMember>, Errors.AuthError>;
     /** Remove a team membership. A no-op when the user is not in the team. */
     readonly removeTeamMember: (
       teamId: string,
@@ -567,13 +569,15 @@ export class OrganizationStore extends Context.Service<
     readonly getOrgRole: (
       organizationId: string,
       role: string,
-    ) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<OrgRole>, Errors.AuthError>;
     /**
      * The role definition whose {@link OrgRole.id} is `orgRoleId`, in whatever
-     * organization it belongs to; `null` when there is none. The HTTP tier
+     * organization it belongs to; `None` when there is none. The HTTP tier
      * addresses a definition by this id (`/organization-roles/:id`).
      */
-    readonly getOrgRoleById: (orgRoleId: string) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    readonly getOrgRoleById: (
+      orgRoleId: string,
+    ) => Effect.Effect<Option.Option<OrgRole>, Errors.AuthError>;
     readonly listOrgRoles: (
       organizationId: string,
     ) => Effect.Effect<ReadonlyArray<OrgRole>, Errors.AuthError>;
@@ -863,32 +867,36 @@ export class OrganizationService extends Context.Service<
 
     /**
      * The membership with this id, in whatever organization it belongs to;
-     * `null` when there is none. No permission is checked: the id names the
+     * `None` when there is none. No permission is checked: the id names the
      * row, and the operation applied to it (`updateMemberRole`,
      * `removeMember`, ...) decides whether the actor may act on it. A caller
-     * that answers `null` differently from that operation's refusal confirms
+     * that answers `None` differently from that operation's refusal confirms
      * which ids exist; the HTTP tier answers both alike.
      */
-    readonly getMemberById: (memberId: string) => Effect.Effect<Member | null, Errors.AuthError>;
+    readonly getMemberById: (
+      memberId: string,
+    ) => Effect.Effect<Option.Option<Member>, Errors.AuthError>;
 
     /**
-     * The team membership with this id; `null` when there is none. No
+     * The team membership with this id; `None` when there is none. No
      * permission is checked, as for {@link getMemberById}: the operation
      * applied to it (`removeTeamMember`) decides.
      */
     readonly getTeamMemberById: (
       teamMemberId: string,
-    ) => Effect.Effect<TeamMember | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<TeamMember>, Errors.AuthError>;
 
     /**
-     * The custom role definition with this id; `null` when there is none. No
+     * The custom role definition with this id; `None` when there is none. No
      * permission is checked, as for {@link getMemberById}: the operation
      * applied to it (`upsertOrgRole`, `deleteOrgRole`) decides.
      */
-    readonly getOrgRoleById: (orgRoleId: string) => Effect.Effect<OrgRole | null, Errors.AuthError>;
+    readonly getOrgRoleById: (
+      orgRoleId: string,
+    ) => Effect.Effect<Option.Option<OrgRole>, Errors.AuthError>;
 
     /**
-     * The domain claim with this id; `null` when there is none. No permission
+     * The domain claim with this id; `None` when there is none. No permission
      * is checked, as for {@link getMemberById}: the operation applied to it
      * (`removeDomain`, `verifyDomain`) decides. Fails with an
      * `OrganizationError` when no {@link OrganizationDomainStore} is
@@ -896,7 +904,7 @@ export class OrganizationService extends Context.Service<
      */
     readonly getDomainById: (
       domainId: string,
-    ) => Effect.Effect<OrganizationDomain | null, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<OrganizationDomain>, OrganizationError | Errors.AuthError>;
 
     /**
      * List the organizations a user is an active member of. A deactivated
@@ -1260,7 +1268,7 @@ export class OrganizationService extends Context.Service<
      * the user is not a member yet, add them as an active member with that
      * organization's `defaultRole`.
      *
-     * Answers the new membership, or `null` when nothing applies (no matching
+     * Answers the new membership, or `None` when nothing applies (no matching
      * domain, the claim is not verified, JIT is off, the user is already a
      * member, or no {@link OrganizationDomainStore} is configured). Only a
      * DNS-verified or operator-attested claim counts. Callers must only pass
@@ -1270,7 +1278,7 @@ export class OrganizationService extends Context.Service<
     readonly provisionJitMembership: (
       userId: string,
       email: string,
-    ) => Effect.Effect<Member | null, OrganizationError | Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Member>, OrganizationError | Errors.AuthError>;
 
     /**
      * Create a team inside an organization. Requires the `team:create`
@@ -1552,7 +1560,7 @@ export const make = (
     ): Effect.Effect<ReadonlyArray<string> | null, Errors.AuthError> =>
       Effect.gen(function* () {
         const custom = yield* store.getOrgRole(organizationId, role);
-        if (custom) return custom.permissions;
+        if (Option.isSome(custom)) return custom.value.permissions;
         return staticRolePermissions(role);
       });
 
@@ -1654,10 +1662,11 @@ export const make = (
     /** Load an organization, failing when it does not exist. */
     const getOrganizationOrFail = (organizationId: string) =>
       Effect.gen(function* () {
-        const organization = yield* store.getOrganizationById(organizationId);
-        if (!organization) {
+        const foundOrganization = yield* store.getOrganizationById(organizationId);
+        if (Option.isNone(foundOrganization)) {
           return yield* new OrganizationError({ message: "Organization not found" });
         }
+        const organization = foundOrganization.value;
         return organization;
       });
 
@@ -1667,9 +1676,7 @@ export const make = (
      * stranger everywhere a permission is decided.
      */
     const getActiveMember = (organizationId: string, userId: string) =>
-      Effect.map(store.getMember(organizationId, userId), (member) =>
-        member !== null && isActiveMember(member) ? member : null,
-      );
+      Effect.map(store.getMember(organizationId, userId), Option.filter(isActiveMember));
 
     /**
      * Resolve the actor's membership and enforce a permission, returning the
@@ -1678,10 +1685,11 @@ export const make = (
     const requireMemberPermission = (userId: string, organizationId: string, permission: string) =>
       Effect.gen(function* () {
         const member = yield* getActiveMember(organizationId, userId);
-        const granted =
-          member !== null && (yield* roleHasPermission(organizationId, member.role, permission));
-        if (!member || !granted) return yield* missingPermission(permission);
-        return member;
+        if (Option.isNone(member)) return yield* missingPermission(permission);
+        if (!(yield* roleHasPermission(organizationId, member.value.role, permission))) {
+          return yield* missingPermission(permission);
+        }
+        return member.value;
       });
 
     /**
@@ -1692,8 +1700,8 @@ export const make = (
     const requireMembership = (userId: string, organizationId: string) =>
       Effect.gen(function* () {
         const member = yield* getActiveMember(organizationId, userId);
-        if (!member) return yield* notAMember();
-        return member;
+        if (Option.isNone(member)) return yield* notAMember();
+        return member.value;
       });
 
     /** Resolve the domain store, explaining its absence when it is not wired. */
@@ -1713,8 +1721,9 @@ export const make = (
      */
     const getTeamOr = (teamId: string, refusal: OrganizationError) =>
       Effect.gen(function* () {
-        const team = yield* store.getTeam(teamId);
-        if (!team) return yield* refusal;
+        const foundTeam = yield* store.getTeam(teamId);
+        if (Option.isNone(foundTeam)) return yield* refusal;
+        const team = foundTeam.value;
         return team;
       });
 
@@ -1889,10 +1898,11 @@ export const make = (
     /** Load a membership (active or not), failing when there is none. */
     const getMemberOrFail = (organizationId: string, memberUserId: string) =>
       Effect.gen(function* () {
-        const member = yield* store.getMember(organizationId, memberUserId);
-        if (!member) {
+        const foundMember = yield* store.getMember(organizationId, memberUserId);
+        if (Option.isNone(foundMember)) {
           return yield* new OrganizationError({ message: "Member not found" });
         }
+        const member = foundMember.value;
         return member;
       });
 
@@ -1922,7 +1932,7 @@ export const make = (
     ) =>
       domainStore.getVerifiedByDomain(domain).pipe(
         Effect.flatMap((holder) =>
-          holder === null || holder.organizationId === organizationId
+          !Option.exists(holder, (claim) => claim.organizationId !== organizationId)
             ? Effect.void
             : Effect.fail(
                 new OrganizationError({
@@ -1953,10 +1963,11 @@ export const make = (
       domainId: string,
     ) =>
       Effect.gen(function* () {
-        const domain = yield* domainStore.getById(domainId);
-        if (!domain || domain.organizationId !== organizationId) {
+        const foundDomain = yield* domainStore.getById(domainId);
+        if (Option.isNone(foundDomain) || foundDomain.value.organizationId !== organizationId) {
           return yield* new OrganizationError({ message: "Domain not found" });
         }
+        const domain = foundDomain.value;
         return domain;
       });
 
@@ -2011,14 +2022,15 @@ export const make = (
      * to bring the token, which then serves as the address's first proof.
      */
     const proveAnswer = (
-      invitation: Invitation | null,
+      found: Option.Option<Invitation>,
       input: InvitationResponseInput,
       userId: string,
     ) =>
       Effect.gen(function* () {
-        if (invitation === null) {
+        if (Option.isNone(found)) {
           return yield* new OrganizationError({ message: "Invitation not found" });
         }
+        const invitation = found.value;
         const email = normalizeEmail(invitation.email);
         const identifier = Arr.findFirst(
           yield* identifiers.listByUser(userId),
@@ -2085,7 +2097,7 @@ export const make = (
         }
 
         const existing = yield* store.getOrganizationBySlug(input.slug);
-        if (existing) {
+        if (Option.isSome(existing)) {
           return yield* new OrganizationError({
             message: `An organization with slug '${input.slug}' already exists`,
           });
@@ -2118,7 +2130,7 @@ export const make = (
 
         if (updates.slug !== undefined && updates.slug !== organization.slug) {
           const existing = yield* store.getOrganizationBySlug(updates.slug);
-          if (existing) {
+          if (Option.isSome(existing)) {
             return yield* new OrganizationError({
               message: `An organization with slug '${updates.slug}' already exists`,
             });
@@ -2202,9 +2214,7 @@ export const make = (
           (membership) => store.getOrganizationById(membership.organizationId),
           { concurrency: 1 },
         );
-        return organizations.filter(
-          (organization): organization is Organization => organization !== null,
-        );
+        return Arr.getSomes(organizations);
       }),
 
       inviteMember: Effect.fn("OrganizationService.inviteMember")(function* (
@@ -2266,7 +2276,7 @@ export const make = (
         yield* requireInviterStillGrants(invitation);
 
         const existingMember = yield* store.getMember(invitation.organizationId, userId);
-        if (existingMember) {
+        if (Option.isSome(existingMember)) {
           return yield* new OrganizationError({
             message: "You are already a member of this organization",
           });
@@ -2304,8 +2314,9 @@ export const make = (
         // The permission first: an unknown id, a stranger and a member
         // without it are refused alike, and only a permitted member learns
         // that an invitation is no longer pending.
-        const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) return yield* missingPermission("invitation:cancel");
+        const foundInvitation = yield* store.getInvitation(invitationId);
+        if (Option.isNone(foundInvitation)) return yield* missingPermission("invitation:cancel");
+        const invitation = foundInvitation.value;
         yield* requireMemberPermission(cancelerId, invitation.organizationId, "invitation:cancel");
         if (invitation.status !== "pending") {
           return yield* new OrganizationError({ message: "Invitation is no longer pending" });
@@ -2319,8 +2330,9 @@ export const make = (
         invitationId: string,
       ) {
         // The permission first, as for `cancelInvitation`.
-        const invitation = yield* store.getInvitation(invitationId);
-        if (!invitation) return yield* missingPermission("invitation:create");
+        const foundInvitation = yield* store.getInvitation(invitationId);
+        if (Option.isNone(foundInvitation)) return yield* missingPermission("invitation:create");
+        const invitation = foundInvitation.value;
         const actor = yield* requireMemberPermission(
           actorId,
           invitation.organizationId,
@@ -2399,11 +2411,11 @@ export const make = (
 
         const user = yield* users.get(userId);
         const managed =
-          user !== null &&
+          Option.isSome(user) &&
           (yield* isManagedUser(
             { identifiers, domains: Option.getOrUndefined(domainStoreOption) },
             organizationId,
-            user,
+            user.value,
           ));
         if (!managed) {
           return yield* new OrganizationError({
@@ -2413,7 +2425,7 @@ export const make = (
         }
 
         const existing = yield* store.getMember(organizationId, userId);
-        if (existing) {
+        if (Option.isSome(existing)) {
           return yield* new OrganizationError({
             message: "User is already a member of this organization",
           });
@@ -2454,8 +2466,9 @@ export const make = (
         userId: string,
         organizationId: string,
       ) {
-        const member = yield* store.getMember(organizationId, userId);
-        if (!member) return yield* notAMember();
+        const foundMember = yield* store.getMember(organizationId, userId);
+        if (Option.isNone(foundMember)) return yield* notAMember();
+        const member = foundMember.value;
         if (
           member.role === creatorRole &&
           isActiveMember(member) &&
@@ -2605,14 +2618,15 @@ export const make = (
       ) {
         const team = yield* requireTeamPermission(actorUserId, teamId, "team:update");
 
-        const updated = yield* store.updateTeam({
+        const foundUpdated = yield* store.updateTeam({
           ...team,
           ...(input.name !== undefined && { name: input.name }),
           updatedAt: yield* Clock.currentTimeMillis,
         });
-        if (!updated) {
+        if (Option.isNone(foundUpdated)) {
           return yield* new OrganizationError({ message: "Team not found" });
         }
+        const updated = foundUpdated.value;
         return updated;
       }),
 
@@ -2633,7 +2647,7 @@ export const make = (
         const team = yield* requireTeamPermission(actorUserId, teamId, "team:manage-members");
 
         const member = yield* store.getMember(team.organizationId, memberUserId);
-        if (!member) {
+        if (Option.isNone(member)) {
           return yield* new OrganizationError({
             message: "User is not a member of this organization",
           });
@@ -2833,21 +2847,26 @@ export const make = (
         userId: string,
         email: string,
       ) {
-        if (Option.isNone(domainStoreOption)) return null;
+        if (Option.isNone(domainStoreOption)) return Option.none<Member>();
 
         const domain = yield* domainStoreOption.value.getVerifiedByDomain(domainOfEmail(email));
         // Only a *verified* claim carries authority; a pending one is just a
         // request, and honoring it would let anyone absorb a domain by asking.
-        if (!domain || domain.verificationState !== "verified") return null;
+        if (Option.isNone(domain) || domain.value.verificationState !== "verified")
+          return Option.none<Member>();
 
-        const organization = yield* store.getOrganizationById(domain.organizationId);
-        if (!organization || organization.jitProvisioning !== true) return null;
+        const foundOrganization = yield* store.getOrganizationById(domain.value.organizationId);
+        if (Option.isNone(foundOrganization) || foundOrganization.value.jitProvisioning !== true)
+          return Option.none<Member>();
+        const organization = foundOrganization.value;
 
         const existing = yield* store.getMember(organization.id, userId);
-        if (existing) return null;
+        if (Option.isSome(existing)) return Option.none<Member>();
 
         yield* ensureMembershipCapacity(organization.id);
-        return yield* createMembership(organization.id, userId, defaultRoleOf(organization));
+        return Option.some(
+          yield* createMembership(organization.id, userId, defaultRoleOf(organization)),
+        );
       }),
 
       upsertOrgRole: Effect.fn("OrganizationService.upsertOrgRole")(function* (
@@ -2872,11 +2891,11 @@ export const make = (
         const now = yield* Clock.currentTimeMillis;
         const existing = yield* store.getOrgRole(organizationId, input.role);
         return yield* store.upsertOrgRole({
-          id: existing?.id ?? (yield* generateId()),
+          id: Option.isSome(existing) ? existing.value.id : yield* generateId(),
           organizationId,
           role: input.role,
           permissions: input.permissions,
-          createdAt: existing?.createdAt ?? now,
+          createdAt: Option.match(existing, { onNone: () => now, onSome: (r) => r.createdAt }),
           updatedAt: now,
         });
       }),
@@ -2890,7 +2909,7 @@ export const make = (
         yield* ensureNotOwnerRole(role);
         yield* ensureNotOwnRole(actor, role, "delete");
         const existing = yield* store.getOrgRole(organizationId, role);
-        if (existing === null) return;
+        if (Option.isNone(existing)) return;
         // Deleting takes away the custom definition and brings back the
         // static entry, if any: the actor must hold both.
         yield* requireHoldsCurrent(organizationId, actor, role);
@@ -2916,8 +2935,9 @@ export const make = (
         organizationId: string,
         permission: string,
       ) {
-        const member = yield* getActiveMember(organizationId, userId);
-        if (!member) return false;
+        const foundMember = yield* getActiveMember(organizationId, userId);
+        if (Option.isNone(foundMember)) return false;
+        const member = foundMember.value;
         return yield* roleHasPermission(organizationId, member.role, permission);
       }),
 

@@ -17,6 +17,7 @@ import Database from "better-sqlite3";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { assert, afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
@@ -211,14 +212,14 @@ describe("SQLite / SessionStore", () => {
 
     expect(result.created).toEqual(makeSession({ attributes: { device: "laptop" } }));
     // Epoch-millisecond integers come back as the exact `Date` that went in.
-    expect(result.loaded?.createdAt).toEqual(at(0));
-    expect(result.loaded?.expiresAt).toEqual(at(60_000));
-    expect(result.loaded?.attributes).toEqual({ device: "laptop" });
+    expect(Option.getOrUndefined(result.loaded)?.createdAt).toEqual(at(0));
+    expect(Option.getOrUndefined(result.loaded)?.expiresAt).toEqual(at(60_000));
+    expect(Option.getOrUndefined(result.loaded)?.attributes).toEqual({ device: "laptop" });
     expect(result.updated.attributes).toEqual({ device: "phone" });
-    expect(result.reloaded?.expiresAt).toEqual(at(120_000));
-    expect(result.reloaded?.lastActivityAt).toEqual(at(30_000));
-    expect(result.reloaded?.attributes).toEqual({ device: "phone" });
-    expect(result.afterDelete).toBeNull();
+    expect(Option.getOrUndefined(result.reloaded)?.expiresAt).toEqual(at(120_000));
+    expect(Option.getOrUndefined(result.reloaded)?.lastActivityAt).toEqual(at(30_000));
+    expect(Option.getOrUndefined(result.reloaded)?.attributes).toEqual({ device: "phone" });
+    expect(Option.isNone(result.afterDelete)).toBe(true);
   });
 
   it("round-trips nested attribute bags through JSON-mode text", async () => {
@@ -244,8 +245,8 @@ describe("SQLite / SessionStore", () => {
       }),
     );
 
-    expect(result.rich?.attributes).toEqual(attributes);
-    expect(result.empty?.attributes).toEqual({});
+    expect(Option.getOrUndefined(result.rich)?.attributes).toEqual(attributes);
+    expect(Option.getOrUndefined(result.empty)?.attributes).toEqual({});
   });
 
   it("returns null on a miss, no-ops absent deletes, and scopes deleteByUserId", async () => {
@@ -273,7 +274,7 @@ describe("SQLite / SessionStore", () => {
       }),
     );
 
-    expect(result.missing).toBeNull();
+    expect(Option.isNone(result.missing)).toBe(true);
     expect(result.listed.map((session) => session.id)).toEqual(["a", "b", "c"]);
     expect(result.afterDelete).toEqual([]);
     expect(result.untouched.map((session) => session.id)).toEqual(["other"]);
@@ -307,23 +308,27 @@ describe("SQLite / UserStore", () => {
       }),
     );
 
-    expect(result.full).toEqual({
-      id: "full",
-      name: "Ada",
-      image: "https://example.com/a.png",
-      createdAt: at(0),
-      updatedAt: at(5000),
-      attributes: { plan: "pro", flags: { beta: true } },
-    });
-    expect(result.bare).toEqual({
-      id: "bare",
-      createdAt: at(0),
-      updatedAt: at(0),
-      attributes: {},
-    });
-    expect(result.bare && "name" in result.bare).toBe(false);
-    expect(result.bare && "image" in result.bare).toBe(false);
-    expect(result.missing).toBeNull();
+    expect(result.full).toEqual(
+      Option.some({
+        id: "full",
+        name: "Ada",
+        image: "https://example.com/a.png",
+        createdAt: at(0),
+        updatedAt: at(5000),
+        attributes: { plan: "pro", flags: { beta: true } },
+      }),
+    );
+    expect(result.bare).toEqual(
+      Option.some({
+        id: "bare",
+        createdAt: at(0),
+        updatedAt: at(0),
+        attributes: {},
+      }),
+    );
+    expect(Option.exists(result.bare, (found) => "name" in found)).toBe(false);
+    expect(Option.exists(result.bare, (found) => "image" in found)).toBe(false);
+    expect(Option.isNone(result.missing)).toBe(true);
   });
 });
 
@@ -373,14 +378,14 @@ describe("SQLite / IdentifierStore", () => {
     );
 
     expect(result.created).toEqual(identifier());
-    expect(result.byEmail).toEqual(identifier());
+    expect(result.byEmail).toEqual(Option.some(identifier()));
     // `verified` survives the 0/1 round trip as a real boolean...
-    expect(result.byEmail?.verified).toBe(false);
+    expect(Option.getOrUndefined(result.byEmail)?.verified).toBe(false);
     // ...and a NULL `verified_at` is omitted, not surfaced as null.
-    expect(result.byEmail && "verifiedAt" in result.byEmail).toBe(false);
-    expect(result.byUsername?.id).toBe("identifier-2");
-    expect(result.crossType).toBeNull();
-    expect(result.missing).toBeNull();
+    expect(Option.exists(result.byEmail, (found) => "verifiedAt" in found)).toBe(false);
+    expect(Option.getOrUndefined(result.byUsername)?.id).toBe("identifier-2");
+    expect(Option.isNone(result.crossType)).toBe(true);
+    expect(Option.isNone(result.missing)).toBe(true);
     expect(result.listed.map((row) => row.id)).toEqual([
       "identifier-1",
       "identifier-2",
@@ -427,7 +432,7 @@ describe("SQLite / IdentifierStore", () => {
 
     expect(result.free.id).toBe("identifier-4");
     // The loser never overwrote the original owner.
-    expect(result.owner?.userId).toBe("user-1");
+    expect(Option.getOrUndefined(result.owner)?.userId).toBe("user-1");
   });
 
   it("setVerified stamps the timestamp and returns null for an unknown id", async () => {
@@ -446,11 +451,11 @@ describe("SQLite / IdentifierStore", () => {
       }),
     );
 
-    expect(result.verified?.verified).toBe(true);
-    expect(result.verified?.verifiedAt).toEqual(at(9000));
-    expect(result.reloaded?.verified).toBe(true);
-    expect(result.reloaded?.verifiedAt).toEqual(at(9000));
-    expect(result.unknown).toBeNull();
+    expect(Option.getOrUndefined(result.verified)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result.verified)?.verifiedAt).toEqual(at(9000));
+    expect(Option.getOrUndefined(result.reloaded)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result.reloaded)?.verifiedAt).toEqual(at(9000));
+    expect(Option.isNone(result.unknown)).toBe(true);
   });
 });
 
@@ -508,9 +513,9 @@ describe("SQLite / Schema", () => {
       "effect_auth_rate_limits",
       "effect_auth_tokens",
     ]);
-    expect(result.session?.attributes).toEqual({ via: "custom" });
-    expect(result.user?.id).toBe("user-1");
-    expect(result.identifier?.id).toBe("identifier-1");
+    expect(Option.getOrUndefined(result.session)?.attributes).toEqual({ via: "custom" });
+    expect(Option.getOrUndefined(result.user)?.id).toBe("user-1");
+    expect(Option.getOrUndefined(result.identifier)?.id).toBe("identifier-1");
   });
 
   it("emits SQLite DDL matching the requested table names", () => {
@@ -631,11 +636,20 @@ describe("SQLite / Requests", () => {
       expect(log.selectsOn("effect_auth_sessions")).toHaveLength(1);
       expect(log.selectsOn("effect_auth_identifiers")).toHaveLength(2);
 
-      expect(users.map((user) => user?.id ?? null)).toEqual(["user-1", "user-1", "user-2", null]);
-      expect(users[0]?.name).toBe("name-user-1");
-      expect(session?.attributes).toEqual({ device: "laptop" });
-      expect(missingSession).toBeNull();
-      expect(byValue.map((row) => row?.id ?? null)).toEqual(["email-1", "name-1", null]);
+      expect(users.map((user) => Option.getOrUndefined(user)?.id ?? null)).toEqual([
+        "user-1",
+        "user-1",
+        "user-2",
+        null,
+      ]);
+      expect(Option.getOrUndefined(users[0])?.name).toBe("name-user-1");
+      expect(Option.getOrUndefined(session)?.attributes).toEqual({ device: "laptop" });
+      expect(Option.isNone(missingSession)).toBe(true);
+      expect(byValue.map((row) => Option.getOrUndefined(row)?.id ?? null)).toEqual([
+        "email-1",
+        "name-1",
+        null,
+      ]);
       expect(mine.map((row) => row.id)).toEqual(["email-1", "name-1"]);
       expect(none).toEqual([]);
     });

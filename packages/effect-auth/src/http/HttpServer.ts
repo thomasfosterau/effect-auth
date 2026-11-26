@@ -2333,9 +2333,11 @@ export const emailVerificationsGroupLayer = (
           // would name an unverified account. The send goes off the response
           // path, so neither the mail round trip nor a vendor failure tells an
           // unverified account apart either.
-          if (identifier !== null && !identifier.verified) {
+          if (Option.isSome(identifier) && !identifier.value.verified) {
             yield* verification
-              .resendVerification(identifier.userId, identifier.value, { offResponsePath: true })
+              .resendVerification(identifier.value.userId, identifier.value.value, {
+                offResponsePath: true,
+              })
               .pipe(
                 Effect.catchIf(isRecipientSendCapped, () => Effect.void),
                 Effect.catchTags({
@@ -2738,13 +2740,19 @@ const organizationTarget =
     lookup: (
       org: typeof OrganizationService.Service,
       id: string,
-    ) => Effect.Effect<A | null, OrganizationError | AuthError>,
+    ) => Effect.Effect<Option.Option<A>, OrganizationError | AuthError>,
   ) =>
   (request: HttpServerRequest.HttpServerRequest, id: string, refusal: OrganizationError) =>
     Effect.gen(function* () {
       const { org, actorId } = yield* organizationActor(request, cfg);
       const target = yield* refusedForbidden(
-        Effect.filterOrFail(lookup(org, id), P.isNotNull, () => refusal),
+        Effect.flatMap(
+          lookup(org, id),
+          Option.match({
+            onNone: () => Effect.fail(refusal),
+            onSome: Effect.succeed,
+          }),
+        ),
       );
       return { org, actorId, target };
     });
@@ -3258,8 +3266,9 @@ export const organizationDomainsGroupLayer = (
         Effect.gen(function* () {
           yield* requireAdminCaller(request, cfg);
           const org = yield* resolveOrganization;
-          const claim = yield* refusedBadRequest(org.service.getDomainById(params.id));
-          if (claim === null) return yield* new S.NotFound({ message: "Domain not found" });
+          const found = yield* refusedBadRequest(org.service.getDomainById(params.id));
+          if (Option.isNone(found)) return yield* new S.NotFound({ message: "Domain not found" });
+          const claim = found.value;
           return yield* refusedBadRequest(
             org.service.releaseDomain(claim.organizationId, claim.domain),
           ).pipe(Effect.asVoid);
@@ -4469,8 +4478,9 @@ export const authGroupLayer = (
               if (clientId !== undefined) {
                 const client = yield* oidc.service
                   .getClient(clientId)
-                  .pipe(Effect.catchTag("AuthError", () => Effect.succeed(null)));
-                if (client !== null && client.redirectUris.includes(query.redirect_uri)) {
+                  .pipe(Effect.catchTag("AuthError", () => Effect.succeedNone));
+                const redirectUri = query.redirect_uri;
+                if (Option.exists(client, (c) => c.redirectUris.includes(redirectUri))) {
                   const errUrl = new URL(query.redirect_uri);
                   errUrl.searchParams.set("error", "login_required");
                   if (query.state !== undefined) errUrl.searchParams.set("state", query.state);
@@ -5218,7 +5228,7 @@ const resolveSession = (
         yield* digestToken(token),
         yield* sessionCacheGateAttributes,
       ).pipe(PlatformCrypto.provide);
-      if (resolved !== null) return { resolved, cacheHit: true, token };
+      if (Option.isSome(resolved)) return { resolved: resolved.value, cacheHit: true, token };
     }
     const sessionManager = yield* SessionService;
     const resolved = yield* sessionManager

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as SchemaGetter from "effect/SchemaGetter";
 import { HttpApiMiddleware, HttpApiSchema } from "effect/http-api";
 import { Forbidden, Unauthorized } from "../Guard.ts";
@@ -1600,10 +1601,10 @@ export const encodeUser = (
   user: Types.User,
   identifiers?: ReadonlyArray<Identifier.Identifier>,
 ): UserView => {
-  const email = identifiers === undefined ? null : Identifier.anyEmail(identifiers);
+  const email = identifiers === undefined ? Option.none() : Identifier.anyEmail(identifiers);
   return {
     id: user.id,
-    ...(email !== null && { email: email.value, emailVerified: email.verified }),
+    ...(Option.isSome(email) && { email: email.value.value, emailVerified: email.value.verified }),
     ...(user.name !== undefined && { name: user.name }),
     ...(user.image !== undefined && { image: user.image }),
     createdAt: user.createdAt.getTime(),

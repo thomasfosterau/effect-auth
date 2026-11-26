@@ -7,6 +7,8 @@
 
 import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
@@ -99,7 +101,7 @@ export const make = (
 
     const one = (label: string, where: ReturnType<typeof eq>) =>
       query(label, (db) => db.select(column).from(table).where(where).limit(1).execute()).pipe(
-        Effect.map((rows) => (rows[0] === undefined ? null : toApiKey(rows[0]))),
+        Effect.map((rows) => Option.map(Arr.head(rows), toApiKey)),
       );
 
     return {
@@ -166,7 +168,9 @@ export const make = (
                 .execute(),
             ),
           );
-          return matched > 0 ? yield* one("apiKey.recordUse.read", eq(column.id, id)) : null;
+          return matched > 0
+            ? yield* one("apiKey.recordUse.read", eq(column.id, id))
+            : Option.none<Auth.ApiKey>();
         }),
 
       delete: (id) =>

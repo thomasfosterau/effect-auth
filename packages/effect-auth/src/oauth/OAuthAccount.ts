@@ -4,6 +4,7 @@
  * the store without an import cycle. `OAuth.ts` re-exports both.
  */
 import { Context, type Effect } from "effect";
+import * as Option from "effect/Option";
 import type { AuthError } from "../Errors.ts";
 
 /**
@@ -42,16 +43,18 @@ export class OAuthAccountStore extends Context.Service<
     readonly get: (
       provider: string,
       providerId: string,
-    ) => Effect.Effect<OAuthAccount | null, AuthError>;
+    ) => Effect.Effect<Option.Option<OAuthAccount>, AuthError>;
     readonly getByUserId: (userId: string) => Effect.Effect<readonly OAuthAccount[], AuthError>;
     /**
      * Refresh the tokens and profile fields (`email`, `name`, `picture`,
      * `accessToken`, `refreshToken`, `expiresAt`, `updatedAt`) of the link
      * whose `id` is `account.id`. It never changes `userId`, `provider` or
      * `providerId`, and never creates a link: it returns the link as stored
-     * afterwards, or `null` when no link has that id (unlinked meanwhile).
+     * afterwards, or `None` when no link has that id (unlinked meanwhile).
      */
-    readonly update: (account: OAuthAccount) => Effect.Effect<OAuthAccount | null, AuthError>;
+    readonly update: (
+      account: OAuthAccount,
+    ) => Effect.Effect<Option.Option<OAuthAccount>, AuthError>;
     /**
      * Point the existing link for `(account.provider, account.providerId)` at
      * `userId`; a no-op when there is none. The one method that changes a

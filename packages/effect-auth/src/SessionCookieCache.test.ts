@@ -1,5 +1,6 @@
 import { assert, describe, it, expect } from "vite-plus/test";
 import { DateTime, Effect, HashSet, Layer, Redacted } from "effect";
+import * as Option from "effect/Option";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   decodeSessionCacheCookie,
@@ -29,7 +30,7 @@ const encode = (
   Effect.runPromise(PlatformCrypto.provide(encodeSessionCacheCookie(...args)));
 const decode = (
   ...args: Parameters<typeof decodeSessionCacheCookie>
-): Promise<Types.SessionWithUser | null> =>
+): Promise<Option.Option<Types.SessionWithUser>> =>
   Effect.runPromise(PlatformCrypto.provide(decodeSessionCacheCookie(...args)));
 
 /** Encode, failing the test when the snapshot is refused. */
@@ -53,8 +54,8 @@ const mustDecode = async (
   ...args: Parameters<typeof decodeSessionCacheCookie>
 ): Promise<Types.SessionWithUser> => {
   const decoded = await decode(...args);
-  assert(decoded !== null, "decodeSessionCacheCookie rejected the cookie");
-  return decoded;
+  assert(Option.isSome(decoded), "decodeSessionCacheCookie rejected the cookie");
+  return decoded.value;
 };
 
 const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
@@ -156,7 +157,7 @@ describe("signature verification", () => {
       secret: Redacted.make("b".repeat(32)),
     };
     const cookie = await mustEncode(value, forgeryCache, now, SESSION_ID);
-    expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(true);
   });
 
   it("rejects a tampered payload", async () => {
@@ -168,7 +169,7 @@ describe("signature verification", () => {
     const raw = Buffer.from(encoded, "base64url");
     raw[10] ^= 0xff;
     const tampered = `${raw.toString("base64url")}.${sig}`;
-    expect(await decode(tampered, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(tampered, cache, now, SESSION_ID))).toBe(true);
   });
 
   it("rejects a cookie with a detached signature", async () => {
@@ -176,18 +177,20 @@ describe("signature verification", () => {
     const dot = cookie.lastIndexOf(".");
     const encoded = cookie.slice(0, dot);
     const wrongSig = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    expect(await decode(`${encoded}.${wrongSig}`, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(`${encoded}.${wrongSig}`, cache, now, SESSION_ID))).toBe(
+      true,
+    );
   });
 
   it("rejects a cookie with no dot separator", async () => {
-    expect(await decode("nodot", cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode("nodot", cache, now, SESSION_ID))).toBe(true);
   });
 });
 
 describe("expiry", () => {
   it("rejects an expired cache entry (exp in past)", async () => {
     const cookie = await mustEncode(value, cache, now - cache.maxAge - 1, SESSION_ID);
-    expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(true);
   });
 
   it("rejects a cache entry whose underlying session has expired", async () => {
@@ -200,24 +203,24 @@ describe("expiry", () => {
       now,
       SESSION_ID,
     );
-    expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(true);
   });
 
   it("accepts a cache entry that is about to expire (1 ms left)", async () => {
     const cookie = await mustEncode(value, cache, now - cache.maxAge + 1, SESSION_ID);
-    expect(await decode(cookie, cache, now, SESSION_ID)).not.toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(false);
   });
 });
 
 describe("session-binding (sid)", () => {
   it("rejects when primarySessionId does not match the encoded sid", async () => {
     const cookie = await mustEncode(value, cache, now, SESSION_ID);
-    expect(await decode(cookie, cache, now, "sess_other")).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, "sess_other"))).toBe(true);
   });
 
   it("accepts when primarySessionId matches", async () => {
     const cookie = await mustEncode(value, cache, now, SESSION_ID);
-    expect(await decode(cookie, cache, now, SESSION_ID)).not.toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(false);
   });
 
   it("rejects after account switch (different sid in cookie vs. primary cookie)", async () => {
@@ -225,13 +228,13 @@ describe("session-binding (sid)", () => {
     const sessionB = "sess_bbb";
     // User had session A cached; primary cookie is now session B
     const cookie = await mustEncode(value, cache, now, sessionA);
-    expect(await decode(cookie, cache, now, sessionB)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, sessionB))).toBe(true);
   });
 
   it("rejects a stale cache after logout (empty primarySessionId)", async () => {
     const cookie = await mustEncode(value, cache, now, SESSION_ID);
     // An empty string will never match a real session id
-    expect(await decode(cookie, cache, now, "")).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, ""))).toBe(true);
   });
 });
 
@@ -241,14 +244,16 @@ describe("cache epoch", () => {
 
   it("rejects every cookie issued under another epoch", async () => {
     const cookie = await mustEncode(value, withVersion("2026-10"), now, SESSION_ID);
-    expect(await decode(cookie, withVersion("2026-10"), now, SESSION_ID)).not.toBeNull();
-    expect(await decode(cookie, withVersion("2026-11"), now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, withVersion("2026-10"), now, SESSION_ID))).toBe(
+      false,
+    );
+    expect(Option.isNone(await decode(cookie, withVersion("2026-11"), now, SESSION_ID))).toBe(true);
   });
 
   it("rejects a cookie with no epoch once one is set, and accepts it while none is", async () => {
     const cookie = await mustEncode(value, cache, now, SESSION_ID);
-    expect(await decode(cookie, cache, now, SESSION_ID)).not.toBeNull();
-    expect(await decode(cookie, withVersion("v2"), now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(false);
+    expect(Option.isNone(await decode(cookie, withVersion("v2"), now, SESSION_ID))).toBe(true);
   });
 });
 
@@ -275,8 +280,10 @@ describe("server-only attributes", () => {
   it("never serves a cookie that carries one, so the request falls through to the store", async () => {
     // Issued while `role` was not server-only, then read with the default list.
     const cookie = await mustEncode(admin, cache, now, SESSION_ID, HashSet.empty());
-    expect(await decode(cookie, cache, now, SESSION_ID, HashSet.empty())).not.toBeNull();
-    expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID, HashSet.empty()))).toBe(
+      false,
+    );
+    expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(true);
   });
 });
 
@@ -291,7 +298,7 @@ describe("standing attributes", () => {
     async (attributes) => {
       expect(await encode(holding(attributes), cache, now, SESSION_ID)).toBeUndefined();
       const cookie = await mustEncode(holding(attributes), cache, now, SESSION_ID, HashSet.empty());
-      expect(await decode(cookie, cache, now, SESSION_ID)).toBeNull();
+      expect(Option.isNone(await decode(cookie, cache, now, SESSION_ID))).toBe(true);
     },
   );
 
@@ -325,15 +332,19 @@ describe("encryption", () => {
     expect(Buffer.from(payload.slice(1), "base64url").toString("utf8")).not.toContain("user_1");
     expect(cookie).not.toContain(Buffer.from('"plan"').toString("base64url"));
     const result = await decode(cookie, encrypted, now, SESSION_ID);
-    expect(result?.user.attributes["plan"]).toBe("pro");
+    expect(Option.getOrUndefined(result)?.user.attributes["plan"]).toBe("pro");
   });
 
   it("rejects a signed-only cookie when encryption is on, and an encrypted one when it is off", async () => {
     expect(
-      await decode(await mustEncode(value, cache, now, SESSION_ID), encrypted, now, SESSION_ID),
-    ).toBeNull();
+      Option.isNone(
+        await decode(await mustEncode(value, cache, now, SESSION_ID), encrypted, now, SESSION_ID),
+      ),
+    ).toBe(true);
     expect(
-      await decode(await mustEncode(value, encrypted, now, SESSION_ID), cache, now, SESSION_ID),
-    ).toBeNull();
+      Option.isNone(
+        await decode(await mustEncode(value, encrypted, now, SESSION_ID), cache, now, SESSION_ID),
+      ),
+    ).toBe(true);
   });
 });

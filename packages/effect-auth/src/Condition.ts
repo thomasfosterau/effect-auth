@@ -12,6 +12,7 @@ import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Entity from "./Entity.ts";
 
 // ---------------------------------------------------------------------------
@@ -333,8 +334,10 @@ const slotRoot = (
   of: RequestSlot,
 ): Entity.AttributeValue => {
   if (of === "context") return request.context;
-  const found = Entity.getEntity(slice, request[of]);
-  return found === null ? {} : found.attributes;
+  return Option.match(Entity.getEntity(slice, request[of]), {
+    onNone: () => ({}),
+    onSome: (found) => found.attributes,
+  });
 };
 
 /**

@@ -6,6 +6,7 @@
  * for good. Internal.
  */
 import { Clock, Duration, Effect } from "effect";
+import * as Option from "effect/Option";
 import type { SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
 import { randomBase64UrlToken } from "./RandomToken.ts";
@@ -25,12 +26,12 @@ export interface CodeRecord {
  * `PhoneOtpStore` both fit, with `A` their record.
  */
 export interface CodeStore<P, A extends CodeRecord = CodeRecord> extends OtpFailureBudget<P> {
-  readonly get: (address: string, purpose: P) => Effect.Effect<A | null, Errors.AuthError>;
+  readonly get: (address: string, purpose: P) => Effect.Effect<Option.Option<A>, Errors.AuthError>;
   readonly delete: (address: string, purpose: P) => Effect.Effect<void, Errors.AuthError>;
   readonly incrementAttempts: (
     address: string,
     purpose: P,
-  ) => Effect.Effect<number | null, Errors.AuthError>;
+  ) => Effect.Effect<Option.Option<number>, Errors.AuthError>;
 }
 
 /** The configuration both flows take for their codes. */
@@ -81,19 +82,18 @@ const backoffDelay = (backoff: ResolvedCodeConfig["backoff"], count: number): nu
 const sendWait = (options: {
   readonly now: number;
   readonly config: ResolvedCodeConfig;
-  readonly existing: CodeRecord | null;
-  readonly failures: OtpFailures | null;
+  readonly existing: Option.Option<CodeRecord>;
+  readonly failures: Option.Option<OtpFailures>;
 }): number => {
-  const cooldown =
-    options.existing === null
-      ? 0
-      : options.existing.createdAt + options.config.resendCooldown - options.now;
-  const backoff =
-    options.failures === null
-      ? 0
-      : options.failures.lastFailureAt +
-        backoffDelay(options.config.backoff, options.failures.count) -
-        options.now;
+  const cooldown = Option.match(options.existing, {
+    onNone: () => 0,
+    onSome: (existing) => existing.createdAt + options.config.resendCooldown - options.now,
+  });
+  const backoff = Option.match(options.failures, {
+    onNone: () => 0,
+    onSome: (failures) =>
+      failures.lastFailureAt + backoffDelay(options.config.backoff, failures.count) - options.now,
+  });
   return Math.max(0, cooldown, backoff);
 };
 
@@ -179,10 +179,11 @@ export const verifyCode = <P, E>(
       return yield* reject(purpose, "missing");
     }
 
-    const record = yield* store.get(address, purpose);
-    if (!record) {
+    const found = yield* store.get(address, purpose);
+    if (Option.isNone(found)) {
       return yield* reject(purpose, "missing");
     }
+    const record = found.value;
 
     const now = yield* Clock.currentTimeMillis;
     if (now > record.expiresAt) {
@@ -192,12 +193,13 @@ export const verifyCode = <P, E>(
 
     // Count the attempt before comparing: each concurrent guess gets
     // its own count from the store, so at most `maxAttempts` guesses are
-    // ever compared, however many arrive at once. `null` is a code another
+    // ever compared, however many arrive at once. `None` is a code another
     // request consumed or exhausted since the read.
-    const attempts = yield* store.incrementAttempts(address, purpose);
-    if (attempts === null) {
+    const counted = yield* store.incrementAttempts(address, purpose);
+    if (Option.isNone(counted)) {
       return yield* reject(purpose, "missing");
     }
+    const attempts = counted.value;
     if (attempts > maxAttempts) {
       yield* store.delete(address, purpose);
       return yield* reject(purpose, "attempts");

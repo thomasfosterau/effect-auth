@@ -87,7 +87,7 @@ const phoneOtpStore: typeof PhoneOtpStore.Service = {
   get: (phone, purpose) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return Option.getOrNull(MutableHashMap.get(records, key(phone, purpose)));
+      return MutableHashMap.get(records, key(phone, purpose));
     }),
   delete: (phone, purpose) =>
     Effect.sync(() => {
@@ -98,10 +98,10 @@ const phoneOtpStore: typeof PhoneOtpStore.Service = {
     Effect.sync(() => {
       storeOps.push("incrementAttempts");
       const record = Option.getOrUndefined(MutableHashMap.get(records, key(phone, purpose)));
-      if (!record) return 0;
+      if (!record) return Option.fromNullishOr(0);
       const updated = { ...record, attempts: record.attempts + 1 };
       MutableHashMap.set(records, key(phone, purpose), updated);
-      return updated.attempts;
+      return Option.fromNullishOr(updated.attempts);
     }),
   ...recordingOtpFailures<PhoneOtpPurpose>(otpFailures, storeOps),
 };
@@ -155,7 +155,7 @@ const sessionStore: typeof SessionStore.Service = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (sessionId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
   update: (session) =>
     Effect.sync(() => {
       MutableHashMap.set(sessions, session.id, session);
@@ -177,7 +177,7 @@ const sessionStore: typeof SessionStore.Service = {
 };
 
 const userStore: typeof UserStore.Service = {
-  get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const sessionConfig: Types.SessionConfig = {
@@ -268,10 +268,10 @@ describe("PhoneOtpService", () => {
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
 
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551231111");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551231111"));
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551231111"));
-    expect(identifier?.userId).toBe(result.user.id);
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.userId).toBe(result.user.id);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
     // The store was handed the number to create the user with.
     expect(createdWith).toEqual([
       { type: "phone", value: "+15551231111", verified: true, verifiedAt: expect.any(Date) },
@@ -372,7 +372,7 @@ describe("PhoneOtpService", () => {
     );
 
     expect(MutableHashMap.size(users)).toBe(before);
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551232222");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551232222"));
   });
 
   it("rejects a replayed OTP (one-time use)", async () => {
@@ -487,8 +487,8 @@ describe("PhoneOtpService", () => {
     );
     expect(updated.id).toBe(created.id);
     const identifier = await Effect.runPromise(identifiers.getByValue("phone", "+15551237777"));
-    expect(identifier?.userId).toBe(created.id);
-    expect(identifier?.verified).toBe(true);
+    expect(Option.getOrUndefined(identifier)?.userId).toBe(created.id);
+    expect(Option.getOrUndefined(identifier)?.verified).toBe(true);
   });
 
   it("applies the normalizePhoneNumber hook for storage and lookup", async () => {
@@ -503,7 +503,7 @@ describe("PhoneOtpService", () => {
         return yield* service.signIn("+15551238888", recorded(sentOtps).otp);
       }).pipe(Effect.provide(testContext), Effect.provide(TestHooks)),
     );
-    expect(await phoneNumberOf(result.user.id)).toBe("+15551238888");
+    expect(await phoneNumberOf(result.user.id)).toEqual(Option.some("+15551238888"));
   });
 
   it("fails with ResendTooSoonError when a resend is within the cooldown window", async () => {

@@ -92,7 +92,7 @@ export const make = (
             // A banned or SCIM-deactivated user gets no session, whichever
             // sign-in method asked for it.
             const user = yield* userStore.get(args.userId);
-            if (user !== null) yield* requireGoodStanding(user);
+            if (Option.isSome(user)) yield* requireGoodStanding(user.value);
 
             const rawToken = yield* generateSessionId();
             const nowUtc = yield* DateTime.now;
@@ -130,13 +130,14 @@ export const make = (
           // what it returns is not read back, so it cannot redirect the lookup.
           const tokenHash = yield* hashToken(rawSessionId);
           yield* hooks.beforeValidateSession({ sessionId: tokenHash });
-          const session = yield* sessionStore.get(tokenHash);
-          if (session === null) {
+          const foundSession = yield* sessionStore.get(tokenHash);
+          if (Option.isNone(foundSession)) {
             return yield* new Errors.SessionNotFoundError({
               message: "Session not found",
               sessionId: tokenHash,
             });
           }
+          const session = foundSession.value;
 
           // Check if session is expired
           const nowUtc = yield* DateTime.now;
@@ -189,7 +190,7 @@ export const make = (
           // refreshed within the last `updateAge` ms (default: always write).
           // `touch` moves only the two expiry columns, so a concurrent
           // attribute write is never undone, and never recreates a session
-          // revoked since the read: its `null` is a revoked session. A failed
+          // revoked since the read: its `None` is a revoked session. A failed
           // write is logged and the request goes on with the refreshed copy.
           const updateAge = config.sessionExpiresIn.updateAge ?? 0;
           const timeSinceUpdate = now.getTime() - session.lastActivityAt.getTime();
@@ -199,7 +200,6 @@ export const make = (
               : yield* sessionStore
                   .touch(tokenHash, { lastActivityAt: now, expiresAt: newExpiresAt })
                   .pipe(
-                    Effect.map(Option.fromNullishOr),
                     Effect.catch((error) =>
                       Effect.logWarning("[effect-auth] refreshing a session failed", error).pipe(
                         Effect.as(Option.some(refreshed)),
@@ -215,13 +215,14 @@ export const make = (
           const updatedSession = stored.value;
 
           // Get user
-          const user = yield* userStore.get(session.userId);
-          if (user === null) {
+          const foundUser = yield* userStore.get(session.userId);
+          if (Option.isNone(foundUser)) {
             return yield* new Errors.UserNotFoundError({
               message: "User not found",
               userId: session.userId,
             });
           }
+          const user = foundUser.value;
           yield* requireGoodStanding(user);
 
           // The session answers under its stored id: the caller already holds
@@ -290,13 +291,14 @@ export const make = (
         storedSessionId: string,
         attributes: Types.Attributes,
       ) {
-        const session = yield* sessionStore.get(storedSessionId);
-        if (session === null) {
+        const foundSession = yield* sessionStore.get(storedSessionId);
+        if (Option.isNone(foundSession)) {
           return yield* new Errors.SessionNotFoundError({
             message: "Session not found",
             sessionId: storedSessionId,
           });
         }
+        const session = foundSession.value;
         // The issuance attributes (credential class, device grant) stay as
         // the issuing flow wrote them, so no caller can upgrade a session.
         const updated: Types.Session = {

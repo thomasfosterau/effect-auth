@@ -7,6 +7,8 @@
 
 import { and, asc, eq, gte, inArray } from "drizzle-orm";
 import { Effect, Layer, Request, RequestResolver } from "effect";
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   resolveSchema,
@@ -55,12 +57,7 @@ export const make = (
     const get = (label: string, sessionId: string) =>
       query(label, (db) =>
         db.select(column).from(table).where(eq(column.id, sessionId)).limit(1).execute(),
-      ).pipe(
-        Effect.map((rows) => {
-          const row = rows[0];
-          return row === undefined ? null : toSession(row);
-        }),
-      );
+      ).pipe(Effect.map((rows) => Option.map(Arr.head(rows), toSession)));
 
     return {
       create: (session) =>
@@ -114,7 +111,7 @@ export const make = (
                 .execute(),
             ),
           );
-          return matched > 0 ? yield* get("session.touch.read", sessionId) : null;
+          return matched > 0 ? yield* get("session.touch.read", sessionId) : Option.none();
         }),
 
       delete: (sessionId) =>
@@ -152,12 +149,12 @@ export const layer = (
 /**
  * Read one session by its id (the SHA-256 hash of the bearer token).
  *
- * Resolves to `null` on a miss, exactly like `SessionStore.get`. Issue it with
+ * Resolves to `None` on a miss, exactly like `SessionStore.get`. Issue it with
  * `Requests.getSession(id)` rather than constructing it by hand.
  */
 export class GetSession extends Request.TaggedClass("GetSession")<
   { readonly id: string },
-  Auth.Session | null,
+  Option.Option<Auth.Session>,
   Auth.AuthError
 > {}
 

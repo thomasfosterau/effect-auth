@@ -539,10 +539,10 @@ export const findUser = (
       "email",
       normalizeEmail(identity.email),
     );
-    if (identifier === null || !identifier.verified) return Option.none();
-    const user = yield* users.get(identifier.userId);
-    if (user === null || !(yield* isInGoodStanding(user))) return Option.none();
-    return Option.some(user);
+    if (Option.isNone(identifier) || !identifier.value.verified) return Option.none();
+    const user = yield* users.get(identifier.value.userId);
+    if (Option.isNone(user) || !(yield* isInGoodStanding(user.value))) return Option.none();
+    return user;
   });
 
 /**

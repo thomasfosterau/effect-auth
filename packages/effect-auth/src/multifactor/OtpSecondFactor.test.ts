@@ -36,8 +36,7 @@ const otpStore = {
       return record;
     }),
 
-  get: (pendingToken: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(otpRecords, pendingToken))),
+  get: (pendingToken: string) => Effect.sync(() => MutableHashMap.get(otpRecords, pendingToken)),
 
   update: (record: OtpSecondFactorRecord) =>
     Effect.sync(() => {
@@ -47,10 +46,10 @@ const otpStore = {
 
   incrementAttempts: (pendingToken: string) =>
     Effect.sync(() => {
-      const record = Option.getOrNull(MutableHashMap.get(otpRecords, pendingToken));
-      if (record === null) return null;
-      MutableHashMap.set(otpRecords, pendingToken, { ...record, attempts: record.attempts + 1 });
-      return record.attempts + 1;
+      return Option.map(MutableHashMap.get(otpRecords, pendingToken), (record) => {
+        MutableHashMap.set(otpRecords, pendingToken, { ...record, attempts: record.attempts + 1 });
+        return record.attempts + 1;
+      });
     }),
 
   delete: (pendingToken: string) =>
@@ -65,7 +64,7 @@ const sessionStore = {
       MutableHashMap.set(sessions, session.id, session);
       return session;
     }),
-  get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+  get: (id: string) => Effect.sync(() => MutableHashMap.get(sessions, id)),
   update: (session: Session) =>
     Effect.sync(() => {
       MutableHashMap.set(sessions, session.id, session);
@@ -90,7 +89,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const sessionConfig: SessionConfig = {

@@ -86,7 +86,7 @@ const makeOidcStores = () => {
 
   const clientStore: typeof OidcClientStore.Service = {
     create: (c) => Effect.sync(() => (MutableHashMap.set(clients, c.clientId, c), c)),
-    getByClientId: (id) => Effect.succeed(Option.getOrNull(MutableHashMap.get(clients, id))),
+    getByClientId: (id) => Effect.succeed(MutableHashMap.get(clients, id)),
     update: (c) => Effect.sync(() => (MutableHashMap.set(clients, c.clientId, c), c)),
     delete: (id) => Effect.sync(() => void MutableHashMap.remove(clients, id)),
     list: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(clients))),
@@ -96,30 +96,24 @@ const makeOidcStores = () => {
     // Reads yield the fiber, as a database round trip would, so concurrent
     // redemptions interleave between a read and the spend.
     get: (hash) =>
-      Effect.tap(
-        Effect.succeed(Option.getOrNull(MutableHashMap.get(codes, hash))),
-        () => Effect.yieldNow,
-      ),
+      Effect.tap(Effect.succeed(MutableHashMap.get(codes, hash)), () => Effect.yieldNow),
     consume: (hash) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(codes, hash));
         MutableHashMap.remove(codes, hash);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(codes, hash)),
   };
   const tokenStore: typeof OidcTokenStore.Service = {
     create: (t) => Effect.sync(() => (MutableHashMap.set(tokens, t.tokenHash, t), t)),
     get: (hash) =>
-      Effect.tap(
-        Effect.succeed(Option.getOrNull(MutableHashMap.get(tokens, hash))),
-        () => Effect.yieldNow,
-      ),
+      Effect.tap(Effect.succeed(MutableHashMap.get(tokens, hash)), () => Effect.yieldNow),
     consume: (hash) =>
       Effect.sync(() => {
         const found = Option.getOrNull(MutableHashMap.get(tokens, hash));
         MutableHashMap.remove(tokens, hash);
-        return found;
+        return Option.fromNullishOr(found);
       }),
     delete: (hash) => Effect.sync(() => void MutableHashMap.remove(tokens, hash)),
     deleteByUserId: (userId) =>
@@ -145,7 +139,7 @@ const makeOidcStores = () => {
   };
   const consentStore: typeof OidcConsentStore.Service = {
     get: (userId, clientId) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(consents, `${userId}:${clientId}`))),
+      Effect.succeed(MutableHashMap.get(consents, `${userId}:${clientId}`)),
     upsert: (c) =>
       Effect.sync(() => (MutableHashMap.set(consents, `${c.userId}:${c.clientId}`, c), c)),
     delete: (userId, clientId) =>
@@ -159,7 +153,7 @@ const makeOidcStores = () => {
       }),
   };
   const jwtKeyStore: typeof JwtKeyStore.Service = {
-    getActive: Effect.sync(() => jwtKeys[0] ?? null),
+    getActive: Effect.sync(() => Arr.head(jwtKeys)),
     create: (pair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: Effect.sync(() => [...jwtKeys]),
   };
@@ -195,7 +189,7 @@ describe("OidcProviderService", () => {
     // construction time (even though these service-level tests never exercise
     // the userinfo/token-signing paths), so both must be satisfiable here too.
     const userStore: typeof UserStore.Service = {
-      get: () => Effect.succeed(null),
+      get: () => Effect.succeedNone,
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
       Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
@@ -512,7 +506,7 @@ describe("OidcProviderService", () => {
       Layer.succeed(OidcCodeStore)(stores.codeStore),
       Layer.succeed(OidcTokenStore)(stores.tokenStore),
       Layer.succeed(OidcConsentStore)(stores.consentStore),
-      Layer.succeed(UserStore)({ get: () => Effect.succeed(user) }),
+      Layer.succeed(UserStore)({ get: () => Effect.succeed(Option.fromNullishOr(user)) }),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       JwtService.layer({ issuer: ISSUER, definePayload: () => ({ roles: ["admin"] }) }).pipe(
         Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
@@ -686,7 +680,7 @@ describe("OidcProviderService token state", () => {
       Layer.succeed(OidcTokenStore)(wrapTokenStore(stores.tokenStore)),
       Layer.succeed(OidcConsentStore)(stores.consentStore),
       Layer.succeed(UserStore)({
-        get: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, id))),
+        get: (id) => Effect.sync(() => MutableHashMap.get(users, id)),
       }),
       Layer.succeed(IdentifierStore)(memoryIdentifierStore()),
       JwtService.layer({ issuer: ISSUER }).pipe(
@@ -788,7 +782,7 @@ describe("OidcProviderService token state", () => {
       ...store,
       get: (hash) =>
         Effect.tap(store.get(hash), (record) =>
-          armed && record?.kind === "refresh"
+          armed && Option.getOrUndefined(record)?.kind === "refresh"
             ? Effect.suspend(() => {
                 arrived += 1;
                 return arrived >= 2
@@ -973,7 +967,7 @@ describe("OidcProviderService dynamic client registration", () => {
   const setup = (dynamicRegistration?: OidcDynamicRegistrationConfig) => {
     const stores = makeOidcStores();
     const userStore: typeof UserStore.Service = {
-      get: () => Effect.succeed(null),
+      get: () => Effect.succeedNone,
     };
     const jwtServiceLayer = JwtService.layer({ issuer: ISSUER }).pipe(
       Layer.provide(Layer.merge(Layer.succeed(JwtKeyStore)(stores.jwtKeyStore), testCryptoLayer)),
@@ -1389,7 +1383,7 @@ const makeHttpFixture = (
   };
 
   const userStore: typeof UserStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
   const userServiceStore = {
     get: userStore.get,
@@ -1399,7 +1393,7 @@ const makeHttpFixture = (
   };
   const sessionStore: typeof SessionStore.Service = {
     create: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
-    get: (id: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, id))),
+    get: (id: string) => Effect.sync(() => MutableHashMap.get(sessions, id)),
     update: (s: Types.Session) => Effect.sync(() => (MutableHashMap.set(sessions, s.id, s), s)),
     touch: (sessionId: string, touch: SessionTouch) =>
       memorySessionStore(sessions).touch(sessionId, touch),
@@ -1488,7 +1482,7 @@ const makeHttpFixture = (
     get: (key: string) =>
       Effect.sync(() => {
         MutableHashSet.add(rateLimitKeys, key);
-        return Option.getOrNull(MutableHashMap.get(rateLimitEntries, key));
+        return MutableHashMap.get(rateLimitEntries, key);
       }),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
       Effect.sync(() => {

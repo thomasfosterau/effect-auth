@@ -11,6 +11,7 @@
  */
 import { assert, beforeEach, describe, expect, it } from "vite-plus/test";
 import { DateTime, Effect, Layer, Redacted } from "effect";
+import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { AdminService, AdminUserStore } from "./Admin.ts";
 import { ClientIP } from "./ClientIP.ts";
@@ -413,7 +414,7 @@ describe("magic link and one-time codes under an account lock", () => {
       }).pipe(Effect.provide(passwordless(lockout({ maxAttempts: 3 })))),
     );
     expect(result.session?.userId).toBe(result.ada.id);
-    expect(result.lock).toBeNull();
+    expect(Option.isNone(result.lock)).toBe(true);
   });
 
   it("lets the owner recover with a phone OTP while the account is locked", async () => {
@@ -452,7 +453,7 @@ describe("magic link and one-time codes under an account lock", () => {
         const store = yield* EmailOtpStore;
         return {
           rounds,
-          failures: (yield* store.getFailures(email, "sign-in"))?.count,
+          failures: Option.getOrUndefined(yield* store.getFailures(email, "sign-in"))?.count,
           password: yield* signInByUsername(password),
         };
       }).pipe(Effect.provide(passwordless(lockout({ maxAttempts: 3 })))),
@@ -673,7 +674,7 @@ describe("an impersonation leaves the target's lockout standing", () => {
       }).pipe(Effect.provide(passwordless(lockout({ maxAttempts: 3 })))),
     );
     expect(result.impersonatedBy).toBe("admin-1");
-    expect(result.lock?.lockedUntil).toBeDefined();
+    expect(Option.getOrUndefined(result.lock)?.lockedUntil).toBeDefined();
     expect(result.password).toBe("AccountLockedError");
   });
 });

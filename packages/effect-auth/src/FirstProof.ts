@@ -7,6 +7,7 @@
  * @internal
  */
 import { DateTime, Effect } from "effect";
+import * as Option from "effect/Option";
 import type * as Errors from "./Errors.ts";
 import type { Identifier, IdentifierStore } from "./Identifier.ts";
 import type { EmailPasswordStore } from "./email/EmailPassword.ts";
@@ -113,13 +114,13 @@ const removeCredentials = (credentials: FirstProofCredentials, userId: string) =
  * session's stored id (the token's digest, as `validateSession` answers it) as
  * `proverSessionId`, and it alone survives. An identifier that is already
  * verified is promoted with nothing removed. Returns what `setVerified`
- * returns (`null` when the identifier was deleted meanwhile).
+ * returns (`None` when the identifier was deleted meanwhile).
  */
 export const proveAddress = (
   services: FirstProofServices,
   identifier: Identifier,
   proverSessionId?: string,
-): Effect.Effect<Identifier | null, Errors.AuthError> =>
+): Effect.Effect<Option.Option<Identifier>, Errors.AuthError> =>
   Effect.gen(function* () {
     if (!identifier.verified) {
       yield* services.passwords.clearPasswordHash(identifier.userId);
@@ -141,17 +142,16 @@ export const proveAddress = (
  */
 export const userForProvenEmail = <E, R, E2>(
   services: FirstProofServices,
-  found:
-    | { readonly identifier: Identifier; readonly user: Types.User }
-    | { readonly identifier: null; readonly user: null },
+  found: Option.Option<{ readonly identifier: Identifier; readonly user: Types.User }>,
   email: string,
   create: (identifier: NewUserIdentifier) => Effect.Effect<CreateUserResult, E, R>,
   taken: () => E2,
 ): Effect.Effect<Types.User, E | E2 | Errors.AuthError, R> =>
   Effect.gen(function* () {
-    if (found.user !== null) {
-      if (!found.identifier.verified) yield* proveAddress(services, found.identifier);
-      return found.user;
+    if (Option.isSome(found)) {
+      const { identifier, user } = found.value;
+      if (!identifier.verified) yield* proveAddress(services, identifier);
+      return user;
     }
     const verifiedAt = yield* DateTime.nowAsDate;
     const created = yield* createUserWithIdentifier(

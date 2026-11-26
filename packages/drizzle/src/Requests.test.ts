@@ -12,6 +12,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { Logger } from "drizzle-orm";
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import type * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -152,7 +153,7 @@ describe("Requests / users", () => {
       // Two requests, one batch, one row read — and the identical id appears in
       // the `IN (...)` list exactly once.
       expect(log.selectsOn("effect_auth_users")).toHaveLength(1);
-      expect(first?.id).toBe("user-1");
+      expect(Option.getOrUndefined(first)?.id).toBe("user-1");
       expect(second).toEqual(first);
     });
   });
@@ -171,9 +172,14 @@ describe("Requests / users", () => {
 
       const queries = log.selectsOn("effect_auth_users");
       expect(queries).toHaveLength(1);
-      expect(found.map((user) => user?.id ?? null)).toEqual(["user-1", "user-2", "user-3", null]);
+      expect(found.map((user) => Option.getOrUndefined(user)?.id ?? null)).toEqual([
+        "user-1",
+        "user-2",
+        "user-3",
+        null,
+      ]);
       // Results are matched back by id, not by row order.
-      expect(found[0]?.name).toBe("name-user-1");
+      expect(Option.getOrUndefined(found[0])?.name).toBe("name-user-1");
     });
   });
 });
@@ -208,9 +214,9 @@ describe("Requests / sessions", () => {
       );
 
       expect(log.selectsOn("effect_auth_sessions")).toHaveLength(1);
-      expect(first?.attributes).toEqual({ device: "session-1" });
-      expect(second?.id).toBe("session-2");
-      expect(missing).toBeNull();
+      expect(Option.getOrUndefined(first)?.attributes).toEqual({ device: "session-1" });
+      expect(Option.getOrUndefined(second)?.id).toBe("session-2");
+      expect(Option.isNone(missing)).toBe(true);
     });
   });
 });
@@ -247,11 +253,11 @@ describe("Requests / identifiers", () => {
       // Three types in the batch, still one round trip: the pairs are grouped
       // by type and OR-ed together.
       expect(log.selectsOn("effect_auth_identifiers")).toHaveLength(1);
-      expect(email?.id).toBe("email-1");
-      expect(username?.id).toBe("name-1");
-      expect(other?.userId).toBe("user-2");
-      expect(crossType).toBeNull();
-      expect(missing).toBeNull();
+      expect(Option.getOrUndefined(email)?.id).toBe("email-1");
+      expect(Option.getOrUndefined(username)?.id).toBe("name-1");
+      expect(Option.getOrUndefined(other)?.userId).toBe("user-2");
+      expect(Option.isNone(crossType)).toBe(true);
+      expect(Option.isNone(missing)).toBe(true);
     });
   });
 

@@ -11,6 +11,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -224,11 +225,14 @@ describe("promoted attributes", () => {
       );
     });
 
-    expect(moderator?.attributes).toEqual({ role: "moderator", plan: "pro" });
+    expect(Option.getOrUndefined(moderator)?.attributes).toEqual({
+      role: "moderator",
+      plan: "pro",
+    });
     // The database default reads through; a NULL column leaves its key absent.
-    expect(plain?.attributes).toEqual({ role: "user" });
+    expect(Option.getOrUndefined(plain)?.attributes).toEqual({ role: "user" });
     // The batched path projects the same way.
-    expect(batched.map((user) => user?.attributes)).toEqual([
+    expect(batched.map((user) => Option.getOrUndefined(user)?.attributes)).toEqual([
       { role: "moderator", plan: "pro" },
       { role: "user" },
     ]);
@@ -255,8 +259,11 @@ describe("promoted attributes", () => {
     });
 
     // A stale `role` in the bag never leaks past the column that owns the key.
-    expect(promotedWins?.attributes).toEqual({ role: "moderator", theme: "dark" });
-    expect(nullColumn?.attributes).toEqual({});
+    expect(Option.getOrUndefined(promotedWins)?.attributes).toEqual({
+      role: "moderator",
+      theme: "dark",
+    });
+    expect(Option.getOrUndefined(nullColumn)?.attributes).toEqual({});
   });
 
   it("is backed by the column's own CHECK: a rung off the ladder cannot be stored", async () => {

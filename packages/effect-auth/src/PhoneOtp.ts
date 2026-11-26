@@ -4,6 +4,7 @@
  * the application's; the default `normalizePhoneNumber` only trims.
  */
 import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { Digest, Mac, SecureRandom } from "effect/crypto";
 import * as Errors from "./Errors.ts";
@@ -66,14 +67,14 @@ export class PhoneOtpStore extends Context.Service<
     readonly get: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
-    ) => Effect.Effect<PhoneOtpRecord | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<PhoneOtpRecord>, Errors.AuthError>;
     readonly delete: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
     ) => Effect.Effect<void, Errors.AuthError>;
     /**
      * Count one attempt against the pair's code, atomically, and return the
-     * new count, or `null` when the pair has no code. The service
+     * new count, or `None` when the pair has no code. The service
      * counts before it compares, so of concurrent guesses each gets its own
      * count and at most `maxAttempts` are ever compared: two calls must never
      * return the same number. On SQL this is one `UPDATE … RETURNING`.
@@ -81,16 +82,16 @@ export class PhoneOtpStore extends Context.Service<
     readonly incrementAttempts: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
-    ) => Effect.Effect<number | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<number>, Errors.AuthError>;
     /**
-     * The pair's failure budget, or `null` when it has none. It is
+     * The pair's failure budget, or `None` when it has none. It is
      * kept apart from the OTP record: `upsert` and `delete` leave it as it
      * was.
      */
     readonly getFailures: (
       phoneNumber: string,
       purpose: PhoneOtpPurpose,
-    ) => Effect.Effect<Types.OtpFailures | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Types.OtpFailures>, Errors.AuthError>;
     /**
      * Count one wrong code against the pair, at `at` (epoch ms), and return
      * the budget after it: `count` from 1, `lastFailureAt` set to `at`. One
@@ -300,20 +301,26 @@ export class PhoneOtpService extends Context.Service<
 }
 
 /**
- * Resolve a user's phone number from their `phone` identifier, or `null`.
+ * Resolve a user's phone number from their `phone` identifier, or `None`.
  * Prefers a verified phone identifier; falls back to the earliest unverified
  * one.
  */
 export const getPhoneNumber = (
   identifierStore: typeof IdentifierStore.Service,
   userId: string,
-): Effect.Effect<string | null, Errors.AuthError> =>
+): Effect.Effect<Option.Option<string>, Errors.AuthError> =>
   Effect.map(identifierStore.listByUser(userId), (all) => {
     const phones = Arr.sort(
       all.filter((id) => id.type === "phone"),
       Order.mapInput(Order.Number, (id: (typeof all)[number]) => id.createdAt.getTime()),
     );
-    return (phones.find((id) => id.verified) ?? phones[0])?.value ?? null;
+    return Option.map(
+      Option.orElse(
+        Arr.findFirst(phones, (id) => id.verified),
+        () => Arr.head(phones),
+      ),
+      (id) => id.value,
+    );
   });
 
 export const make = (
@@ -399,7 +406,7 @@ export const make = (
         // Anti-enumeration: sign-in with sign-up disabled and no user
         // succeeds without sending.
         const deliver = hidesAccount(purpose)
-          ? (yield* lookupIdentifier(identifiers, "phone", phoneNumber)) !== null
+          ? Option.isSome(yield* lookupIdentifier(identifiers, "phone", phoneNumber))
           : true;
 
         // Resend cooldown and failure backoff. Both run for a number
@@ -443,7 +450,7 @@ export const make = (
       ) {
         const phoneNumber = yield* normalize(rawPhoneNumber);
 
-        const { identifier, user: owner } = yield* findIdentifierOwner(
+        const owned = yield* findIdentifierOwner(
           identifiers,
           users.get,
           "phone",
@@ -453,13 +460,13 @@ export const make = (
         yield* hooks.beforeAuthenticate({
           method: "phone-otp",
           identifier: { type: "phone", value: phoneNumber },
-          userId: owner?.id,
+          userId: Option.getOrUndefined(Option.map(owned, (o) => o.user.id)),
         });
 
         yield* verifyOtp(phoneNumber, otp, "sign-in");
 
-        let user = owner;
-        if (!user) {
+        let user: Types.User;
+        if (Option.isNone(owned)) {
           if (disableSignUp) {
             return yield* new PhoneOtpError({ message: "Sign-up is disabled" });
           }
@@ -479,9 +486,12 @@ export const make = (
             ),
           );
           user = created.user;
-        } else if (identifier !== null && !identifier.verified) {
-          // The OTP proves ownership — promote the identifier to verified.
-          yield* identifiers.setVerified(identifier.id, yield* DateTime.nowAsDate);
+        } else {
+          user = owned.value.user;
+          if (!owned.value.identifier.verified) {
+            // The OTP proves ownership — promote the identifier to verified.
+            yield* identifiers.setVerified(owned.value.identifier.id, yield* DateTime.nowAsDate);
+          }
         }
 
         const issued = yield* sessionOrChallenge(
@@ -510,10 +520,10 @@ export const make = (
 
         // Attach (or verify) the phone identifier for this user.
         const existing = yield* lookupIdentifier(identifiers, "phone", phoneNumber);
-        if (existing !== null && existing.userId !== userId) {
+        if (Option.exists(existing, (found) => found.userId !== userId)) {
           return yield* new PhoneOtpError({ message: "This phone number is already in use" });
         }
-        if (existing === null) {
+        if (Option.isNone(existing)) {
           const verifiedAt = yield* DateTime.nowAsDate;
           yield* claimIdentifier(
             identifiers,
@@ -532,14 +542,15 @@ export const make = (
               IdentifierRefusedError: (error) => Effect.fail(refusalAuthError(error)),
             }),
           );
-        } else if (!existing.verified) {
-          yield* identifiers.setVerified(existing.id, yield* DateTime.nowAsDate);
+        } else if (!existing.value.verified) {
+          yield* identifiers.setVerified(existing.value.id, yield* DateTime.nowAsDate);
         }
 
-        const user = yield* users.get(userId);
-        if (user === null) {
+        const foundUser = yield* users.get(userId);
+        if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
         }
+        const user = foundUser.value;
         return user;
       }),
     };

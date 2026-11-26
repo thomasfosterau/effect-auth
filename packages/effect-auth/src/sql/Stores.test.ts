@@ -1,5 +1,6 @@
 import { afterAll, assert, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import { Clock, Data, DateTime, Effect, Layer, Order, Stream } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
@@ -346,8 +347,9 @@ const storeContract = (engine: StoreEngine): void => {
           yield* store.create(session);
           yield* store.create({ ...session, id: "sess-2" });
           yield* store.create({ ...session, id: "sess-3", userId: "user-2" });
-          const loaded = yield* store.get("sess-1");
-          assert(loaded !== null, "the session was created");
+          const foundLoaded = yield* store.get("sess-1");
+          assert(Option.isSome(foundLoaded), "the session was created");
+          const loaded = foundLoaded.value;
           const updated = yield* store.update({
             ...loaded,
             lastActivityAt: DateTime.toDateUtc(DateTime.makeUnsafe(now.getTime() + 1000)),
@@ -361,8 +363,8 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, updated, listed, missing, other };
         }),
       );
-      expect(result.loaded?.attributes).toEqual({ device: "laptop" });
-      expect(result.loaded?.expiresAt).toBeInstanceOf(Date);
+      expect(result.loaded.attributes).toEqual({ device: "laptop" });
+      expect(result.loaded.expiresAt).toBeInstanceOf(Date);
       expect(result.updated.attributes).toEqual({ device: "phone" });
       expect(
         Arr.sort(
@@ -370,7 +372,7 @@ const storeContract = (engine: StoreEngine): void => {
           Order.String,
         ),
       ).toEqual(["sess-1", "sess-2"]);
-      expect(result.missing).toBeNull();
+      expect(Option.isNone(result.missing)).toBe(true);
       expect(result.other).toHaveLength(1);
     });
 
@@ -392,15 +394,15 @@ const storeContract = (engine: StoreEngine): void => {
           return { created, byEmail, missingEmail, hash, loaded, missing, cleared };
         }),
       );
-      expect(result.byEmail?.userId).toBe(result.created.id);
-      expect(result.byEmail?.verified).toBe(false);
-      expect(result.loaded?.attributes).toEqual({ plan: "pro" });
-      expect(result.loaded?.name).toBe("Test User");
-      expect(result.missingEmail).toBeNull();
-      expect(result.hash).toBe("hash-1");
-      expect(result.cleared).toBeNull();
-      expect(result.loaded?.createdAt).toBeInstanceOf(Date);
-      expect(result.missing).toBeNull();
+      expect(Option.getOrUndefined(result.byEmail)?.userId).toBe(result.created.id);
+      expect(Option.getOrUndefined(result.byEmail)?.verified).toBe(false);
+      expect(Option.getOrUndefined(result.loaded)?.attributes).toEqual({ plan: "pro" });
+      expect(Option.getOrUndefined(result.loaded)?.name).toBe("Test User");
+      expect(Option.isNone(result.missingEmail)).toBe(true);
+      expect(result.hash).toEqual(Option.some("hash-1"));
+      expect(Option.isNone(result.cleared)).toBe(true);
+      expect(Option.getOrUndefined(result.loaded)?.createdAt).toBeInstanceOf(Date);
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("UserServiceStore updates and deletes users", async () => {
@@ -420,9 +422,9 @@ const storeContract = (engine: StoreEngine): void => {
           return { updated, loaded, gone };
         }),
       );
-      expect(result.loaded?.name).toBe("Renamed");
-      expect(result.loaded?.image).toBe("https://example.com/x.png");
-      expect(result.gone).toBeNull();
+      expect(Option.getOrUndefined(result.loaded)?.name).toBe("Renamed");
+      expect(Option.getOrUndefined(result.loaded)?.image).toBe("https://example.com/x.png");
+      expect(Option.isNone(result.gone)).toBe(true);
     });
 
     it("UserServiceStore.delete removes the user's role rows with the user, and only theirs", async () => {
@@ -491,7 +493,7 @@ const storeContract = (engine: StoreEngine): void => {
       );
       expect(result.failure).toBe("user delete failed");
       expect(result.keys).toBe(1);
-      expect(result.multiFactor).not.toBeNull();
+      expect(Option.isNone(result.multiFactor)).toBe(false);
       expect(result.identifiers).toBe(1);
     });
 
@@ -506,7 +508,7 @@ const storeContract = (engine: StoreEngine): void => {
           return { hash };
         }),
       );
-      expect(result.hash).toBe("reset-hash");
+      expect(result.hash).toEqual(Option.some("reset-hash"));
     });
 
     it("RBAC entity resolver projects auth_user_roles as Role parents", async () => {
@@ -615,14 +617,14 @@ const storeContract = (engine: StoreEngine): void => {
           return { before, first, second, afterSet, freshSet, restarted, deleted };
         }),
       );
-      expect(result.before).toBeNull();
+      expect(Option.isNone(result.before)).toBe(true);
       expect(result.first).toBe(1);
       expect(result.second).toBe(2);
-      expect(result.afterSet?.count).toBe(9);
-      expect(result.afterSet?.blockedUntil).toBeDefined();
-      expect(result.freshSet?.count).toBe(3);
+      expect(Option.getOrUndefined(result.afterSet)?.count).toBe(9);
+      expect(Option.getOrUndefined(result.afterSet)?.blockedUntil).toBeDefined();
+      expect(Option.getOrUndefined(result.freshSet)?.count).toBe(3);
       expect(result.restarted).toBe(1);
-      expect(result.deleted).toBeNull();
+      expect(Option.isNone(result.deleted)).toBe(true);
     });
 
     it("EmailVerificationStore roundtrips and deletes by user id", async () => {
@@ -648,10 +650,10 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, deleted, two, three };
         }),
       );
-      expect(result.loaded?.userId).toBe("user-1");
-      expect(result.deleted).toBeNull();
-      expect(result.two).toBeNull();
-      expect(result.three?.userId).toBe("user-2");
+      expect(Option.getOrUndefined(result.loaded)?.userId).toBe("user-1");
+      expect(Option.isNone(result.deleted)).toBe(true);
+      expect(Option.isNone(result.two)).toBe(true);
+      expect(Option.getOrUndefined(result.three)?.userId).toBe("user-2");
     });
 
     it("EmailVerificationStore reads a user's newest verification, and null for none", async () => {
@@ -668,8 +670,8 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.latest?.token).toBe("ev-new");
-      expect(result.none).toBeNull();
+      expect(Option.getOrUndefined(result.latest)?.token).toBe("ev-new");
+      expect(Option.isNone(result.none)).toBe(true);
     });
 
     it("ChallengeStore roundtrips challenge bytes (base64 TEXT)", async () => {
@@ -695,10 +697,12 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, missing };
         }),
       );
-      expect(Array.from(result.loaded?.challenge ?? [])).toEqual([0, 1, 2, 250, 255]);
-      expect(result.loaded?.ceremony).toBe("authentication");
-      expect(result.loaded?.userId).toBeUndefined();
-      expect(result.missing).toBeNull();
+      expect(Array.from(Option.getOrUndefined(result.loaded)?.challenge ?? [])).toEqual([
+        0, 1, 2, 250, 255,
+      ]);
+      expect(Option.getOrUndefined(result.loaded)?.ceremony).toBe("authentication");
+      expect(Option.getOrUndefined(result.loaded)?.userId).toBeUndefined();
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("ChallengeStore reads a challenge with no known ceremony as missing", async () => {
@@ -719,7 +723,7 @@ const storeContract = (engine: StoreEngine): void => {
           ];
         }),
       );
-      expect(result).toEqual([null, null]);
+      expect(result.map(Option.isNone)).toEqual([true, true]);
     });
 
     it("CredentialStore roundtrips credentials incl. transports and getByCredentialId", async () => {
@@ -747,13 +751,13 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, byCredentialId, updated, byUser, missing };
         }),
       );
-      expect(Array.from(result.loaded?.publicKey ?? [])).toEqual([9, 8, 7]);
-      expect(result.loaded?.transports).toEqual(["internal", "hybrid"]);
-      expect(result.loaded?.name).toBe("MacBook");
-      expect(result.byCredentialId?.id).toBe("cred-1");
-      expect(result.updated?.counter).toBe(5);
+      expect(Array.from(Option.getOrUndefined(result.loaded)?.publicKey ?? [])).toEqual([9, 8, 7]);
+      expect(Option.getOrUndefined(result.loaded)?.transports).toEqual(["internal", "hybrid"]);
+      expect(Option.getOrUndefined(result.loaded)?.name).toBe("MacBook");
+      expect(Option.getOrUndefined(result.byCredentialId)?.id).toBe("cred-1");
+      expect(Option.getOrUndefined(result.updated)?.counter).toBe(5);
       expect(result.byUser).toHaveLength(1);
-      expect(result.missing).toBeNull();
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("CredentialStore reads a credential stored before its flags as having none, and update records them", async () => {
@@ -765,12 +769,20 @@ const storeContract = (engine: StoreEngine): void => {
           yield* sql`INSERT INTO auth_webauthn_credentials (id, user_id, public_key, algorithm, counter, created_at, name, transports)
             VALUES ('legacy-cred', 'user-1', 'CQgH', -7, 3, 0, NULL, NULL)`;
           const legacy = yield* store.get("legacy-cred");
-          if (legacy === null) return { legacy, updated: null };
-          yield* store.update({ ...legacy, counter: 4, backupEligible: true, backupState: false });
-          return { legacy, updated: yield* store.get("legacy-cred") };
+          if (Option.isNone(legacy)) return { legacy: undefined, updated: undefined };
+          yield* store.update({
+            ...legacy.value,
+            counter: 4,
+            backupEligible: true,
+            backupState: false,
+          });
+          return {
+            legacy: legacy.value,
+            updated: Option.getOrUndefined(yield* store.get("legacy-cred")),
+          };
         }),
       );
-      expect(result.legacy).not.toBeNull();
+      expect(result.legacy).toBeDefined();
       expect(result.legacy).not.toHaveProperty("backupEligible");
       expect(result.legacy).not.toHaveProperty("backupState");
       expect(result.legacy).not.toHaveProperty("aaguid");
@@ -801,8 +813,8 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, missing };
         }),
       );
-      expect(result.loaded).toEqual({ ...state, returnTo: "/dashboard" });
-      expect(result.missing).toBeNull();
+      expect(result.loaded).toEqual(Option.some({ ...state, returnTo: "/dashboard" }));
+      expect(Option.isNone(result.missing)).toBe(true);
     });
 
     it("OAuthStateStore.consume hands a state to one of several concurrent callers", async () => {
@@ -823,7 +835,7 @@ const storeContract = (engine: StoreEngine): void => {
           );
         }),
       );
-      expect(Arr.filter(results, (entry) => entry !== null)).toEqual([state]);
+      expect(Arr.getSomes(results)).toEqual([state]);
     });
 
     it("OAuthAccountStore creates, updates, links, unlinks and reports hasPassword", async () => {
@@ -866,13 +878,13 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, updated, linked, afterUnlink, deleted, noPassword, withPassword };
         }),
       );
-      expect(result.loaded?.accessToken).toBe("token-1");
-      expect(result.loaded?.refreshToken).toBe("refresh-1");
-      expect(result.updated?.accessToken).toBe("token-2");
+      expect(Option.getOrUndefined(result.loaded)?.accessToken).toBe("token-1");
+      expect(Option.getOrUndefined(result.loaded)?.refreshToken).toBe("refresh-1");
+      expect(Option.getOrUndefined(result.updated)?.accessToken).toBe("token-2");
       expect(result.linked).toHaveLength(1);
       expect(result.linked[0]?.userId).toBe("user-2");
-      expect(result.afterUnlink).toBeNull();
-      expect(result.deleted).toBeNull();
+      expect(Option.isNone(result.afterUnlink)).toBe(true);
+      expect(Option.isNone(result.deleted)).toBe(true);
       expect(result.noPassword).toBe(false);
       expect(result.withPassword).toBe(true);
     });
@@ -921,9 +933,9 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, two, three };
         }),
       );
-      expect(result.loaded?.token).toBe("pr-1");
-      expect(result.two).toBeNull();
-      expect(result.three?.userId).toBe("user-2");
+      expect(Option.getOrUndefined(result.loaded)?.token).toBe("pr-1");
+      expect(Option.isNone(result.two)).toBe(true);
+      expect(Option.getOrUndefined(result.three)?.userId).toBe("user-2");
     });
 
     it("MagicLinkStore roundtrips and deletes by email", async () => {
@@ -949,9 +961,9 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, two, three, user };
         }),
       );
-      expect(result.loaded?.email).toBe("a@example.com");
-      expect(result.two).toBeNull();
-      expect(result.three?.email).toBe("b@example.com");
+      expect(Option.getOrUndefined(result.loaded)?.email).toBe("a@example.com");
+      expect(Option.isNone(result.two)).toBe(true);
+      expect(Option.getOrUndefined(result.three)?.email).toBe("b@example.com");
       expect(result.user.name).toBe("Magic User");
     });
 
@@ -982,14 +994,14 @@ const storeContract = (engine: StoreEngine): void => {
           return { attempts1, attempts2, replaced, other, deleted, missingIncrement, user };
         }),
       );
-      expect(result.attempts1).toBe(1);
-      expect(result.attempts2).toBe(2);
-      expect(result.replaced?.otpHash).toBe("new-hash");
-      expect(result.replaced?.attempts).toBe(0);
-      expect(result.other?.otpHash).toBe("other");
-      expect(result.deleted).toBeNull();
+      expect(result.attempts1).toEqual(Option.some(1));
+      expect(result.attempts2).toEqual(Option.some(2));
+      expect(Option.getOrUndefined(result.replaced)?.otpHash).toBe("new-hash");
+      expect(Option.getOrUndefined(result.replaced)?.attempts).toBe(0);
+      expect(Option.getOrUndefined(result.other)?.otpHash).toBe("other");
+      expect(Option.isNone(result.deleted)).toBe(true);
       // A pair with no code counts nothing.
-      expect(result.missingIncrement).toBeNull();
+      expect(Option.isNone(result.missingIncrement)).toBe(true);
       expect(result.user.name).toBe("OTP User");
     });
 
@@ -1032,10 +1044,10 @@ const storeContract = (engine: StoreEngine): void => {
       );
       expect(result.purged).toEqual({ ...nothingPurged, magicLinks: 2, emailOtps: 1 });
       expect(result.again).toEqual({ ...nothingPurged });
-      expect(result.stale).toBeNull();
-      expect(result.live?.token).toBe("live");
-      expect(result.staleOtp).toBeNull();
-      expect(result.liveOtp?.email).toBe("live@example.com");
+      expect(Option.isNone(result.stale)).toBe(true);
+      expect(Option.getOrUndefined(result.live)?.token).toBe("live");
+      expect(Option.isNone(result.staleOtp)).toBe(true);
+      expect(Option.getOrUndefined(result.liveOtp)?.email).toBe("live@example.com");
     });
 
     it("purgeExpired keeps a row that expires exactly now, which the services still accept", async () => {
@@ -1089,7 +1101,7 @@ const storeContract = (engine: StoreEngine): void => {
       );
       expect(result.purged).toEqual({ ...nothingPurged, rateLimits: 3 });
       expect(result.again).toEqual({ ...nothingPurged });
-      expect(result.left).toEqual([null, null, null, entries[3], entries[4]]);
+      expect(result.left.map(Option.getOrNull)).toEqual([null, null, null, entries[3], entries[4]]);
     });
 
     it("purgeExpiredWith({ limit }) deletes at most limit rows per table per call, and repeated calls drain every expired row", async () => {
@@ -1156,7 +1168,7 @@ const storeContract = (engine: StoreEngine): void => {
         { ...nothingPurged, rateLimits: 1 },
         { ...nothingPurged },
       ]);
-      expect(result.left).toEqual([...stale.map(() => null), ...kept]);
+      expect(result.left.map(Option.getOrNull)).toEqual([...stale.map(() => null), ...kept]);
     });
 
     it("purgeExpiredWith() with no limit is purgeExpired, and a limit that is not a positive integer fails", async () => {
@@ -1279,12 +1291,12 @@ const storeContract = (engine: StoreEngine): void => {
         passwordResets: 1,
       });
       expect(result.again).toEqual(nothingPurged);
-      expect(result.staleSession).toBeNull();
-      expect(result.edgeSession?.id).toBe("sess-edge");
-      expect(result.liveState?.state).toBe("state-live");
-      expect(result.staleChallenge).toBeNull();
-      expect(result.edgeChallenge?.ceremony).toBe("authentication");
-      expect(result.stalePending).toBeNull();
+      expect(Option.isNone(result.staleSession)).toBe(true);
+      expect(Option.getOrUndefined(result.edgeSession)?.id).toBe("sess-edge");
+      expect(Option.getOrUndefined(result.liveState)?.state).toBe("state-live");
+      expect(Option.isNone(result.staleChallenge)).toBe(true);
+      expect(Option.getOrUndefined(result.edgeChallenge)?.ceremony).toBe("authentication");
+      expect(Option.isNone(result.stalePending)).toBe(true);
       // The purged challenge's ceremony and the purged challenge's attempt
       // count went with them: two of each kind are left.
       expect(result.companions).toBe(4);
@@ -1312,8 +1324,8 @@ const storeContract = (engine: StoreEngine): void => {
       );
       expect(result.byDefault).toEqual({ ...nothingPurged, emailOtpFailures: 1 });
       expect(result.shorter).toEqual({ ...nothingPurged, emailOtpFailures: 2 });
-      expect(result.old).toBeNull();
-      expect(result.recent).toBeNull();
+      expect(Option.isNone(result.old)).toBe(true);
+      expect(Option.isNone(result.recent)).toBe(true);
     });
 
     it("purgeExpired drops an ended lock and an idle counter, and keeps an active lock and a recent counter", async () => {
@@ -1350,7 +1362,12 @@ const storeContract = (engine: StoreEngine): void => {
         }).pipe(Effect.provide(TestClock.layer())),
       );
       expect(result.purged).toEqual({ ...nothingPurged, accountLockouts: 2 });
-      expect(result.left.map((record) => record?.failures ?? null)).toEqual([null, null, 2, 1]);
+      expect(result.left.map((record) => Option.getOrUndefined(record)?.failures ?? null)).toEqual([
+        null,
+        null,
+        2,
+        1,
+      ]);
       expect(result.attempts).toEqual(["active", "recent"]);
     });
 
@@ -1442,20 +1459,20 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.before).toBeNull();
-      expect(result.created?.verified).toBe(false);
-      expect(result.created?.backupCodes).toEqual(["h1", "h2", "h3"]);
-      expect(result.created?.lastUsedCounter).toBeUndefined();
-      expect(result.updated?.verified).toBe(true);
-      expect(result.updated?.backupCodes).toEqual(["h2", "h3"]);
-      expect(result.updated?.lastUsedCounter).toBe(42);
-      expect(result.deleted).toBeNull();
-      expect(result.loadedPending).toEqual(pending);
+      expect(Option.isNone(result.before)).toBe(true);
+      expect(Option.getOrUndefined(result.created)?.verified).toBe(false);
+      expect(Option.getOrUndefined(result.created)?.backupCodes).toEqual(["h1", "h2", "h3"]);
+      expect(Option.getOrUndefined(result.created)?.lastUsedCounter).toBeUndefined();
+      expect(Option.getOrUndefined(result.updated)?.verified).toBe(true);
+      expect(Option.getOrUndefined(result.updated)?.backupCodes).toEqual(["h2", "h3"]);
+      expect(Option.getOrUndefined(result.updated)?.lastUsedCounter).toBe(42);
+      expect(Option.isNone(result.deleted)).toBe(true);
+      expect(result.loadedPending).toEqual(Option.some(pending));
       expect(result.attempts).toEqual([1, 2, 3]);
       expect(result.unknownAttempt).toBeInstanceOf(Auth.AuthError);
       expect(result.attemptAfterDelete).toBeInstanceOf(Auth.AuthError);
       expect(result.recreatedAttempt).toBe(1);
-      expect(result.deletedPending).toBeNull();
+      expect(Option.isNone(result.deletedPending)).toBe(true);
     });
 
     it("schema declares BIGINT for all epoch-ms timestamp columns", async () => {
@@ -1524,9 +1541,9 @@ const storeContract = (engine: StoreEngine): void => {
           return yield* sessionStore.get("bigint-test");
         }),
       );
-      expect(result?.expiresAt.getTime()).toBe(FAR_FUTURE_MS);
-      expect(result?.createdAt.getTime()).toBe(FAR_FUTURE_MS - 1000);
-      expect(result?.lastActivityAt.getTime()).toBe(FAR_FUTURE_MS - 500);
+      expect(Option.getOrUndefined(result)?.expiresAt.getTime()).toBe(FAR_FUTURE_MS);
+      expect(Option.getOrUndefined(result)?.createdAt.getTime()).toBe(FAR_FUTURE_MS - 1000);
+      expect(Option.getOrUndefined(result)?.lastActivityAt.getTime()).toBe(FAR_FUTURE_MS - 500);
     });
 
     it("IdentifierStore roundtrips create/getByValue/listByUser/setVerified/delete/deleteByUser", async () => {
@@ -1578,17 +1595,17 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.byEmail?.id).toBe("ident-email");
-      expect(result.byEmail?.verified).toBe(false);
-      expect(result.byEmail?.createdAt).toBeInstanceOf(Date);
-      expect(result.missing).toBeNull();
+      expect(Option.getOrUndefined(result.byEmail)?.id).toBe("ident-email");
+      expect(Option.getOrUndefined(result.byEmail)?.verified).toBe(false);
+      expect(Option.getOrUndefined(result.byEmail)?.createdAt).toBeInstanceOf(Date);
+      expect(Option.isNone(result.missing)).toBe(true);
       expect(result.listed.map((i) => i.id)).toEqual(["ident-email", "ident-username"]);
       expect(result.emptyList).toEqual([]);
-      expect(result.verified?.verified).toBe(true);
-      expect(result.verified?.verifiedAt).toBeInstanceOf(Date);
-      expect(result.verifiedMissing).toBeNull();
-      expect(result.afterVerify?.verified).toBe(true);
-      expect(result.afterDelete).toBeNull();
+      expect(Option.getOrUndefined(result.verified)?.verified).toBe(true);
+      expect(Option.getOrUndefined(result.verified)?.verifiedAt).toBeInstanceOf(Date);
+      expect(Option.isNone(result.verifiedMissing)).toBe(true);
+      expect(Option.getOrUndefined(result.afterVerify)?.verified).toBe(true);
+      expect(Option.isNone(result.afterDelete)).toBe(true);
       expect(result.afterDeleteUser).toHaveLength(0);
     });
 
@@ -1607,11 +1624,12 @@ const storeContract = (engine: StoreEngine): void => {
           const ada = yield* store.create(email("user-ada", "ada@example.com", true));
           yield* store.create(email("user-grace", "grace@example.com"));
 
-          const replaced = yield* store.replace(
+          const foundReplaced = yield* store.replace(
             ada,
             email("user-ada", "ada-new@example.com", true),
           );
-          assert(replaced !== null, "the first replace succeeds");
+          assert(Option.isSome(foundReplaced), "the first replace succeeds");
+          const replaced = foundReplaced.value;
           const afterReplace = {
             listed: yield* store.listByUser("user-ada"),
             old: yield* store.getByValue("email", "ada@example.com"),
@@ -1635,7 +1653,10 @@ const storeContract = (engine: StoreEngine): void => {
             store.replace(replaced, email("user-grace", "x@example.com")),
           );
           const sameId = yield* Effect.flip(
-            store.replace(replaced, { ...email("user-ada", "y@example.com"), id: replaced.id }),
+            store.replace(replaced, {
+              ...email("user-ada", "y@example.com"),
+              id: replaced.id,
+            }),
           );
           return {
             replaced,
@@ -1652,21 +1673,21 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.replaced?.value).toBe("ada-new@example.com");
-      expect(result.afterReplace.old).toBeNull();
+      expect(result.replaced.value).toBe("ada-new@example.com");
+      expect(Option.isNone(result.afterReplace.old)).toBe(true);
       expect(result.afterReplace.listed.map((i) => [i.value, i.verified])).toEqual([
         ["ada-new@example.com", true],
       ]);
       expect(result.takenRaw._tag).toBe("AuthError");
       expect(result.taken._tag).toBe("IdentifierTakenError");
-      expect(result.stale).toBeNull();
+      expect(Option.isNone(result.stale)).toBe(true);
       expect(result.staleTyped._tag).toBe("IdentifierNotFoundError");
       expect(result.wrongUser._tag).toBe("AuthError");
       expect(result.sameId._tag).toBe("AuthError");
       expect(result.sameId.message).toContain("with its own id");
       expect(result.listed.map((i) => i.value)).toEqual(["ada-new@example.com"]);
-      expect(result.grace?.userId).toBe("user-grace");
-      expect(result.other).toBeNull();
+      expect(Option.getOrUndefined(result.grace)?.userId).toBe("user-grace");
+      expect(Option.isNone(result.other)).toBe(true);
     });
 
     it("IdentifierStore.replace releases `from` with a compare-and-swap: of two replaces of one `from`, the second resolves to null", async () => {
@@ -1686,8 +1707,9 @@ const storeContract = (engine: StoreEngine): void => {
         Effect.gen(function* () {
           const store = yield* Auth.IdentifierStore;
           const ada = yield* store.create(email("ada@example.com"));
-          const first = yield* store.replace(ada, email("ada-a@example.com"));
-          assert(first !== null, "the first replace succeeds");
+          const foundFirst = yield* store.replace(ada, email("ada-a@example.com"));
+          assert(Option.isSome(foundFirst), "the first replace succeeds");
+          const first = foundFirst.value;
           const second = yield* store.replace(ada, email("ada-b@example.com"));
           // A double submit of the same change: the second claim is refused by
           // the unique index (this user already holds the value), and
@@ -1711,12 +1733,12 @@ const storeContract = (engine: StoreEngine): void => {
           };
         }),
       );
-      expect(result.first?.value).toBe("ada-a@example.com");
-      expect(result.second).toBeNull();
+      expect(result.first.value).toBe("ada-a@example.com");
+      expect(Option.isNone(result.second)).toBe(true);
       expect(result.again._tag).toBe("IdentifierNotFoundError");
-      expect(result.staleValue).toBeNull();
+      expect(Option.isNone(result.staleValue)).toBe(true);
       expect(result.listed.map((i) => i.value)).toEqual(["ada-a@example.com"]);
-      expect(result.b).toBeNull();
+      expect(Option.isNone(result.b)).toBe(true);
     });
 
     it("ApiKeyStore roundtrips full records incl. permissions/metadata/refill/rateLimit", async () => {
@@ -1764,19 +1786,24 @@ const storeContract = (engine: StoreEngine): void => {
           return { loaded, byHash, missingHash, updated, afterUpdate, byUser, deleted };
         }),
       );
-      expect(result.loaded?.name).toBe("CI deploy key");
-      expect(result.loaded?.permissions).toEqual({ posts: ["read", "write"] });
-      expect(result.loaded?.metadata).toEqual({ plan: "pro" });
-      expect(result.loaded?.rateLimit).toEqual({ maxRequests: 100, windowMs: 60_000 });
-      expect(result.loaded?.refillAmount).toBe(5);
-      expect(result.byHash?.id).toBe("key-1");
-      expect(result.missingHash).toBeNull();
+      expect(Option.getOrUndefined(result.loaded)?.name).toBe("CI deploy key");
+      expect(Option.getOrUndefined(result.loaded)?.permissions).toEqual({
+        posts: ["read", "write"],
+      });
+      expect(Option.getOrUndefined(result.loaded)?.metadata).toEqual({ plan: "pro" });
+      expect(Option.getOrUndefined(result.loaded)?.rateLimit).toEqual({
+        maxRequests: 100,
+        windowMs: 60_000,
+      });
+      expect(Option.getOrUndefined(result.loaded)?.refillAmount).toBe(5);
+      expect(Option.getOrUndefined(result.byHash)?.id).toBe("key-1");
+      expect(Option.isNone(result.missingHash)).toBe(true);
       expect(result.updated.enabled).toBe(false);
-      expect(result.afterUpdate?.enabled).toBe(false);
-      expect(result.afterUpdate?.remaining).toBe(9);
-      expect(result.afterUpdate?.lastUsedAt).toBe(now + 1000);
+      expect(Option.getOrUndefined(result.afterUpdate)?.enabled).toBe(false);
+      expect(Option.getOrUndefined(result.afterUpdate)?.remaining).toBe(9);
+      expect(Option.getOrUndefined(result.afterUpdate)?.lastUsedAt).toBe(now + 1000);
       expect(result.byUser).toHaveLength(2);
-      expect(result.deleted).toBeNull();
+      expect(Option.isNone(result.deleted)).toBe(true);
     });
 
     it("ApiKeyStore treats minimal records (no permissions/metadata/refill/rateLimit) as absent, not null", async () => {
@@ -1798,13 +1825,13 @@ const storeContract = (engine: StoreEngine): void => {
           return yield* store.get("key-min");
         }),
       );
-      expect(result?.name).toBeUndefined();
-      expect(result?.prefix).toBeUndefined();
-      expect(result?.expiresAt).toBeUndefined();
-      expect(result?.permissions).toBeUndefined();
-      expect(result?.metadata).toEqual({});
-      expect(result?.remaining).toBeUndefined();
-      expect(result?.rateLimit).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.name).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.prefix).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.expiresAt).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.permissions).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.metadata).toEqual({});
+      expect(Option.getOrUndefined(result)?.remaining).toBeUndefined();
+      expect(Option.getOrUndefined(result)?.rateLimit).toBeUndefined();
     });
 
     it("ApiKeyStore surfaces malformed JSON permissions as AuthError not defect", async () => {
@@ -1867,7 +1894,7 @@ const storeContract = (engine: StoreEngine): void => {
       expect(result.searchedNarrow.users[0]?.id).toBe(result.alice.id);
       expect(result.created.name).toBe("Carol");
       expect(result.created.attributes).toEqual({ role: "admin" });
-      expect(result.hash).toBe("admin-hash");
+      expect(result.hash).toEqual(Option.some("admin-hash"));
     });
 
     it("AdminUserStore.listUsers matches LIKE wildcards literally and pages past an offset", async () => {
@@ -2019,15 +2046,15 @@ const storeContract = (engine: StoreEngine): void => {
           return { before, first, second, third, whileLocked, afterExpiry, deleted, burst };
         }),
       );
-      expect(result.before).toBeNull();
+      expect(Option.isNone(result.before)).toBe(true);
       expect(result.first).toEqual({ failures: 1 });
       expect(result.second).toEqual({ failures: 2 });
       expect(result.third.failures).toBe(3);
       expect(result.third.lockedUntil).toBeDefined();
       expect(result.whileLocked).toEqual(result.third);
       expect(result.afterExpiry).toEqual({ failures: 1 });
-      expect(result.deleted).toBeNull();
-      expect(result.burst?.failures).toBe(25);
+      expect(Option.isNone(result.deleted)).toBe(true);
+      expect(Option.getOrUndefined(result.burst)?.failures).toBe(25);
     });
 
     it("concurrent rateLimit.increment does not undercount", async () => {
@@ -2039,7 +2066,7 @@ const storeContract = (engine: StoreEngine): void => {
             { concurrency: "unbounded" },
           );
           const entry = yield* store.get("burst");
-          return entry?.count;
+          return Option.getOrUndefined(entry)?.count;
         }),
       );
       expect(result).toBe(20);

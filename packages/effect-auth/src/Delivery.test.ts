@@ -78,7 +78,7 @@ describe("emailCallbacks", () => {
     await Effect.runPromise(
       cb.sendDeleteAccountVerification({
         user: user(),
-        email: "alice@example.com",
+        email: Option.some("alice@example.com"),
         token: "tok-5",
       }),
     );
@@ -120,7 +120,9 @@ describe("emailCallbacks", () => {
     expect(otpError.message).toMatch(/no email/);
 
     const deleteError = await Effect.runPromise(
-      Effect.flip(cb.sendDeleteAccountVerification({ user: user(), email: null, token: "t" })),
+      Effect.flip(
+        cb.sendDeleteAccountVerification({ user: user(), email: Option.none(), token: "t" }),
+      ),
     );
     expect(deleteError).toBeInstanceOf(AuthError);
     expect(deleteError.message).toMatch(/no email/);

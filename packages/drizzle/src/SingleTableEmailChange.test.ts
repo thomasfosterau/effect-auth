@@ -22,7 +22,6 @@ import { eq } from "drizzle-orm";
 import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";
-import * as Option from "effect/Option";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { databaseLayer } from "./Database.ts";
@@ -139,7 +138,7 @@ const makeHarness = (
   const tokens = MutableHashMap.empty<string, Auth.AccountToken>();
 
   const userStore: typeof Auth.UserServiceStore.Service = {
-    get: (userId) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(userMap, userId))),
+    get: (userId) => Effect.sync(() => MutableHashMap.get(userMap, userId)),
     update: (user) =>
       Effect.sync(() => {
         MutableHashMap.set(userMap, user.id, user);
@@ -163,7 +162,7 @@ const makeHarness = (
         MutableHashMap.set(tokens, token.token, token);
         return token;
       }),
-    get: (token) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(tokens, token))),
+    get: (token) => Effect.sync(() => MutableHashMap.get(tokens, token)),
     delete: (token) => Effect.sync(() => void MutableHashMap.remove(tokens, token)),
     deleteByUserId: (userId) =>
       Effect.sync(() => {

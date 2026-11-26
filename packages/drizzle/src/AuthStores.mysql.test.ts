@@ -8,6 +8,7 @@
 
 import { drizzle } from "drizzle-orm/mysql-proxy";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -137,7 +138,7 @@ describe("MySQL / TokenStore consume", () => {
         Effect.provide(TokenStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
       ),
     );
-    expect(consumed?.token).toBe("digest");
+    expect(Option.getOrUndefined(consumed)?.token).toBe("digest");
     expect(proxy.sent.map((statement) => statement.sql.split(" ")[0])).toEqual([
       "select",
       "delete",
@@ -167,7 +168,7 @@ describe("MySQL / UserServiceStore", () => {
         Effect.provide(UserServiceStore.layer(tables).pipe(Layer.provide(databaseLayer(proxy.db)))),
       ),
     );
-    expect(read).toBeNull();
+    expect(Option.isNone(read)).toBe(true);
     expect(proxy.sent.map((statement) => statement.sql)).toEqual([
       "select `id`, `name`, `image`, `attributes`, `created_at`, `updated_at` from `effect_auth_users` where `effect_auth_users`.`id` = ? limit ?",
       // The whole user: an absent `image` is written as NULL; never `password_hash`.
@@ -213,7 +214,7 @@ describe("MySQL / ApiKeyStore recordUse", () => {
 
   it("is null without a read when the UPDATE matched no row", async () => {
     const proxy = recording([], 0);
-    expect(await recordUse(proxy, { usedAt: 2000 })).toBeNull();
+    expect(Option.isNone(await recordUse(proxy, { usedAt: 2000 }))).toBe(true);
     expect(proxy.sent).toHaveLength(1);
   });
 });

@@ -8,6 +8,8 @@
 
 import { and, desc, eq } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
+import * as Arr from "effect/Array";
 import * as Auth from "@thomasfosterau/effect-auth";
 import {
   resolveTokenTable,
@@ -39,11 +41,11 @@ interface TokenRecord {
  */
 interface TokenStoreShape<A extends TokenRecord> {
   readonly create: (record: A) => Effect.Effect<A, Auth.AuthError>;
-  readonly get: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
-  readonly consume: (token: string) => Effect.Effect<A | null, Auth.AuthError>;
+  readonly get: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
+  readonly consume: (token: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
   readonly delete: (token: string) => Effect.Effect<void, Auth.AuthError>;
   readonly deleteByUserId: (userId: string) => Effect.Effect<void, Auth.AuthError>;
-  readonly getLatestByUserId: (userId: string) => Effect.Effect<A | null, Auth.AuthError>;
+  readonly getLatestByUserId: (userId: string) => Effect.Effect<Option.Option<A>, Auth.AuthError>;
 }
 
 const instant = (millis: number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(millis));
@@ -90,7 +92,7 @@ const makeFor = (
       get: (token) =>
         query(`${purpose}.get`, (db) =>
           db.select(column).from(table).where(byToken(token)).limit(1).execute(),
-        ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
+        ).pipe(Effect.map((rows) => Option.map(Arr.head(rows), toRecord))),
 
       consume: (token) =>
         Effect.gen(function* () {
@@ -98,12 +100,12 @@ const makeFor = (
             db.select(column).from(table).where(byToken(token)).limit(1).execute(),
           );
           const row = rows[0];
-          if (row === undefined) return null;
+          if (row === undefined) return Option.none();
           const deleted = yield* affectedRows(
             `${purpose}.consume`,
             query(`${purpose}.consume`, (db) => db.delete(table).where(byToken(token)).execute()),
           );
-          return deleted > 0 ? toRecord(row) : null;
+          return deleted > 0 ? Option.some(toRecord(row)) : Option.none();
         }),
 
       delete: (token) =>
@@ -126,7 +128,7 @@ const makeFor = (
             .where(byUser(userId))
             .orderBy(desc(column.createdAt))
             .execute(),
-        ).pipe(Effect.map((rows) => (rows[0] === undefined ? null : toRecord(rows[0])))),
+        ).pipe(Effect.map((rows) => Option.map(Arr.head(rows), toRecord))),
     };
   });
 

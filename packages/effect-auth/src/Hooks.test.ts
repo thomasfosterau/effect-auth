@@ -277,7 +277,7 @@ describe("RateLimitPlugin - dependency composition + short-circuit", () => {
   const makeRateLimitStoreLayer = () => {
     const entries = MutableHashMap.empty<string, RateLimitEntry>();
     return Layer.succeed(RateLimitStore, {
-      get: (key: string) => Effect.succeed(Option.getOrNull(MutableHashMap.get(entries, key))),
+      get: (key: string) => Effect.succeed(MutableHashMap.get(entries, key)),
       set: (key: string, entry: RateLimitEntry) =>
         Effect.sync(() => {
           MutableHashMap.set(entries, key, entry);
@@ -355,8 +355,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
           MutableHashMap.set(sessions, session.id, session);
           return session;
         }),
-      get: (sessionId: string) =>
-        Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+      get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
       update: (session: Session) =>
         Effect.sync(() => {
           MutableHashMap.set(sessions, session.id, session);
@@ -383,8 +382,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
     };
 
     const userStore = {
-      get: (userId: string) =>
-        Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+      get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
     };
 
     const emailPasswordStore = {
@@ -402,7 +400,7 @@ describe("Hooks - integration with EmailPasswordService", () => {
           return { user, created: true };
         }),
       getPasswordHash: (userId: string) =>
-        Effect.sync(() => Option.getOrNull(MutableHashMap.get(passwordHashes, userId))),
+        Effect.sync(() => MutableHashMap.get(passwordHashes, userId)),
       clearPasswordHash: (userId: string) =>
         Effect.sync(() => void MutableHashMap.remove(passwordHashes, userId)),
       setPasswordHash: (userId: string, hash: string) =>

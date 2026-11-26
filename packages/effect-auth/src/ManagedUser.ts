@@ -47,14 +47,18 @@ export type ProvisionedBy = typeof ProvisionedBy.Type;
 const decodeProvisionedBy = Schema.decodeUnknownOption(ProvisionedBy);
 
 /**
- * The connection that created `user`, or `null` for a user no connection
+ * The connection that created `user`, or `None` for a user no connection
  * created (or whose stamp does not decode).
  *
  * @since 0.1.0
  * @category getters
  */
-export const provisionedBy = (user: Types.User): ProvisionedBy | null =>
-  Option.getOrNull(decodeProvisionedBy(user.attributes[PROVISIONED_BY_ATTRIBUTE]));
+export const provisionedBy = (user: Types.User): Option.Option<ProvisionedBy> =>
+  decodeProvisionedBy(user.attributes[PROVISIONED_BY_ATTRIBUTE]);
+
+/** Whether `user` carries a stamp from one of `organizationId`'s connections. */
+const stampedBy = (user: Types.User, organizationId: string): boolean =>
+  Option.exists(provisionedBy(user), (by) => by.organizationId === organizationId);
 
 /**
  * The attributes that stamp a new user as created by `by`.
@@ -132,9 +136,10 @@ export const isManagedBy = (input: {
   readonly organizationId: string;
   readonly verifiedDomains: ReadonlyArray<string>;
 }): boolean => {
-  if (provisionedBy(input.user)?.organizationId === input.organizationId) return true;
-  const primary = primaryEmail(input.identifiers);
-  return primary !== null && isOnDomains(primary.value, input.verifiedDomains);
+  if (stampedBy(input.user, input.organizationId)) return true;
+  return Option.exists(primaryEmail(input.identifiers), (primary) =>
+    isOnDomains(primary.value, input.verifiedDomains),
+  );
 };
 
 /**
@@ -155,7 +160,7 @@ export const isManagedUser = (
   user: Types.User,
 ): Effect.Effect<boolean, AuthError> =>
   Effect.gen(function* () {
-    if (provisionedBy(user)?.organizationId === organizationId) return true;
+    if (stampedBy(user, organizationId)) return true;
     const identifiers = yield* stores.identifiers.listByUser(user.id);
     const domains = yield* verifiedDomains(stores.domains, organizationId);
     return isManagedBy({ user, identifiers, organizationId, verifiedDomains: domains });

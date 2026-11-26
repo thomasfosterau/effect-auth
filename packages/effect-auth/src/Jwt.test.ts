@@ -39,7 +39,7 @@ const keyPairs: JwtKeyPair[] = [];
 const verifyOnly = (pair: GeneratedJwtKeyPair): JwtKeyPair => ({ ...pair, privateKey: "" });
 
 const jwtKeyStore = {
-  getActive: Effect.sync(() => keyPairs[keyPairs.length - 1] ?? null),
+  getActive: Effect.sync(() => Arr.last(keyPairs)),
 
   create: (pair: JwtKeyPair) =>
     Effect.sync(() => {
@@ -712,7 +712,7 @@ describe("RemoteJwksVerifier", () => {
   // Isolated key store so beforeEach on the shared store doesn't interfere.
   const remotePairs: JwtKeyPair[] = [];
   const remoteStore = {
-    getActive: Effect.sync(() => remotePairs[remotePairs.length - 1] ?? null),
+    getActive: Effect.sync(() => Arr.last(remotePairs)),
     create: (pair: JwtKeyPair) =>
       Effect.sync(() => {
         remotePairs.push(pair);

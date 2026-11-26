@@ -211,13 +211,13 @@ export interface SamlReplayRecord {
  * Both operations are **atomic** by contract; SAML's replay defences are only
  * as good as that atomicity:
  *
- * - {@link create} is insert-if-absent. It returns `null` — it does *not* fail
- *   — when a record with the same id already exists, and that `null` is exactly
+ * - {@link create} is insert-if-absent. It returns `None` — it does *not* fail
+ *   — when a record with the same id already exists, and that `None` is exactly
  *   how {@link module:sso} detects a replayed assertion. Implement it as a
  *   single `INSERT ... ON CONFLICT DO NOTHING` (or an equivalent conditional
  *   put), never as a read followed by a write.
  * - {@link consume} is get-and-delete. Two concurrent callers passing the same
- *   id must not both receive the record; the loser gets `null`. Implement it as
+ *   id must not both receive the record; the loser gets `None`. Implement it as
  *   a conditional delete returning the deleted row (or a compare-and-swap), the
  *   same way `DeviceAuthorizationStore.claimApproval` does.
  *
@@ -230,9 +230,9 @@ export class SamlReplayStore extends Context.Service<
     /** Insert if absent. `null` means the id was already recorded (a replay). */
     readonly create: (
       record: SamlReplayRecord,
-    ) => Effect.Effect<SamlReplayRecord | null, AuthError>;
+    ) => Effect.Effect<Option.Option<SamlReplayRecord>, AuthError>;
     /** Atomically fetch and delete. `null` when unknown or expired. */
-    readonly consume: (id: string) => Effect.Effect<SamlReplayRecord | null, AuthError>;
+    readonly consume: (id: string) => Effect.Effect<Option.Option<SamlReplayRecord>, AuthError>;
   }
 >()("@effect-auth/SamlReplayStore") {}
 
@@ -255,19 +255,18 @@ export const memorySamlReplayStore = (
           // Every unauthenticated sign-in adds a record; expired ones go once
           // the map has doubled, so it stays bounded by its live records.
           prune((stored) => now > stored.expiresAt);
-          const existing = Option.getOrUndefined(MutableHashMap.get(records, record.id));
-          if (existing !== undefined && now <= existing.expiresAt) return null;
+          const existing = MutableHashMap.get(records, record.id);
+          if (Option.exists(existing, (stored) => now <= stored.expiresAt)) return Option.none();
           MutableHashMap.set(records, record.id, record);
-          return record;
+          return Option.some(record);
         }),
       ),
     consume: (id) =>
       Effect.flatMap(Clock.currentTimeMillis, (now) =>
         Effect.sync(() => {
-          const existing = Option.getOrUndefined(MutableHashMap.get(records, id));
-          if (existing === undefined) return null;
-          MutableHashMap.remove(records, id);
-          return now > existing.expiresAt ? null : existing;
+          const existing = MutableHashMap.get(records, id);
+          if (Option.isSome(existing)) MutableHashMap.remove(records, id);
+          return Option.filter(existing, (stored) => now <= stored.expiresAt);
         }),
       ),
   };

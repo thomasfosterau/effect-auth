@@ -280,7 +280,7 @@ export const decodeTemplateDocument = (
 /**
  * Persistence for policies, templates and template links.
  *
- * Conventions match the rest of the library: lookups return `null` on a miss,
+ * Conventions match the rest of the library: lookups return `None` on a miss,
  * deletes no-op when the row is absent, and the error channel carries
  * {@link Errors.AuthError} for *infrastructure* failures only — with one
  * modelled conflict: `createPolicy` / `createTemplate` / `createLink` fail
@@ -302,10 +302,10 @@ export const decodeTemplateDocument = (
 export class PolicyStore extends Context.Service<
   PolicyStore,
   {
-    /** Look up a stored policy by id; `null` when absent. */
+    /** Look up a stored policy by id; `None` when absent. */
     readonly getPolicy: (
       id: string,
-    ) => Effect.Effect<Policy.DeclarativePolicy | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Policy.DeclarativePolicy>, Errors.AuthError>;
 
     /** Every stored policy (excluding template-linked ones). */
     readonly listPolicies: Effect.Effect<ReadonlyArray<Policy.DeclarativePolicy>, Errors.AuthError>;
@@ -315,16 +315,18 @@ export class PolicyStore extends Context.Service<
       policy: Policy.DeclarativePolicy,
     ) => Effect.Effect<Policy.DeclarativePolicy, Errors.AuthError>;
 
-    /** Replace a stored policy by its id; `null` when no such policy exists. */
+    /** Replace a stored policy by its id; `None` when no such policy exists. */
     readonly updatePolicy: (
       policy: Policy.DeclarativePolicy,
-    ) => Effect.Effect<Policy.DeclarativePolicy | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<Policy.DeclarativePolicy>, Errors.AuthError>;
 
     /** Delete a policy by id. No-ops when it does not exist. */
     readonly deletePolicy: (id: string) => Effect.Effect<void, Errors.AuthError>;
 
-    /** Look up a template by id; `null` when absent. */
-    readonly getTemplate: (id: string) => Effect.Effect<PolicyTemplate | null, Errors.AuthError>;
+    /** Look up a template by id; `None` when absent. */
+    readonly getTemplate: (
+      id: string,
+    ) => Effect.Effect<Option.Option<PolicyTemplate>, Errors.AuthError>;
 
     /** Every stored template. */
     readonly listTemplates: Effect.Effect<ReadonlyArray<PolicyTemplate>, Errors.AuthError>;
@@ -335,13 +337,13 @@ export class PolicyStore extends Context.Service<
     ) => Effect.Effect<PolicyTemplate, Errors.AuthError>;
 
     /**
-     * Replace a stored template by its id; `null` when no such template
+     * Replace a stored template by its id; `None` when no such template
      * exists. Existing links are untouched and instantiate against the new
      * body — editing a template retroactively updates its links.
      */
     readonly updateTemplate: (
       template: PolicyTemplate,
-    ) => Effect.Effect<PolicyTemplate | null, Errors.AuthError>;
+    ) => Effect.Effect<Option.Option<PolicyTemplate>, Errors.AuthError>;
 
     /**
      * Delete a template by id, **cascading to its links**. No-ops when the
@@ -354,8 +356,8 @@ export class PolicyStore extends Context.Service<
       templateId?: string,
     ) => Effect.Effect<ReadonlyArray<TemplateLink>, Errors.AuthError>;
 
-    /** Look up a link by id; `null` when absent. */
-    readonly getLink: (id: string) => Effect.Effect<TemplateLink | null, Errors.AuthError>;
+    /** Look up a link by id; `None` when absent. */
+    readonly getLink: (id: string) => Effect.Effect<Option.Option<TemplateLink>, Errors.AuthError>;
 
     /** Persist a new link. Fails when `link.id` is already taken. */
     readonly createLink: (link: TemplateLink) => Effect.Effect<TemplateLink, Errors.AuthError>;
@@ -472,21 +474,21 @@ export const memoryPolicyStore = (
   const replace = <A extends { readonly id: string }>(
     store: MutableHashMap.MutableHashMap<string, A>,
     value: A,
-  ): Effect.Effect<A | null, Errors.AuthError> =>
+  ): Effect.Effect<Option.Option<A>, Errors.AuthError> =>
     Effect.sync(() => {
-      if (!MutableHashMap.has(store, value.id)) return null;
+      if (!MutableHashMap.has(store, value.id)) return Option.none();
       MutableHashMap.set(store, value.id, value);
-      return value;
+      return Option.some(value);
     });
 
   return {
-    getPolicy: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(policies, id))),
+    getPolicy: (id) => Effect.sync(() => MutableHashMap.get(policies, id)),
     listPolicies: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(policies))),
     createPolicy: (policy) => bounded("Policy", policy, insert(policies, "Policy", policy)),
     updatePolicy: (policy) => bounded("Policy", policy, replace(policies, policy)),
     deletePolicy: (id) => Effect.sync(() => void MutableHashMap.remove(policies, id)),
 
-    getTemplate: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(templates, id))),
+    getTemplate: (id) => Effect.sync(() => MutableHashMap.get(templates, id)),
     listTemplates: Effect.sync(() => Arr.fromIterable(MutableHashMap.values(templates))),
     createTemplate: (value) =>
       bounded("Policy template", value, insert(templates, "Policy template", value)),
@@ -506,7 +508,7 @@ export const memoryPolicyStore = (
           (link) => templateId === undefined || link.templateId === templateId,
         ),
       ),
-    getLink: (id) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(links, id))),
+    getLink: (id) => Effect.sync(() => MutableHashMap.get(links, id)),
     createLink: (link) => insert(links, "Template link", link),
     deleteLink: (id) => Effect.sync(() => void MutableHashMap.remove(links, id)),
   } satisfies typeof PolicyStore.Service;

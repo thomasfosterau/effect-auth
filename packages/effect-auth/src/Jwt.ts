@@ -92,7 +92,7 @@ export class JwtKeyStore extends Context.Service<
   JwtKeyStore,
   {
     /** The key pair new tokens should be signed with, or null when none exists */
-    readonly getActive: Effect.Effect<JwtKeyPair | null, Errors.AuthError>;
+    readonly getActive: Effect.Effect<Option.Option<JwtKeyPair>, Errors.AuthError>;
     readonly create: (pair: JwtKeyPair) => Effect.Effect<JwtKeyPair, Errors.AuthError>;
     /** Every known key pair (verification matches tokens by `kid`) */
     readonly list: Effect.Effect<readonly JwtKeyPair[], Errors.AuthError>;
@@ -453,7 +453,7 @@ export const make = (
 
     // Ref holding an in-progress key-creation Deferred; null when idle.
     // Prevents duplicate active keys when concurrent fibers both call sign()
-    // before any key exists (both see getActive → null).
+    // before any key exists (both see getActive → None).
     type PendingDeferred = Deferred.Deferred<JwtKeyPair, JwtError | Errors.AuthError>;
     const pendingCreate = yield* Ref.make<PendingDeferred | null>(null);
 
@@ -465,7 +465,7 @@ export const make = (
     const getOrCreateActiveKey = Effect.fn("JwtService.getOrCreateActiveKey")(
       function* (): Effect.fn.Return<JwtKeyPair, JwtError | Errors.AuthError> {
         const active = yield* store.getActive;
-        if (active) return active;
+        if (Option.isSome(active)) return active.value;
 
         const deferred = yield* Deferred.make<JwtKeyPair, JwtError | Errors.AuthError>();
 

@@ -54,7 +54,9 @@ export interface RegisterAttemptOptions {
 export class AccountLockoutStore extends Context.Service<
   AccountLockoutStore,
   {
-    readonly get: (key: string) => Effect.Effect<AccountLockoutRecord | null, Errors.AuthError>;
+    readonly get: (
+      key: string,
+    ) => Effect.Effect<Option.Option<AccountLockoutRecord>, Errors.AuthError>;
 
     /**
      * Atomically register a sign-in attempt and return the resulting record.
@@ -120,7 +122,7 @@ export const memoryAccountLockoutStore = (
   const lastAttemptAt = MutableHashMap.empty<string, number>();
   const prune = makeAmortizedPrune(records);
   return {
-    get: (key) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(records, key))),
+    get: (key) => Effect.sync(() => MutableHashMap.get(records, key)),
     registerAttempt: (key, options) =>
       Effect.sync(() => {
         prune((record, staleKey) => {
@@ -240,15 +242,14 @@ export const AccountLockoutPlugin = (config: AccountLockoutConfig = {}) => {
             if (counter === null) return attempt;
             const now = yield* Clock.currentTimeMillis;
 
-            const existing = yield* guarded(store.get(counter.key), null);
-            if (
-              existing !== null &&
-              existing.lockedUntil !== undefined &&
-              existing.lockedUntil > now
-            ) {
+            const existing = yield* guarded(store.get(counter.key), Option.none());
+            const lockedUntil = Option.flatMap(existing, (record) =>
+              Option.fromUndefinedOr(record.lockedUntil),
+            );
+            if (Option.isSome(lockedUntil) && lockedUntil.value > now) {
               return yield* new Errors.AccountLockedError({
                 message: counter.message,
-                retryAfter: Duration.millis(existing.lockedUntil - now),
+                retryAfter: Duration.millis(lockedUntil.value - now),
               });
             }
 

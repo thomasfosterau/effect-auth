@@ -126,8 +126,7 @@ const makeFixture = (
   };
 
   const userStore = {
-    get: (userId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(usersById, userId))),
+    get: (userId: string) => Effect.sync(() => MutableHashMap.get(usersById, userId)),
   };
 
   const userServiceStore = {
@@ -146,8 +145,7 @@ const makeFixture = (
         MutableHashMap.set(sessions, session.id, session);
         return session;
       }),
-    get: (sessionId: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+    get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
     update: (session: Types.Session) =>
       Effect.sync(() => {
         MutableHashMap.set(sessions, session.id, session);
@@ -172,12 +170,9 @@ const makeFixture = (
   const orgStore = {
     createOrganization: (o: Organization) =>
       Effect.sync(() => (MutableHashMap.set(orgs, o.id, o), o)),
-    getOrganizationById: (id: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(orgs, id))),
+    getOrganizationById: (id: string) => Effect.succeed(MutableHashMap.get(orgs, id)),
     getOrganizationBySlug: (slug: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(orgs)).find((o) => o.slug === slug) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(orgs), (o) => o.slug === slug)),
     updateOrganization: (o: Organization) =>
       Effect.sync(() => (MutableHashMap.set(orgs, o.id, o), o)),
     deleteOrganization: (id: string) =>
@@ -195,10 +190,10 @@ const makeFixture = (
     createMember: (m: Member) => Effect.sync(() => (members.push(m), m)),
     getMember: (organizationId: string, userId: string) =>
       Effect.succeed(
-        members.find((m) => m.organizationId === organizationId && m.userId === userId) ?? null,
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
     getMemberById: (memberId: string) =>
-      Effect.succeed(members.find((m) => m.id === memberId) ?? null),
+      Effect.succeed(Arr.findFirst(members, (m) => m.id === memberId)),
     updateMember: (m: Member) =>
       Effect.sync(() => {
         const i = members.findIndex((x) => x.id === m.id);
@@ -218,8 +213,7 @@ const makeFixture = (
       Effect.succeed(members.filter((m) => m.organizationId === organizationId).length),
     createInvitation: (inv: Invitation) =>
       Effect.sync(() => (MutableHashMap.set(invitations, inv.id, inv), inv)),
-    getInvitation: (id: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(invitations, id))),
+    getInvitation: (id: string) => Effect.succeed(MutableHashMap.get(invitations, id)),
     updateInvitation: (inv: Invitation) =>
       Effect.sync(() => (MutableHashMap.set(invitations, inv.id, inv), inv)),
     listInvitationsByOrganization: (organizationId: string) =>
@@ -233,13 +227,12 @@ const makeFixture = (
         Arr.fromIterable(MutableHashMap.values(invitations)).filter((i) => i.email === email),
       ),
     createTeam: (t: Team) => Effect.sync(() => (MutableHashMap.set(teams, t.id, t), t)),
-    getTeam: (teamId: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(teams, teamId))),
+    getTeam: (teamId: string) => Effect.succeed(MutableHashMap.get(teams, teamId)),
     updateTeam: (t: Team) =>
       Effect.sync(() => {
-        if (!MutableHashMap.has(teams, t.id)) return null;
+        if (!MutableHashMap.has(teams, t.id)) return Option.none();
         MutableHashMap.set(teams, t.id, t);
-        return t;
+        return Option.fromNullishOr(t);
       }),
     deleteTeam: (teamId: string) =>
       Effect.sync(() => {
@@ -255,7 +248,7 @@ const makeFixture = (
     addTeamMember: (teamMember: TeamMember) =>
       Effect.sync(() => (teamMembers.push(teamMember), teamMember)),
     getTeamMemberById: (teamMemberId: string) =>
-      Effect.succeed(teamMembers.find((m) => m.id === teamMemberId) ?? null),
+      Effect.succeed(Arr.findFirst(teamMembers, (m) => m.id === teamMemberId)),
     removeTeamMember: (teamId: string, userId: string) =>
       Effect.sync(() => {
         const i = teamMembers.findIndex((m) => m.teamId === teamId && m.userId === userId);
@@ -273,11 +266,9 @@ const makeFixture = (
     upsertOrgRole: (r: OrgRole) =>
       Effect.sync(() => (MutableHashMap.set(orgRoles, `${r.organizationId} ${r.role}`, r), r)),
     getOrgRole: (organizationId: string, role: string) =>
-      Effect.succeed(Option.getOrNull(MutableHashMap.get(orgRoles, `${organizationId} ${role}`))),
+      Effect.succeed(MutableHashMap.get(orgRoles, `${organizationId} ${role}`)),
     getOrgRoleById: (orgRoleId: string) =>
-      Effect.succeed(
-        Arr.fromIterable(MutableHashMap.values(orgRoles)).find((r) => r.id === orgRoleId) ?? null,
-      ),
+      Effect.succeed(Arr.findFirst(MutableHashMap.values(orgRoles), (r) => r.id === orgRoleId)),
     listOrgRoles: (organizationId: string) =>
       Effect.succeed(
         Arr.fromIterable(MutableHashMap.values(orgRoles)).filter(
@@ -329,7 +320,7 @@ const makeFixture = (
   const apiKeyStore = memoryApiKeyStore(apiKeys);
 
   const jwtKeyStore = {
-    getActive: Effect.sync(() => jwtKeys[0] ?? null),
+    getActive: Effect.sync(() => Arr.head(jwtKeys)),
     create: (pair: JwtKeyPair) => Effect.sync(() => (jwtKeys.push(pair), pair)),
     list: Effect.succeed(jwtKeys),
   };
@@ -338,8 +329,7 @@ const makeFixture = (
   // time even though these tests never exercise rate-limited paths.
   const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
   const rateLimitStore = {
-    get: (key: string) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(rateLimitEntries, key))),
+    get: (key: string) => Effect.sync(() => MutableHashMap.get(rateLimitEntries, key)),
     set: (key: string, entry: RateLimitEntry, _ttl: number) =>
       Effect.sync(() => void MutableHashMap.set(rateLimitEntries, key, entry)),
     increment: (key: string, ttl: number) =>

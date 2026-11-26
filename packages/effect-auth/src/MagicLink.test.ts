@@ -66,8 +66,7 @@ const sessionStore = {
       return session;
     }),
 
-  get: (sessionId: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(sessions, sessionId))),
+  get: (sessionId: string) => Effect.sync(() => MutableHashMap.get(sessions, sessionId)),
 
   update: (session: Session) =>
     Effect.sync(() => {
@@ -98,7 +97,7 @@ const sessionStore = {
 };
 
 const userStore = {
-  get: (userId: string) => Effect.sync(() => Option.getOrNull(MutableHashMap.get(users, userId))),
+  get: (userId: string) => Effect.sync(() => MutableHashMap.get(users, userId)),
 };
 
 const addUser = (user: User) => {
@@ -161,13 +160,13 @@ const magicLinkStore = {
   get: (token: string) =>
     Effect.sync(() => {
       storeOps.push("get");
-      return Option.getOrNull(MutableHashMap.get(magicLinkTokens, token));
+      return MutableHashMap.get(magicLinkTokens, token);
     }).pipe(Effect.tap(() => (slowReads ? Effect.yieldNow : Effect.void))),
 
   consume: (token: string) =>
     Effect.sync(() => {
       storeOps.push("consume");
-      const found = Option.getOrNull(MutableHashMap.get(magicLinkTokens, token));
+      const found = MutableHashMap.get(magicLinkTokens, token);
       MutableHashMap.remove(magicLinkTokens, token);
       return found;
     }),
@@ -175,8 +174,9 @@ const magicLinkStore = {
   getByEmail: (email: string) =>
     Effect.sync(() => {
       storeOps.push("getByEmail");
-      return Option.getOrNull(
-        Arr.findFirst(MutableHashMap.values(magicLinkTokens), (token) => token.email === email),
+      return Arr.findFirst(
+        MutableHashMap.values(magicLinkTokens),
+        (token) => token.email === email,
       );
     }),
 

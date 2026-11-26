@@ -17,6 +17,7 @@ import { boolean, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-c
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { eq, getTableName } from "drizzle-orm";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
@@ -260,14 +261,16 @@ describe("stores over an application's own schema", () => {
       Effect.flatMap(Auth.UserStore, (store) => store.get(userId)),
     );
 
-    expect(user).toEqual({
-      id: userId,
-      name: "Ada",
-      image: "https://example.com/ada.png",
-      attributes: { plan: "pro" },
-      createdAt: at(0),
-      updatedAt: at(5_000),
-    });
+    expect(user).toEqual(
+      Option.some({
+        id: userId,
+        name: "Ada",
+        image: "https://example.com/ada.png",
+        attributes: { plan: "pro" },
+        createdAt: at(0),
+        updatedAt: at(5_000),
+      }),
+    );
   });
 
   it("round-trips a session, leaving the application's own columns to their defaults", async () => {
@@ -303,10 +306,10 @@ describe("stores over an application's own schema", () => {
       }),
     );
 
-    expect(result.read).toEqual(session);
+    expect(result.read).toEqual(Option.some(session));
     expect(result.listed).toEqual([{ ...session, lastActivityAt: at(30_000) }]);
     expect(result.origin).toBe("web");
-    expect(result.afterDelete).toBeNull();
+    expect(Option.isNone(result.afterDelete)).toBe(true);
   });
 
   it("claims and verifies an identifier through the application's columns", async () => {
@@ -331,14 +334,16 @@ describe("stores over an application's own schema", () => {
       }),
     );
 
-    expect(result.byValue).toEqual(identifier);
-    expect(result.verified).toEqual({
-      ...identifier,
-      verified: true,
-      verifiedAt: at(10_000),
-    });
+    expect(result.byValue).toEqual(Option.some(identifier));
+    expect(result.verified).toEqual(
+      Option.some({
+        ...identifier,
+        verified: true,
+        verifiedAt: at(10_000),
+      }),
+    );
     expect(result.listed).toHaveLength(1);
-    expect(result.missing).toBeNull();
+    expect(Option.isNone(result.missing)).toBe(true);
   });
 
   it("surfaces the application's own unique index as the claim mechanism", async () => {

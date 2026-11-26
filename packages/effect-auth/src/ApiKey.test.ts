@@ -32,8 +32,7 @@ const rateLimitEntries = MutableHashMap.empty<string, RateLimitEntry>();
 const apiKeyStore = memoryApiKeyStore(apiKeys);
 
 const rateLimitStore = {
-  get: (key: string) =>
-    Effect.sync(() => Option.getOrNull(MutableHashMap.get(rateLimitEntries, key))),
+  get: (key: string) => Effect.sync(() => MutableHashMap.get(rateLimitEntries, key)),
 
   set: (key: string, entry: RateLimitEntry, _ttl: number) =>
     Effect.sync(() => {

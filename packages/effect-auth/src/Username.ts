@@ -5,6 +5,7 @@
  * email sign-in's error, `beforeAuthenticate` hook and `SecondFactorGate`.
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Errors from "./Errors.ts";
 import {
@@ -196,7 +197,7 @@ const make = (
       signUp: Effect.fn("UsernameService.signUp")(function* (input: UsernameSignUpInput) {
         const username = yield* validate(input.username);
 
-        if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
+        if (Option.isSome(yield* lookupIdentifier(identifiers, "username", username))) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
 
@@ -219,7 +220,7 @@ const make = (
         // silently leave a fresh sign-up's username unclaimed.
         const standIn = yield* answeredByStandIn(identifiers, users, result, input.email);
         if (standIn) {
-          if ((yield* lookupIdentifier(identifiers, "username", username)) !== null) {
+          if (Option.isSome(yield* lookupIdentifier(identifiers, "username", username))) {
             return yield* new UsernameError({ message: "Username is already taken" });
           }
           return result;
@@ -260,17 +261,20 @@ const make = (
         }
 
         const identifier = yield* lookupIdentifier(identifiers, "username", username);
-        const user = identifier === null ? null : yield* users.get(identifier.userId);
+        const found = Option.isNone(identifier)
+          ? Option.none<Types.User>()
+          : yield* users.get(identifier.value.userId);
         // The same gate as email and password sign-in: lockout, rate limits
         // and captcha key on the resolved user.
         yield* hooks.beforeAuthenticate({
           method: "username",
           identifier: { type: "username", value: username },
-          userId: user?.id,
+          userId: Option.getOrUndefined(Option.map(found, (user) => user.id)),
           captchaToken: input.captchaToken,
         });
-        const passwordHash =
-          user !== null ? yield* emailPasswordStore.getPasswordHash(user.id) : null;
+        const passwordHash = Option.isSome(found)
+          ? yield* emailPasswordStore.getPasswordHash(found.value.id)
+          : Option.none<string>();
         // Always verify against a real or decoy hash so timing is constant
         // regardless of whether the account exists.
         const isValid = yield* verifyPasswordOrDecoy(
@@ -279,16 +283,17 @@ const make = (
           passwordHash,
           getDecoyHash,
         );
-        if (user === null || passwordHash === null || !isValid) {
+        if (Option.isNone(found) || Option.isNone(passwordHash) || !isValid) {
           return yield* invalid();
         }
+        const user = found.value;
 
         if (requireEmailVerification) {
           const userIdentifiers = yield* identifiers.listByUser(user.id);
-          if (primaryEmail(userIdentifiers) === null) {
+          if (Option.isNone(primaryEmail(userIdentifiers))) {
             return yield* new Errors.EmailNotVerifiedError({
               message: "Email must be verified before sign-in",
-              email: anyEmailValue(userIdentifiers) ?? "",
+              email: Option.getOrElse(anyEmailValue(userIdentifiers), () => ""),
             });
           }
         }
@@ -296,7 +301,7 @@ const make = (
         const handle = { type: "username" as const, value: username };
 
         // Silently upgrade the stored hash when the current hasher considers it outdated.
-        if (passwordHasher.needsRehash?.(passwordHash)) {
+        if (passwordHasher.needsRehash?.(passwordHash.value)) {
           yield* passwordHasher.hash(input.password).pipe(
             Effect.flatMap((newHash) => emailPasswordStore.setPasswordHash(user.id, newHash.hash)),
             Effect.ignore,
@@ -335,10 +340,10 @@ const make = (
         const username = yield* validate(rawUsername);
 
         const existing = yield* lookupIdentifier(identifiers, "username", username);
-        if (existing !== null && existing.userId !== userId) {
+        if (Option.exists(existing, (held) => held.userId !== userId)) {
           return yield* new UsernameError({ message: "Username is already taken" });
         }
-        if (existing !== null) {
+        if (Option.isSome(existing)) {
           return yield* Effect.void; // Already this user's username.
         }
 

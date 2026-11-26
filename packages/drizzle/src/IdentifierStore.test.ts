@@ -8,6 +8,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { DateTime, Effect, Layer } from "effect";
+import * as Option from "effect/Option";
 import { assert, afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
@@ -85,11 +86,11 @@ describe("IdentifierStore", () => {
     );
 
     expect(result.created).toEqual(identifier());
-    expect(result.byEmail).toEqual(identifier());
-    expect(result.byEmail && "verifiedAt" in result.byEmail).toBe(false);
-    expect(result.byUsername?.id).toBe("identifier-2");
-    expect(result.crossType).toBeNull();
-    expect(result.missing).toBeNull();
+    expect(result.byEmail).toEqual(Option.some(identifier()));
+    expect(Option.exists(result.byEmail, (found) => "verifiedAt" in found)).toBe(false);
+    expect(Option.getOrUndefined(result.byUsername)?.id).toBe("identifier-2");
+    expect(Option.isNone(result.crossType)).toBe(true);
+    expect(Option.isNone(result.missing)).toBe(true);
   });
 
   it("rejects a duplicate (type, value) with AuthError, which claimIdentifier reads as taken", async () => {
@@ -132,7 +133,7 @@ describe("IdentifierStore", () => {
 
     expect(result.free.id).toBe("identifier-4");
     // The loser never overwrote the original owner.
-    expect(result.owner?.userId).toBe("user-1");
+    expect(Option.getOrUndefined(result.owner)?.userId).toBe("user-1");
   });
 
   it("lists a user's identifiers by createdAt ascending", async () => {
@@ -175,11 +176,11 @@ describe("IdentifierStore", () => {
       }),
     );
 
-    expect(result.verified?.verified).toBe(true);
-    expect(result.verified?.verifiedAt).toEqual(at(9000));
-    expect(result.reloaded?.verified).toBe(true);
-    expect(result.reloaded?.verifiedAt).toEqual(at(9000));
-    expect(result.unknown).toBeNull();
+    expect(Option.getOrUndefined(result.verified)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result.verified)?.verifiedAt).toEqual(at(9000));
+    expect(Option.getOrUndefined(result.reloaded)?.verified).toBe(true);
+    expect(Option.getOrUndefined(result.reloaded)?.verifiedAt).toEqual(at(9000));
+    expect(Option.isNone(result.unknown)).toBe(true);
   });
 
   it("deletes one identifier or every identifier of a user, no-op when absent", async () => {
