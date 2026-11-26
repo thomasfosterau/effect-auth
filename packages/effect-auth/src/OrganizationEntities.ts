@@ -1,12 +1,10 @@
 /**
- * The organization world, as authorization entities.
+ * Organizations, teams, memberships and roles as {@link Entity} values for the
+ * policy kernel: a user under `Org::`, `Role::"org:<id>:<role>"` (active
+ * memberships only) and `Team::`, and a team under its `Org::`. It resolves
+ * only those types; merge its slice with the application's own resolver.
  *
- * `Organization.ts` answers permission questions inside one organization
- * (`checkPermission(userId, organizationId, "team:create")`). The policy
- * kernel (`Policy` / `Authorizer`) answers them over an entity graph. This module is the
- * bridge: it projects organizations, teams, memberships and roles into
- * {@link Entity} values so application policies can talk about them directly:
- *
+ * @example Org admins may update what their organization owns
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
@@ -57,33 +55,6 @@
  *   }),
  * )
  * ```
- *
- * The projection, for the reference types it recognizes:
- *
- * - `User::"<userId>"` - parents `Org::"<organizationId>"` and
- *   `Role::"org:<organizationId>:<role>"` for every *active* membership
- *   (deactivated ones project nothing, matching `Organization.ts`), plus
- *   `Team::"<teamId>"` for every team membership.
- * - `Team::"<teamId>"` - attributes `{ name, organizationId }`, parent
- *   `Org::"<organizationId>"`.
- * - `Org::"<organizationId>"` - attributes `{ name, slug }`, no parents.
- *
- * Roles are namespaced per organization (`org:<organizationId>:<role>`) so
- * `admin` in one tenant is not `admin` in another. `Role::` references
- * themselves resolve to nothing: they carry no attributes and no parents, and
- * hierarchy checks only need them to appear as *parents* of the user, which
- * they do.
- *
- * Ancestors are included per the {@link EntityResolver} contract (a resolved
- * user drags in its organizations and teams, a resolved team its
- * organization), so `principal in Role::"org:o1:admin"` and
- * `resource in Org::"o1"` decide correctly from the returned slice alone.
- *
- * **Composition is out of scope:** this resolver answers only for the
- * reference types above and omits everything else. An application that also
- * resolves its own domain entities should merge slices itself - e.g. by
- * writing an `EntityResolver` that calls this one and concatenates the
- * result with its own - rather than expecting a combinator here.
  *
  * @module organization-entities
  */

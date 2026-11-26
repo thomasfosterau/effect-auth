@@ -1,28 +1,8 @@
 /**
- * Google One Tap sign-in.
- *
- * The browser's One Tap prompt yields a `credential` — an OIDC `id_token`
- * signed by Google. This module verifies it against Google's published JWKS
- * (signature, `iss`, `aud` = your OAuth client id, `exp`, `nonce`) via the
- * shared {@link module:oauth} `verifyIdToken`, then finds-or-creates the user
- * by their verified email and issues a session.
- *
- * ## Nonce / replay protection
- *
- * To prevent a captured id_token from being replayed, this module enforces a
- * server-side nonce:
- *
- * 1. Call `createNonce()` (or `POST /google-one-tap-nonces`) before
- *    rendering the One Tap prompt. Pass the returned nonce as the `data-nonce`
- *    attribute to Google's One Tap library.
- * 2. Google embeds the nonce (SHA-256 hex-hashed per spec) in the id_token's
- *    `nonce` claim. Pass the **unhashed** nonce alongside the credential when
- *    calling `signIn` (or `POST /sessions` with a `google-one-tap` credential).
- * 3. `signIn` verifies that the stored nonce matches and consumes it — a
- *    replayed credential is rejected even if it is otherwise still valid.
- *
- * Provide a {@link GoogleOneTapNonceStore} (e.g. `GoogleOneTapNonceStoreKV`
- * from `KeyValueStores`) to the service's context.
+ * Google One Tap sign-in: verifies the prompt's `id_token` against Google's
+ * keys and finds or creates the user. A server nonce blocks replay: mint it
+ * with `createNonce()`, pass it as `data-nonce`, and hand the unhashed nonce to
+ * `signIn`, which consumes it. Provide a {@link GoogleOneTapNonceStore}.
  *
  * @module google-one-tap
  */

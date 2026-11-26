@@ -40,7 +40,7 @@ class CurrentViewer extends Context.Service<CurrentViewer, Option.Option<AppUser
 ) {}
 
 const Roles = Ladder.make(["user", "contributor", "moderator", "admin"]);
-/** The four role axes a content application asks (see the `OwnedAccess` module docs). */
+/** The four role axes a content application asks (the `OwnedAccess.make` example). */
 const Axes = Roles.axes({
   viewPrivate: "moderator",
   viewDeleted: "moderator",

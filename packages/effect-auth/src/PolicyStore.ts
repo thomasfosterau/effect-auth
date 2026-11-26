@@ -1,53 +1,9 @@
 /**
- * Policies as data: the stored document format, Cedar-style templates and
- * template links, and the `PolicyStore` service contract.
- *
- * This is the persistence half of the kernel. `Policy.ts` says what a
- * declarative policy *is* and how it decides; this module says how a policy
- * *lives* — how it serializes (a versioned, Schema-validated JSON document
- * this library owns), how a tenant-scoped grant is expressed without writing
- * a new policy per grant (templates + links), and what a backing store must
- * provide (`docs/better-auth-parity.md` §2.5, decisions 4 and 5).
- *
- * ## Templates and links
- *
- * A {@link PolicyTemplate} is a declarative policy with **slots**: its
- * principal and/or resource scope may be `?principal` / `?resource` rather
- * than a concrete entity. Cedar has no action slot, and neither do we — the
- * template's `action` is an ordinary {@link Policy.Scope}, so an action slot
- * is unrepresentable rather than merely rejected.
- *
- * A {@link TemplateLink} is one instantiation: the slot values, as a tiny
- * record. "Share this document with that user" and "assign this user that
- * role in this org" are link rows, not policy rows. {@link instantiate}
- * substitutes a link into its template to produce a real
- * {@link Policy.DeclarativePolicy} with the stable id `<templateId>#<linkId>`,
- * so editing the template retroactively changes every link it owns (the
- * point of decision 5) while each instantiated policy keeps a stable identity
- * in decision traces.
- *
- * ## Fail-closed posture
- *
- * {@link effectivePolicies} — the policy set a decision should actually run
- * against — never silently drops a link. A link whose template is missing, or
- * whose slot values do not match the template's slots, fails the whole
- * effect with an {@link Errors.AuthError} naming the link. A quietly vanishing
- * *forbid* link would be a silent privilege escalation; refusing to produce a
- * policy set at all is the safe failure.
- *
- * The cost is that **one broken link fails every decision**, for every
- * tenant: the policy set is global, so a bad row anywhere is an outage
- * everywhere. If tenants can write policies, templates or links:
- *
- * - validate on write: decode through {@link PolicyDocument} /
- *   {@link TemplateDocument} (which rejects a condition beyond
- *   `Condition.maxDepth` / `Condition.maxNodes`), check against your model
- *   with `AuthorizationModel.validatePolicies` / {@link validateTemplates},
- *   and {@link instantiate} a link against its template before storing it;
- * - scope per tenant: every decision loads every policy and link in the
- *   store, so give each tenant's policies a principal or resource scope
- *   inside that tenant (or a store of its own), or one tenant's policy can
- *   decide another tenant's requests.
+ * Policies as data: the versioned stored document, Cedar-style templates with
+ * `?principal` and `?resource` slots and the links that fill them, and the
+ * `PolicyStore` contract. {@link effectivePolicies} fails on a broken link, so
+ * one bad row fails every decision: validate on write, and scope each tenant's
+ * policies.
  *
  * @module policy-store
  */
@@ -420,8 +376,9 @@ export class PolicyStore extends Context.Service<
  * the template's slots, fails the effect with an {@link Errors.AuthError}
  * naming the link. Skipping the broken link would drop a grant silently —
  * and, for a `forbid` template, would turn a storage inconsistency into an
- * over-permissive decision. So one broken link fails every decision; see the
- * module docs for validating tenant-written rows.
+ * over-permissive decision. So one broken link fails every decision: validate
+ * tenant-written rows on write (decode them, check them against the model,
+ * instantiate each link), and scope each tenant's policies to that tenant.
  *
  * Reads the store three times (`listPolicies`, `listLinks`, `listTemplates`)
  * however many links there are.

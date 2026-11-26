@@ -1,32 +1,9 @@
 /**
- * Drizzle-backed implementation of effect-auth's `EmailPasswordStore` — the
- * store `EmailPasswordService` creates users and reads and writes password
- * hashes through — and of `PasswordResetUserStore`, the one setter
- * `PasswordResetService` writes a new hash with.
- *
- * Both live on the users table: the password hash is its `password_hash`
- * column (`passwordHash` in a `defineSchema` mapping). This is the only store
- * in the package that reads or writes that column; `UserStore` never selects
- * it.
- *
- * ### Contract notes
- *
- * - `createUser` is a plain `INSERT` with a fresh random UUID, so every success
- *   is a new user (`created: true`) and an existing row is never touched. It
- *   inserts the user row only: core claims the login address in the
- *   identifiers table afterwards (`Auth.createUserWithIdentifier`). The user it
- *   returns is read back through the same projection as `UserStore.get`, so a
- *   column default the database applied (a promoted `role`) is in it.
- * - On a `defineSchema` mapping, an attribute declared under `promoted` is
- *   written to its own column, and every other attribute to the bag. A sign-up
- *   carrying attributes for a users table with no mapped bag fails with
- *   `Auth.AuthError` rather than dropping them.
- * - `getPasswordHash` is `null` for a user with no password and for a missing
- *   user; `setPasswordHash` / `clearPasswordHash` of a missing user are no-ops.
- * - A users table whose mapping leaves `passwordHash` out cannot serve this
- *   store: building the layer dies with a defect naming the missing column.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `EmailPasswordStore` and `PasswordResetUserStore`, the only stores
+ * that read or write `password_hash`. `createUser` inserts the user row alone;
+ * promoted attributes go to their columns, and attributes with no mapped bag
+ * fail with `AuthError`. A mapping without `passwordHash` cannot build the
+ * layer.
  */
 
 import { eq, getTableColumns, type Column } from "drizzle-orm";

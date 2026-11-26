@@ -1,57 +1,8 @@
 /**
- * Pointing the stores at tables this package did not define.
- *
- * `Pg.defineTables()` and its SQLite/MySQL siblings build the three auth tables
- * under names of your choosing, but with column names and column types this
- * package picks. That is the right default, and most applications should stay on
- * it. It is the wrong answer for an application adopting effect-auth **in
- * place** — one whose entire entity graph already has foreign keys into
- * `users.id`, whose primary keys are `uuid` rather than `text`, and whose
- * migrations it owns. For those, adoption has to meet the existing schema rather
- * than the reverse.
- *
- * This module is how. An {@link AuthSchema} pairs each of the three tables with
- * a mapping from the fields the stores need to the columns *that* table actually
- * has. Everything below `AuthSchema` is the same store code, running the same
- * queries; only the projection changes.
- *
- * ### What is checked, and where
- *
- * The mapping is type-level: {@link ColumnKey} picks out exactly those keys of a
- * table whose selected value is assignable to the type the store needs, so
- * naming a `text` column for `expiresAt`, or a nullable one for `id`, is a
- * compile error at the call site — not a runtime surprise.
- *
- * Column *names* are free because the mapping supplies them, and column *types*
- * are free as long as they read back as the value the domain uses. A `uuid`
- * primary key reads back as `string`, so it needs nothing but the mapping; a
- * `bigint` one does not, and is out of scope.
- *
- * ### What a caller-supplied table still has to satisfy
- *
- * - **Attribute bags** must read back as an object. A drizzle `jsonb()` column
- *   with no `$type` reads back as `unknown`, which no mapping will accept; write
- *   `jsonb().$type<Auth.JsonObject>()`.
- * - **Extra required columns** — a `role text NOT NULL` the stores know nothing
- *   about — must have a database-level default, since the stores insert only the
- *   columns they were given.
- *
- * ### Promoted attributes
- *
- * An attribute the application keeps as a **real column** — `users.role`, with
- * its own type, `CHECK`, default and index — is declared under the users
- * entry's `promoted`, keyed by attribute name. The user store selects each
- * promoted column and presents it in `user.attributes` under that name, so
- * `Admin.isAdmin`, `SessionContext.withRole` and every other reader of
- * `attributes.role` see the column. The column is the sole authority for its
- * key: a value under the same key in the `jsonb` bag is ignored, and a `NULL`
- * column leaves the key absent. A users table with promoted attributes may omit
- * the `attributes` bag entirely — the applications' `users` tables have none.
- * (`ladderCheck` in this package derives a role column's `CHECK` from the
- * application's `Ladder`.)
- * - **Uniqueness on `(type, value)`** in the identifiers table is still what
- *   makes `Auth.claimIdentifier` correct. The mapping cannot check that; the
- *   application's migration has to carry it.
+ * Pointing the stores at tables this package did not define: an {@link
+ * AuthSchema} maps each field a store needs to a column of the application's
+ * table, checked at compile time by {@link ColumnKey}. See {@link defineSchema}
+ * for what such a table must satisfy.
  *
  * @example
  * ```ts
@@ -164,7 +115,7 @@ export interface UserColumnNames<TTable extends Table> {
   readonly image: ColumnKey<TTable, string | null>;
   /**
    * The `jsonb` attribute bag. Optional: a table that keeps every attribute it
-   * has as a promoted column (see the module docs) needs none.
+   * has as a promoted column needs none.
    */
   readonly attributes?: ColumnKey<TTable, Auth.JsonObject | null>;
   readonly createdAt: ColumnKey<TTable, Date>;
@@ -251,7 +202,7 @@ export type PromotedValue = string | number | boolean | null;
 
 /** Everything the user store addresses. */
 export type UserSchema = TableSchema<UserColumns> & {
-  /** Attribute name → the real column that holds it (see the module docs). */
+  /** Attribute name → the real column that holds it, the only authority for that key. */
   readonly promoted: Readonly<Record<string, Column>>;
 };
 /** Everything the identifier store addresses. */
@@ -339,8 +290,19 @@ export class SchemaMappingError extends Data.TaggedError("SchemaMappingError")<{
  * Point the stores at tables this package did not define.
  *
  * Each entry names a table and says which of its columns holds each field the
- * corresponding store reads and writes. See the module docs for what a table
- * still has to satisfy beyond the mapping.
+ * corresponding store reads and writes. A column's type must read back as the
+ * value the store needs (a `uuid` key reads as `string`; a `bigint` one is not
+ * supported). Beyond the mapping, a table still needs:
+ *
+ * - attribute bags that read back as an object
+ *   (`jsonb().$type<Auth.JsonObject>()`, not a bare `jsonb()`);
+ * - a database default for every required column the stores do not know;
+ * - a unique index on the identifiers table's `(type, value)`, which makes
+ *   `Auth.claimIdentifier` correct.
+ *
+ * An attribute under `users.promoted` is a real column, presented in
+ * `user.attributes` under its name; the column is the only authority for that
+ * key, and a `NULL` leaves it absent.
  *
  * Throws {@link SchemaMappingError} when `users.promoted` maps an attribute
  * onto a column already mapped to a fixed field.

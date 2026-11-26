@@ -1,18 +1,8 @@
 /**
- * Deleting a user deletes what they hold.
- *
- * Every path that deletes a user (`AccountManagementService`'s confirmed
- * deletion, `AdminService.removeUser`, `AnonymousService` once an anonymous
- * user is linked, and `UserService.deleteUser` through the `AccountDeletion`
- * service) goes through {@link purgeUser}. It removes the user's credentials
- * and tokens through each store's per-user delete (`UserCredentials.ts`), the
- * unspent magic links and one-time codes sent to the user's addresses, then
- * the sessions, then the identifiers, and only then the user row. The stores
- * keep no foreign keys, so nothing else removes those rows.
- *
- * The stores are optional: a caller resolves them once with
- * {@link userPurgeStores} where it resolves its other stores, and an app
- * without a store holds nothing of that kind.
+ * Deleting a user deletes what they hold: {@link purgeUser} removes the user's
+ * credentials and tokens, the codes and links sent to their addresses, then the
+ * sessions, the identifiers and last the user row. Every path that deletes a
+ * user goes through it; {@link userPurgeStores} resolves the optional stores.
  *
  * @internal
  */

@@ -1,15 +1,7 @@
 /**
- * Reads the schema's `BIGINT` columns back as JavaScript numbers, whatever
- * the driver hands over.
- *
- * The schema stores every epoch-millisecond instant and millisecond duration
- * as `BIGINT` (`Schema.ts`), and drivers disagree on how an `int8` comes back:
- * SQLite, D1 and PGlite return a `number`, `@effect/sql-pg` returns a
- * `bigint`, and node-postgres (`pg`) returns a decimal string. The stores
- * type those columns as `number`, so every row read normalizes them here,
- * strictly: only an integer in the safe range is accepted, from a `number`,
- * a `bigint` or a canonical decimal string; `NaN`, fractions, exponents and
- * out-of-range values fail as an `AuthError`.
+ * Reads the schema's `BIGINT` columns back as numbers, whatever the driver
+ * returns (a `number`, a `bigint` or a decimal string). Only a safe integer is
+ * accepted; anything else fails as an `AuthError`.
  *
  * @internal
  */

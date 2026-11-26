@@ -1,48 +1,8 @@
 /**
- * The service seam between effect-auth's stores and a Drizzle database handle —
- * PostgreSQL, SQLite or MySQL, Promise-shaped or Effect-shaped.
- *
- * This package never opens a connection of its own: the application builds a
- * drizzle handle with whichever driver it already uses (`node-postgres`,
- * `postgres.js`, Neon, PGlite, `better-sqlite3`, libSQL, D1, `mysql2`,
- * `effect-postgres`, ...) and hands it over as the {@link DrizzleDatabase}
- * service.
- *
- * ### Why a structural seam
- *
- * The store code is single-sourced across all dialects because the fragment of
- * drizzle's query builder it uses — `insert().values()`,
- * `select().from().where().limit()/.orderBy()`, `update().set().where()`,
- * `delete().where()`, all terminated by `.execute()` — is spelled identically by
- * `PgAsyncDatabase`, `SQLiteAsyncDatabase`, `MySqlAsyncDatabase` and drizzle's
- * Effect drivers. What is *not* shared is their static types: each dialect brands its
- * own `PgTable` / `SQLiteTable` / `MySqlTable`, so no single drizzle type covers
- * them.
- *
- * {@link AuthDatabase} is therefore a minimal structural description of exactly
- * that fragment, and nothing else — it carries no `any`, and every row and
- * insert type is still derived from the table it was given. {@link databaseLayer}
- * and {@link effectDatabaseLayer} are the doors a real handle comes through.
- *
- * ### Promise-shaped and Effect-shaped drivers
- *
- * `.execute()` returns a `Promise` on the classic drivers and an `Effect` on
- * drizzle's Effect drivers (`drizzle-orm/effect-postgres` and friends, new in
- * the drizzle `1.0` line this package targets). {@link DrizzleResult} is the union of the two, and the store
- * layer adapts at runtime — an Effect-shaped handle reaches the database with
- * no Promise round trip in between.
- *
- * ### Handle lifetime
- *
- * {@link DrizzleDatabase} does not hold a handle; it holds an
- * `Effect<AuthDatabase>` that is run *once per query*. Passing a plain handle
- * pins it for the life of the layer, exactly as before. Passing an `Effect`
- * defers the choice to the calling fiber, which is what a request-scoped pool
- * needs: on Cloudflare Workers a pool's sockets are pinned to the request that
- * opened them, so an isolate serving overlapping requests must resolve the
- * handle per query rather than capture one at layer-build time. A
- * `Context.Reference` holding the handle does that with no `AsyncLocalStorage`:
- * the request scope *is* the Effect context.
+ * The {@link DrizzleDatabase} seam: the application hands over a drizzle handle
+ * of any dialect and driver, Promise- or Effect-shaped. {@link AuthDatabase}
+ * describes only the query-builder fragment the stores use. A handle given as
+ * an `Effect` is resolved per query, as request-scoped pools on Workers need.
  *
  * @example
  * ```ts
@@ -331,7 +291,7 @@ const toHandle = (db: object | Effect.Effect<object>): DrizzleHandle => ({
  *
  * Passing an `Effect` defers the handle to query time: it is run once per query,
  * in the calling fiber, so a handle held in a `Context.Reference` follows the
- * request that set it. See the module docs for why that matters on Workers.
+ * request that set it, as a request-scoped pool on Workers needs.
  *
  * Pair it with the tables for the *same* dialect (`Pg.tables`, `Sqlite.tables`
  * or `MySql.tables`); the store layers take those separately, so the pairing is

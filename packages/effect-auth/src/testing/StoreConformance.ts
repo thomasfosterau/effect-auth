@@ -1,65 +1,8 @@
 /**
- * Store-contract conformance suites: the semantics the core's store contracts
- * state, as executable cases an application runs against the store it brings
- * (`docs/guides/byo-stores.md`).
- *
- * ### How assertions surface
- *
- * This module imports no test runner. A suite is plain data: a contract name
- * and a list of cases, each an `Effect` that succeeds when the store behaves,
- * and fails with {@link ConformanceError} (naming the contract, the case and
- * what was wrong) when it does not. A store failing unexpectedly fails the
- * case with its own `AuthError`. Register the cases with whatever runner the
- * app uses:
- *
- * ```ts
- * import { Effect, Layer } from "effect"
- * import * as Auth from "@thomasfosterau/effect-auth"
- * import * as Testing from "@thomasfosterau/effect-auth/testing"
- *
- * // The store under test: here, a map.
- * const sessions = new Map<string, Auth.Session>()
- * const store: typeof Auth.SessionStore.Service = {
- *   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
- *   get: (id) => Effect.sync(() => sessions.get(id) ?? null),
- *   // Never creates: a session deleted meanwhile stays deleted.
- *   update: (session) =>
- *     Effect.sync(() => (sessions.has(session.id) && sessions.set(session.id, session), session)),
- *   touch: (id, touch) =>
- *     Effect.sync(() => {
- *       const session = sessions.get(id)
- *       if (session === undefined || session.expiresAt < touch.lastActivityAt) return null
- *       const touched = { ...session, ...touch }
- *       sessions.set(id, touched)
- *       return touched
- *     }),
- *   delete: (id) => Effect.sync(() => void sessions.delete(id)),
- *   deleteByUserId: (userId) =>
- *     Effect.sync(() => {
- *       for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id)
- *     }),
- *   listByUserId: (userId) =>
- *     Effect.sync(() => [...sessions.values()].filter((session) => session.userId === userId)),
- * }
- *
- * const suite = Testing.sessionStoreConformance()
- * for (const testCase of suite.cases) {
- *   // In a test file, one test per case: it(testCase.name, () => Effect.runPromise(...)).
- *   await Effect.runPromise(testCase.run.pipe(Effect.provide(Layer.succeed(Auth.SessionStore, store))))
- * }
- * ```
- *
- * ### Isolation
- *
- * Every case mints its own ids and values (random UUIDs), so cases may share
- * one database and run in any order; nothing needs truncating between them.
- *
- * ### Stores whose tables reference users
- *
- * A store whose rows carry a foreign key to the app's users table needs the
- * user to exist first. Pass `seedUser`, which the suite calls for every user
- * id a case uses before the store sees it. `userStoreConformance` requires it,
- * since `UserStore` only reads.
+ * Conformance suites for a store an application brings
+ * (`docs/guides/byo-stores.md`). A suite is runner-free data: cases that fail
+ * with {@link ConformanceError}. Each case mints its own ids, so cases share
+ * one database in any order; pass `seedUser` when rows reference users.
  *
  * @module testing
  */

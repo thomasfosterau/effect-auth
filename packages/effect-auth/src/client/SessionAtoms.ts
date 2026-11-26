@@ -1,22 +1,8 @@
 /**
- * The client session as an `effect/reactivity` Atom graph
- * (`@thomasfosterau/effect-auth/client/atoms`).
- *
- * {@link makeSessionAtoms} turns an {@link AuthClient} into Atoms: the session
- * read (`GET /sessions/current?include=user`) as an `AsyncResult`, the states
- * derived from it (signed in, pending, last error), and the signed-in user's
- * session list. An application reads them through its own `AtomRegistry`, the
- * one its other Atoms live in, so auth and data share one graph and one
- * runtime: an Atom that reads `isSignedIn` or `data` recomputes when the user
- * signs in or out, with no invalidation list.
- *
- * Commands stay plain calls on the client (`client.signIn(...)`, ...). The
- * Atoms observe them through `client.onSessionChange`: each session-changing
- * call refetches the session while it is observed, and resolves once that
- * refetch has settled.
- *
- * This is a subpath of its own, apart from `./client`, because it imports
- * `effect` at runtime and `./client` stays free of it.
+ * The client session as an `effect/reactivity` Atom graph (`./client/atoms`):
+ * {@link makeSessionAtoms} reads the session as an `AsyncResult`, with derived
+ * states and the session list, in the application's own `AtomRegistry`.
+ * Commands stay client calls; the Atoms refetch on `onSessionChange`.
  *
  * @example
  * ```ts

@@ -1,34 +1,9 @@
 /**
- * Drizzle-backed implementations of the two stores that keep pending one-time
- * tokens for a user's address: `Auth.Email.EmailVerificationStore` (email
- * verification links) and `Auth.Password.PasswordResetStore` (password reset
- * links).
- *
- * The two contracts have the same shape (`create`, `get`, `delete`,
- * `deleteByUserId` over `{ token, userId, email, createdAt, expiresAt }`;
- * `EmailVerificationStore` adds `getLatestByUserId`, served for both), so
- * one `tokens` table holds both, told apart by its `purpose` column: a
- * dialect's {@link Tables}, or an application's own table mapped with
- * `defineTokenTable` (so the application owns its `user_id` foreign key). Every
- * read and delete is scoped to the store's own purpose: a password-reset
- * request, which first clears the user's pending resets, never clears a
- * pending email verification.
- *
- * ### Contract notes
- *
- * - `token` is the SHA-256 hex digest the core services compute
- *   (`Auth.hashToken`); the raw token goes to the user and never reaches the
- *   store.
- * - `get` returns `null` on a miss; deletes of missing rows are no-ops.
- * - `consume` reads the row, then deletes it and hands it back only
- *   when that `DELETE` reports one affected row, so of concurrent consumers
- *   of one token only one receives it. MySQL has no `RETURNING`, so every
- *   dialect takes the driver's affected-row count rather than a
- *   per-dialect branch; a driver that reports none fails with `AuthError`
- *   rather than hand the token out twice.
- * - Expiry is the services' to check: an expired row is returned as found.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `EmailVerificationStore` and `PasswordResetStore` over one tokens
+ * table, told apart by `purpose` (a dialect's {@link Tables}, or a table mapped
+ * with `defineTokenTable`). Each store reads and deletes only its own purpose.
+ * Tokens are the digests core computes, and `consume` hands a row to one
+ * consumer only.
  */
 
 import { and, desc, eq } from "drizzle-orm";

@@ -1,16 +1,8 @@
 /**
- * Core sign-up over the single-table `IdentifierStore`, written once and
- * run against each dialect that has an engine in the test run.
- *
- * Core passes the address a user signs up with to the store's `createUser` (as
- * `CreateUserInput.identifier`). The application's user writer inserts the row
- * with it, and the claim that follows finds the address already on the row. On a
- * `NOT NULL` `email` column that is the only way the row can be inserted; on a
- * nullable one a writer may also leave the address out, and the claim writes it.
- *
- * The suite drives `EmailPasswordService` end to end: sign-up, then sign-in with
- * the same address. Everything but the users table is in memory. Never published
- * (`tsconfig.json` excludes `src/testing/`).
+ * Core sign-up over the single-table `IdentifierStore`, run on each dialect
+ * with an engine: `EmailPasswordService` signs up and then signs in, with the
+ * user writer inserting the row with its address. Everything but the users
+ * table is in memory. Never published.
  */
 
 import { DateTime, Effect, Layer, MutableHashMap } from "effect";

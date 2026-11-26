@@ -1,13 +1,7 @@
 /**
- * Shared token-hashing primitives for effect-auth.
- *
- * Bearer tokens (magic links, email-verification tokens, password-reset
- * tokens, device codes) are high-entropy secrets that grant account access.
- * They are stored as their SHA-256 digest so that a stolen database does not
- * allow replay attacks.
- *
- * The raw token is delivered to the end user (via email, SMS, URL, …) and
- * never persisted. All store lookups use the digest as the key.
+ * Token hashing: bearer secrets are stored as their SHA-256 digest and looked
+ * up by it, so a stolen database cannot replay them. The raw token goes only to
+ * the user.
  *
  * @module token-hash
  */

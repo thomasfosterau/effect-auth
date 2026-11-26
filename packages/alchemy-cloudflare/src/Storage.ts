@@ -1,13 +1,7 @@
 /**
- * Wiring: Alchemy's D1 client (`Cloudflare.D1.QueryDatabase(database)`) → a
- * `SqlClient` → every effect-auth store.
- *
- * There are no D1-flavoured store implementations in this package. The stores
- * come from `@thomasfosterau/effect-auth/sql`, which implements every
- * effect-auth storage interface against `effect/sql`'s `SqlClient`
- * with DDL that is valid on SQLite (and therefore D1) and Postgres.
- * All this module does is build the client with {@link D1Client.layer} and
- * provide it to those stores.
+ * Wiring: the bound D1 client, through {@link D1Client.layer}, to a `SqlClient`
+ * and every `@thomasfosterau/effect-auth/sql` store. There are no D1-specific
+ * stores.
  */
 
 import type { QueryDatabaseClient } from "@alchemy.run/cloudflare/D1/QueryDatabase";

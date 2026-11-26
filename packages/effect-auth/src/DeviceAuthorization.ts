@@ -1,9 +1,8 @@
 /**
- * Device Authorization Grant (RFC 8628) for input-constrained devices (CLIs,
- * TVs). A registered client requests a `device_code` + short human-typable
- * `user_code`, shows the user a verification URL, and polls the token endpoint
- * while the user reviews the client and scopes and approves the code on a
- * second device. The session it receives records the client and scopes.
+ * The device authorization grant (RFC 8628): a registered client gets a
+ * `device_code` and a short `user_code`, and polls while the user reviews the
+ * client and scopes on another device and approves. The session records the
+ * client and scopes.
  */
 import { Clock, Context, Data, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";

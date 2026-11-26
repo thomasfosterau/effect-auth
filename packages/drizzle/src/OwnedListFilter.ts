@@ -1,52 +1,9 @@
 /**
- * The owned-material read scope rendered as a drizzle `WHERE`.
- *
- * `Auth.OwnedAccess.readScope` resolves, once per request, the facts a LIST
- * of owned rows is filtered by — who the viewer is, whether they see
- * everything, whom they follow and which groups they belong to.
- * {@link ownedListFilter} turns those facts into SQL over the columns a table
- * (or view) actually has. "Published" below is `draft = false AND
- * unapproved = false`, each conjunct present only when the table has that
- * column:
- *
- * | scope    | `WHERE`                                                                  |
- * | -------- | ------------------------------------------------------------------------ |
- * | `all`    | none (`undefined`)                                                       |
- * | `public` | `visibility = 'public'` AND published                                    |
- * | `member` | public-and-published, OR `owner = <viewer>`, OR `visibility = 'followers'` AND published `AND owner IN (<following>)`, OR `visibility = 'group'` AND published `AND group IN (<groups>)` |
- *
- * The owner's own arm never excludes drafts or unapproved rows, so a member
- * lists their pending material alongside their published rows; every other
- * arm does. This is the set-shaped twin of `Auth.OwnedAccess`'s per-row
- * `canView` and of `ReadScope.compile` over `Auth.OwnedAccess.policies` and
- * `binding`, built from the same facts, and `OwnedListFilter.test.ts` runs all
- * three over one corpus in a real Postgres and requires them to agree on every
- * row.
- *
- * ### Columns a table may not have
- *
- * - **No `group` column**: the `group` arm is left out, so a `group` row lists
- *   only for its owner (and the `all` scope). That is narrower than `canView`,
- *   never wider. A `NULL` group names no group, so its row reads as private.
- * - **No `unapproved` column**: the table has no moderation axis, and every
- *   row counts as approved. Map an application's own moderation state to a
- *   boolean expression (`state <> 'approved'` through drizzle's `sql`) rather than
- *   leave it out: anything but exactly the approved state is unapproved.
- * - `draft` and `unapproved` compare with `= false`, so a `NULL` in either
- *   reads as unpublished, as the policies' decision slice does.
- *
- * ### The follow set is a subquery, not a list
- *
- * The viewer's follow set reaches the `WHERE` as `owner IN (SELECT …)` — the
- * query value {@link isFollowerLayer}'s `followingQuery` returns — so it is
- * never materialised into literals and never capped: Postgres plans it as a
- * semi-join, and the only bound that matters is the list's own `LIMIT`. A
- * viewer who follows nobody (`Auth.OwnedAccess.nobody`, which is also what an
- * unprovided follower seam resolves to) simply loses the followers arm. A
- * follow set carrying anything but a drizzle query is treated the same way —
- * the renderer fails closed on a value it cannot render. The group set is
- * the same: `group IN (SELECT …)` from {@link isMemberLayer}'s `groupsQuery`,
- * or no group arm at all.
+ * `Auth.OwnedAccess.readScope` rendered as a drizzle `WHERE` over an owned
+ * table's columns. Missing `draft`, `unapproved` or `group` columns only narrow
+ * it, and the follow and group sets stay subqueries ({@link isFollowerLayer},
+ * {@link isMemberLayer}). It agrees row for row with `canView` and
+ * `ReadScope.compile`.
  *
  * @example
  * ```ts

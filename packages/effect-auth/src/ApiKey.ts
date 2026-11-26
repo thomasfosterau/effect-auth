@@ -1,17 +1,8 @@
 /**
- * API key management for effect-auth.
- *
- * Mirrors better-auth's api-key plugin: users create long-lived API keys
- * (shown in plaintext exactly once), which are later presented by clients
- * and verified by sha256 hash lookup. Keys support expiry, enable/disable,
- * per-resource permissions, remaining-use quotas, arbitrary metadata, and
- * an optional per-key rate limit that is enforced through the
- * {@link RateLimiter} service.
- *
- * Only the sha256 hex digest of a key is ever persisted — the plaintext is
- * returned once from `create` and cannot be recovered. Because verification
- * looks a key up by its exact digest (rather than comparing secrets
- * byte-by-byte), the comparison is inherently timing-safe.
+ * API keys: long-lived keys shown once and verified by their SHA-256 digest,
+ * with expiry, enabling, per-resource permissions, use quotas, metadata and an
+ * optional per-key rate limit through the {@link RateLimiter}. Only the digest
+ * is stored.
  *
  * @module api-key
  */

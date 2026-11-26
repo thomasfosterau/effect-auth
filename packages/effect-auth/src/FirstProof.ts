@@ -1,20 +1,8 @@
 /**
- * The first proof of an address.
- *
- * An email identifier is created unverified only by a sign-up that proved
- * nothing about the address, so every credential on its account may belong to
- * whoever signed up with it first, not to the address's holder. Every flow
- * that promotes such an identifier to verified on the strength of a proof (a
- * verification link, a magic link, an email OTP, an invitation, an IdP's
- * verified email claim through OAuth, Google One Tap or SSO) first clears the
- * account's password, removes its other credentials (unverified phone
- * numbers, linked OAuth accounts, passkeys, API keys, multi-factor enrolment,
- * trusted devices and the tokens the core's OIDC provider issued) and revokes
- * its sessions, so the prover is left the only one holding the account and
- * enrols their own credentials. A phone number the account already verified
- * stays: its holder proved it with a code sent to it, so it is not the
- * earlier holder's to keep or lose. JWTs already issued (`Jwt`) cannot be
- * revoked; they expire on their own.
+ * The first proof of an address: before a flow verifies an unverified email
+ * identifier on a proof, it clears the account's password and other credentials
+ * and revokes its sessions, so the prover alone holds the account. A verified
+ * phone stays, and issued JWTs expire on their own.
  *
  * @internal
  */

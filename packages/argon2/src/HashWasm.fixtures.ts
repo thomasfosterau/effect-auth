@@ -1,10 +1,7 @@
 /**
- * PHC strings written by `hash-wasm` 4.13.0, the backend this package used
- * through 0.1.x. Each was generated once by calling hash-wasm's
- * `argon2id` / `argon2i` / `argon2d` with a fixed ASCII salt and
- * `outputType: "encoded"`, and committed so the tests prove those stored
- * hashes still verify, and that the new kernel derives the same strings,
- * without keeping hash-wasm installed. Test-only: excluded from the build.
+ * PHC strings that `hash-wasm` 4.13.0, the 0.1.x backend, wrote with fixed
+ * salts, committed so the tests prove those hashes still verify and that the
+ * kernel derives the same strings. Test-only.
  */
 export interface HashWasmFixture {
   readonly label: string;

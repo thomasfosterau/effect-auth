@@ -1,13 +1,7 @@
 /**
- * The config the MySQL suites hand `drizzle-orm/mysql-proxy`.
- *
- * drizzle 1.0 decodes a column's driver value in the driver's codecs, not in
- * the column, and `drizzle-orm/mysql-proxy` ships none (the proxy's owner
- * decodes). The proxy fixtures emulate mysql2's wire shape, so they pass
- * {@link mysqlProxyConfig}: mysql2's own decoders for the column types the
- * suites read.
- *
- * Never published (`tsconfig.json` excludes `src/testing/`).
+ * The mysql2 decoders the MySQL suites pass `drizzle-orm/mysql-proxy`, which in
+ * drizzle 1.0 decodes nothing itself, so the fixtures read values as mysql2
+ * would. Never published.
  */
 
 import { DateTime } from "effect";

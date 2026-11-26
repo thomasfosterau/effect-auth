@@ -1,19 +1,9 @@
 /**
- * The steps the one-time-code flows (`EmailOtp`, `PhoneOtp`) share around a
- * stored code: their defaults, the send gate (resend cooldown and the failure
- * backoff), and verification. Internal: not exported from any barrel.
- *
- * ## The failure budget
- *
- * `maxAttempts` bounds the wrong codes one code accepts, but a send replaces
- * the code, so on its own it bounds nothing per address: send, guess, send
- * again. Each wrong code is therefore also counted against the (address,
- * purpose) pair in a counter the store keeps apart from the code's record
- * (`recordFailure`), which a resend, an expiry or the attempt limit never
- * clears; only a successful verification does (`clearFailures`). Once the
- * count reaches `freeFailures`, a send waits `baseDelay * 2 ** (count -
- * freeFailures)` (at most `maxDelay`) after the latest wrong code. A send is
- * delayed, never refused for good, so an attacker cannot lock the owner out.
+ * The steps `EmailOtp` and `PhoneOtp` share: defaults, the send gate (resend
+ * cooldown and failure backoff) and verification. Each wrong code counts
+ * against the (address, purpose) pair, apart from the code, until a success
+ * clears it; past `freeFailures`, sends back off exponentially, never refused
+ * for good. Internal.
  */
 import { Clock, Duration, Effect } from "effect";
 import type { SecureRandom } from "effect/crypto";

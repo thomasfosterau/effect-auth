@@ -1,9 +1,8 @@
 /**
- * The scrypt password hasher, the last `node:crypto` use in the core and the
- * reason it is a subpath of its own: `effect/crypto` has no scrypt, so it runs
- * only on Node.js (and Workers with `nodejs_compat`). It is an opt-in, for
- * verifying hashes written before PBKDF2 became the default; put it beside
- * the default in a `multiAlgorithmVerifier` and sign-in rehashes them.
+ * The scrypt password hasher, Node-only (or Workers with `nodejs_compat`)
+ * because `effect/crypto` has no scrypt, hence its own subpath. Put it beside
+ * the default in a `multiAlgorithmVerifier` to verify old hashes, and sign-in
+ * rehashes them.
  *
  * @module scrypt
  */

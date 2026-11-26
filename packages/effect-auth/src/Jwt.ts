@@ -1,16 +1,8 @@
 /**
- * JSON Web Tokens (compact JWS) for effect-auth, on `effect/jose`.
- *
- * Mirrors better-auth's jwt plugin: issue short-lived, asymmetrically signed
- * JWTs for authenticated users so downstream services can verify sessions
- * without a shared secret or a round-trip to the auth server, and publish
- * the matching public keys as a JWKS document (`ES256` by default, or
- * `EdDSA`). Private keys are stored as JWE (`dir` + `A256GCM`) under a key
- * derived from the root secret, with the key id in the protected header.
- *
- * Serving the JWKS is the application's concern: expose the result of
- * `getJwks()` at `/.well-known/jwks.json` (or wherever your `iss` publishes
- * keys) so verifiers can fetch the public keys.
+ * JSON Web Tokens on `effect/jose`: short-lived, asymmetrically signed JWTs
+ * (`ES256` by default, or `EdDSA`) that services verify against the published
+ * JWKS. Private keys are stored as JWE under a root-secret key. Serve
+ * `getJwks()` at your issuer's `/.well-known/jwks.json`.
  *
  * @module jwt
  */

@@ -1,27 +1,8 @@
 /**
- * Drizzle `pg-core` table definitions backing the effect-auth stores.
- *
- * Six tables cover the surface this package implements — sessions, users,
- * identifiers, API keys, rate limits and one-time tokens — namespaced with an `effect_auth_` prefix so they can live beside
- * an application's own tables. The exported table objects are ordinary drizzle
- * schema objects: feed them to `drizzle-kit` (or any migration tool) exactly as
- * you would your own.
- *
- * ### Column conventions
- *
- * - Timestamps are `timestamp({ mode: "date", withTimezone: true })`, so the
- *   domain sees real `Date` values and PostgreSQL stores `timestamptz`.
- * - Attribute bags are `jsonb().$type<Auth.JsonObject>()`, `NOT NULL`
- *   with a `'{}'` default — the driver round-trips them as plain objects, no
- *   `JSON.parse` in the store layer.
- * - Identifiers are unique on `(type, value)`; that index is the real claim
- *   mechanism behind `Auth.claimIdentifier`.
- *
- * ### Custom table names
- *
- * {@link defineTables} builds the same tables under names you choose;
- * pass the result to any store factory. {@link migrationStatements} emits DDL
- * for whichever names you used.
+ * Drizzle `pg-core` tables for the six auth tables, prefixed `effect_auth_` and
+ * ready for `drizzle-kit`. Instants are `timestamptz`, bags `jsonb` with a
+ * `'{}'` default, and `(type, value)` is unique. {@link defineTables} builds
+ * them under other names, and {@link migrationStatements} emits their DDL.
  */
 
 import {

@@ -1,24 +1,9 @@
 /**
- * In-memory reference stores for the contracts a typical service graph needs,
- * so a test or a docs example can build and run `SessionService`,
- * `EmailPasswordService`, `MultiFactorService`, `OAuthService`, `JwtService`,
- * `OidcProviderService` and the trusted-device and OTP second-factor gates
- * without a database.
- *
- * Each `memoryXStore` returns a plain implementation of one contract over
- * `MutableHashMap`s that live as long as the value. The user contracts
- * (`UserStore`, `UserServiceStore`, `EmailPasswordStore`, `OAuthUserStore`) and
- * `OAuthAccountStore.hasPassword` share one {@link MemoryUserTable}, so a user
- * created through one is read through the others. {@link layer} provides every
- * store at once over fresh state, along with the core's `KeyValueStore`-backed
- * ephemeral stores (`layerKVSingleProcess`) over an in-memory `KeyValueStore` (provided
- * with its `KeyValueStoreKeys` listing, so `purgeExpiredKV` runs against it,
- * and its `KeyValueStoreTake`, so the token stores' `consume` takes records),
- * and `memoryIdentifierStore`.
- *
- * Every operation is synchronous, so the read-then-write steps are atomic
- * within one process. These are references for tests, examples and
- * single-process demos: nothing persists.
+ * In-memory reference stores for tests and examples. The user contracts share
+ * one {@link MemoryUserTable}, and {@link layer} provides every store over
+ * fresh state, with the `KeyValueStore` stores over an in-memory backend. Every
+ * operation is synchronous, so read-then-write steps are atomic in one process.
+ * Nothing persists.
  *
  * @module testing
  */

@@ -1,39 +1,9 @@
 /**
- * What the auth tables are called, and the dialect-independent shape the
- * stores address them through.
- *
- * The tables themselves are defined once per dialect — `Pg`, `Sqlite` and
- * `MySql` — because a drizzle table object is branded by its dialect. This
- * module holds what those three definitions agree on: the table names, the
- * {@link Tables} set a store factory takes, and the row types it reads back.
- *
- * ### Column conventions, in the abstract
- *
- * Every dialect maps the same six semantics; only the physical types differ.
- *
- * | Semantic          | PostgreSQL              | SQLite                     | MySQL             |
- * | ----------------- | ----------------------- | -------------------------- | ----------------- |
- * | id / handle text  | `text`                  | `text`                     | `varchar(255)`    |
- * | instant           | `timestamptz` (`Date`)  | `integer` epoch ms (`Date`)| `datetime(3)`     |
- * | attribute bag     | `jsonb`                 | `text` (JSON mode)         | `json`            |
- * | boolean           | `boolean`               | `integer` 0/1              | `tinyint` 0/1     |
- *
- * All four round-trip to the *same* TypeScript values — `string`, `Date`,
- * `Auth.JsonObject`, `boolean` — which is why one store implementation
- * serves all three. Column names are identical across dialects.
- *
- * ### Tables this package did not define
- *
- * Everything here describes the tables this package builds. An application
- * adopting effect-auth onto tables it already owns — its own column names, its
- * own key types — maps them instead; see `Columns.ts` and `defineSchema`.
- *
- * ### What is *not* here
- *
- * `effect_auth_users` carries no `email`/`email_verified` columns. Since the
- * surrogate-key migration, login handles live exclusively in
- * `effect_auth_identifiers` — a user may hold several emails, a username and a
- * phone number, or none at all.
+ * Table names, the dialect-independent {@link Tables} set and the row types the
+ * stores read. Each dialect (`Pg`, `Sqlite`, `MySql`) defines the tables with
+ * the same column names, and every column reads back as the same `string`,
+ * `Date`, `JsonObject` or `boolean`. Login handles live only in the identifiers
+ * table.
  */
 
 import type * as MySql from "./MySqlSchema.ts";

@@ -1,12 +1,8 @@
 /**
- * Internal: records on a `Hooks` implementation which of its plugins key a limit
- * on the client address, so `Http.make` can check at build that the handler has
- * an address source. No entry point exports this module, and the API
- * reference leaves it out (`docgen.json` excludes it).
- *
- * The record is a symbol-keyed property. A plugin built with `makePlugin` copies
- * its inner implementation with an object spread, which keeps symbol-keyed
- * properties, so the record survives the plugins stacked after it.
+ * Records on a `Hooks` value which plugins key a limit on the client address,
+ * so `Http.make` can require an address source at build. The record is
+ * symbol-keyed, which `makePlugin`'s object spread keeps. Internal;
+ * `docgen.json` excludes it.
  *
  * @module HooksClientAddress
  * @internal

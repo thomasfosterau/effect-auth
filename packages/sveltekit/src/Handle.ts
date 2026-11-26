@@ -1,22 +1,8 @@
 /**
- * The SvelteKit `handle` hook: resolve the session once, before any `load`
- * runs, and keep a page rendered for a signed-in viewer out of shared caches.
- *
- * ### Order matters
- *
- * The hook authenticates first, puts the result on `event.locals.auth`,
- * renders, and only then sets the cache headers. Cache-control has to see the
- * resolved viewer, so a response rendered for a signed-in viewer is forced to
- * `private, no-store`, whatever the route asked for. A hook that sets cache
- * headers before authenticating ends up caching a page rendered for an admin
- * and serving it to anonymous visitors.
- *
- * ### Resolution
- *
- * Resolution goes through the core's `SessionResolution`, so the cookieless
- * skip, the fail-open or fail-closed choice and the outcome metric are the
- * ones every other edge uses. The app supplies the lookup itself: the
- * in-process `SessionService`, or `Http.RemoteSession` over a service binding.
+ * The SvelteKit `handle` hook: resolves the session once through the core's
+ * `SessionResolution`, before any `load`, puts it on `event.locals.auth`, and
+ * only after rendering sets the cache headers, forcing `private, no-store` for
+ * a signed-in viewer. The app supplies the lookup.
  *
  * @module handle
  */

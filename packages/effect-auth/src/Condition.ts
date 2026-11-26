@@ -1,19 +1,9 @@
 /**
- * The declarative condition language: a small, serializable expression AST
- * evaluated by a **pure, total** function over a {@link Entity.EntitySlice}.
- *
- * Conditions are the `when` clause of declarative policies. Because they are
- * data (Schema-validated, versioned with the policy document format) they
- * are storable, tenant-editable, and analyzable — the extra powers the
- * declarative subset earns (`docs/better-auth-parity.md` §2.5). Arbitrary
- * code belongs in `Policy.custom`, not here.
- *
- * Evaluation never throws and never performs IO: a type mismatch (comparing
- * a string with `<`, calling `in` on a non-entity) produces a typed
- * {@link ConditionError} result, which the decision layer treats
- * **fail-closed** (an erroring permit cannot grant; an erroring forbid
- * denies). `and`/`or` short-circuit, so `false && <error>` is `false` and
- * `true || <error>` is `true` — the same posture as Cedar's operators.
+ * The declarative condition language: a serializable expression AST, the `when`
+ * clause of a declarative policy, evaluated by a pure, total function over an
+ * {@link Entity.EntitySlice}. A type mismatch is a {@link ConditionError},
+ * which the kernel treats as fail-closed; `and` and `or` short-circuit as
+ * Cedar's do.
  *
  * @module condition
  */

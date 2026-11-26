@@ -1,28 +1,9 @@
 /**
- * The Argon2 kernel: `@thomasfosterau/argon2`'s WebAssembly binary
- * ({@link WASM_BASE64}), compiled **once, at module scope**, and called
- * synchronously through the binary's C ABI.
- *
- * Module scope is the point. workerd forbids generating wasm code while
- * it serves a request (`CompileError: WebAssembly.compile(): Wasm code
- * generation disallowed by embedder`) and allows it only while the worker's
- * modules are evaluated (from compatibility date 2025-06-01, or with
- * `allow_eval_during_startup`), so a backend that compiles lazily on the first
- * hash (as `hash-wasm` does) fails every sign-up and sign-in on a deployed
- * Worker. Don't move the `new WebAssembly.Module` below into a function.
- *
- * The ABI (`src/lib.rs` in `@thomasfosterau/argon2`): the caller `alloc`s
- * linear memory for each input, `hash` writes an argon2id PHC string and
- * returns its length (read from `last_ptr`) or `-1`, and `verify` returns `1`
- * on a match, `0` on a mismatch and `-1` when the stored string cannot be
- * recomputed. `verify` reads the variant (`argon2d`, `argon2i`, `argon2id`),
- * version, costs, salt and digest length from the stored string and compares
- * in constant time (RustCrypto's `subtle`). `hash` always derives argon2id,
- * v=19, with a 32-byte digest. The package's own exports take no cost
- * parameters, which is why this module calls the ABI itself. Planned
- * follow-up: `@thomasfosterau/argon2` is being asked for a cost-parameter
- * API; with it the adapter depends on that package at runtime again
- * (ADR-0022) and this module's ABI calls and `WasmBinary.ts` go.
+ * The Argon2 kernel: `@thomasfosterau/argon2`'s WebAssembly ({@link
+ * WASM_BASE64}), compiled once at module scope and called through its C ABI.
+ * workerd forbids compiling wasm inside a request, so never move `new
+ * WebAssembly.Module` into a function. `verify` reads the costs from the stored
+ * string.
  *
  * @module argon2/wasm
  * @internal

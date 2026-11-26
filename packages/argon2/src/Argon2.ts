@@ -1,26 +1,9 @@
 /**
- * Argon2id password hasher backed by WebAssembly: the RustCrypto `argon2`
- * crate as built by
- * [`@thomasfosterau/argon2`](https://www.npmjs.com/package/@thomasfosterau/argon2)
- * (MIT), compiled once at module scope.
- *
- * It has no native module and no `node:` imports, and it generates no wasm
- * code after startup, so it runs unchanged on Node, Bun, Deno, and edge
- * runtimes such as Cloudflare Workers, which refuse wasm compilation inside a
- * request. Randomness comes from the platform Web Crypto API
- * (`globalThis.crypto`), the same source core effect-auth's `PlatformCrypto`
- * layer uses.
- *
- * Emitted hashes are standard PHC strings
- * (`$argon2id$v=19$m=...,t=...,p=...$salt$hash`) and `verify` parses the cost
- * parameters, salt and digest length out of the *stored* hash rather than
- * assuming the configured ones — so hashes written by `hash-wasm` (this
- * package's backend through 0.1.x), by `@node-rs/argon2`, by an older
- * configuration of this package, or by any other Argon2 implementation keep
- * verifying after a parameter change. Those costs are bounded by a verify
- * ceiling (`maxMemoryKiB`, `maxIterations`, `maxParallelism`): a stored
- * hash over it is refused before the kernel runs, so it cannot grow the wasm
- * memory or spin for billions of passes.
+ * Argon2id over WebAssembly (the RustCrypto crate built by
+ * `@thomasfosterau/argon2`), compiled once at module scope, so it runs on Node,
+ * Bun, Deno and Workers. `verify` reads the costs from the stored PHC string,
+ * so older hashes keep verifying, and refuses one over the verify ceiling
+ * before hashing.
  *
  * @module argon2/argon2
  */

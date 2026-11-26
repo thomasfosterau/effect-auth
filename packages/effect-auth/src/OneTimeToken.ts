@@ -1,14 +1,8 @@
 /**
- * General-purpose single-use token service for effect-auth.
- *
- * Tokens are cryptographically random (32 bytes of base64url entropy), stored
- * as SHA-256 digests so a database breach cannot replay them, expire on a
- * configurable TTL, and are consumed (deleted) by the first
- * {@link OneTimeTokenService.verify} call that finds them, even an expired one.
- *
- * Typical use-cases: email-action confirmation links, passwordless sign-in
- * codes, invite tokens, account-deletion confirmation, or any flow that needs
- * a secure one-shot secret.
+ * General single-use tokens: 32 random bytes, stored as SHA-256 digests,
+ * expiring on a TTL and spent by the first {@link OneTimeTokenService.verify}
+ * that finds them, expired or not. For confirmation links, invitations and any
+ * one-shot secret.
  *
  * @module one-time-token
  */

@@ -1,64 +1,8 @@
 /**
- * SCIM 2.0 provisioning — the identity provider's write path into this
- * directory (RFC 7643 / RFC 7644).
- *
- * Enterprise SSO answers "may this person sign in?". SCIM answers the other
- * half: "who exists, and who left?". An IdP (Okta, Entra ID, OneLogin, …)
- * pushes user and group lifecycle here over a small REST API, so an employee
- * who is deprovisioned in the IdP stops being able to sign in *without* anyone
- * waiting for a session to expire.
- *
- * ## Scoping
- *
- * A {@link ScimConnection} is **per organization**: it is the credential a
- * single tenant's IdP presents, and everything it can see or change is scoped
- * to `connection.organizationId`. A connection for org A cannot read, patch, or
- * even discover org B's members — cross-tenant reads answer `404`, exactly as
- * they would for an id that does not exist. That is the whole security model,
- * and every resource operation takes the authenticated connection as its first
- * argument so the scope can never be forgotten.
- *
- * Membership lets a connection read a user; writing needs more. A connection
- * changes a user's profile and addresses only when its organization manages
- * them ({@link module:managed-user}), and claims or unclaims only addresses on
- * the organization's verified domains. For any other member only `active`
- * changes, and it deactivates their membership, never their account.
- *
- * The provisioning token is a bearer secret: it is returned **once**, from
- * {@link ScimService.createConnection}, and only its SHA-256 digest is stored
- * (the {@link module:token-hash} convention shared with API keys, magic links
- * and device codes).
- *
- * ## What SCIM resources map onto
- *
- * Nothing new is invented for SCIM; it is a projection of the core model.
- *
- * | SCIM                  | effect-auth                                          |
- * | --------------------- | ---------------------------------------------------- |
- * | `User.id`             | `User.id` (the surrogate key)                         |
- * | `User.userName`       | the primary email {@link Identifier}'s value          |
- * | `User.emails[]`       | the user's `email` identifiers                        |
- * | `User.displayName`    | `User.name`                                           |
- * | `User.active`         | NOT `attributes.scimDeactivated`                      |
- * | `User.externalId`     | `attributes.scimExternalId`                           |
- * | `Group`               | an organization {@link Team}                          |
- * | `Group.displayName`   | `Team.name`                                           |
- * | `Group.members[]`     | the team's members (`value` is the core user id)      |
- *
- * Users provisioned here are created with their email identifier **verified**:
- * the IdP is the system of record for that address, the same attestation an
- * OIDC `email_verified` claim or a signed SAML assertion carries.
- *
- * ## Deactivation is a soft disable
- *
- * `PATCH {"active": false}` and `DELETE /Users/:id` both **deactivate** a
- * managed user rather than delete them: the user keeps their id, their identifiers and their audit
- * trail, gains `attributes.scimDeactivated = true`, and has every live session
- * revoked. Reactivation (`PATCH {"active": true}`) is then a single write, which
- * is what an IdP expects when someone returns from leave.
- *
- * Deactivation also revokes the user's API keys and OIDC grants, and
- * `SessionService` refuses a deactivated user a session, with no plugin needed.
+ * SCIM 2.0 provisioning (RFC 7643 / RFC 7644): an organization's identity
+ * provider creates, updates and deactivates users, and manages groups as teams.
+ * Each {@link ScimConnection} is scoped to one organization, and deactivation
+ * is a soft disable. See `docs/guides/scim.md`.
  *
  * @module scim
  */

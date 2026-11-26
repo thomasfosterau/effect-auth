@@ -1,9 +1,6 @@
 /**
- * The submit lifecycle every bundled form shares, as a rune-backed factory.
- *
- * A `.svelte.ts` module rather than a plain one so `$state` is available: the
- * returned object's getters are reactive in whichever component created it, and
- * one form (the email-OTP form) owns two of these at once, one per step.
+ * The submit lifecycle every bundled form shares, as a rune-backed factory: a
+ * `.svelte.ts` module so `$state` works, and one form may own several.
  *
  * @module forms/submission
  */

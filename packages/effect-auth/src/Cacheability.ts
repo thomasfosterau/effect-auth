@@ -1,56 +1,9 @@
 /**
- * Two questions a shared, viewer-less cache (a KV read-through cache, a CDN,
- * a service-worker cache keyed by URL) asks of authorization — kept apart,
- * because collapsing them is how a private row ends up in the cache.
- *
- * 1. **May this representation be stored where any viewer can be served it?**
- *    ({@link publiclyServeable}) A property of the *representation*: is it
- *    identical for every possible viewer, anonymous included? Checked on the
- *    write path and again on every hit, whoever the viewer is.
- * 2. **May this viewer be served from that cache?** ({@link bypassesForFreshness})
- *    A property of the *viewer*: a hit is a public-only snapshot, so a viewer
- *    entitled to more (private or deleted material) must be routed around the
- *    cache to the database. This is not an authorization gate and not the
- *    cache's safety property — it only decides who a cache cannot be fresh for.
- *
- * ### Conservative by construction
- *
- * {@link publiclyServeable} answers from a declared list of axes, and every
- * axis fails closed: an axis whose attribute is present must hold **exactly**
- * the serveable literal — `null`, `""`, or a state a later schema change
- * introduces are all "not serveable" — and a required axis whose attribute is
- * *absent* is not serveable either, because a projection that dropped the one
- * attribute deciding who may see the row must not read as public.
- * {@link OwnedAccess.serveableAxes} are the axes derived from the owned-read
- * policy (visibility required; draft, unapproved and moderation state
- * optional, since a leaf without the axis never emits them; `deletedAt`
- * absent), and the tests pin that a representation they admit is visible to
- * every viewer, anonymous included.
- *
- * ### The `Cache-Control` corollary
- *
- * A response rendered after a principal was resolved is `private, no-store`,
- * unconditionally — whatever {@link publiclyServeable} says about the resource
- * inside it, because the rendering (per-viewer `meta.canEdit`, a private field
- * the viewer may see) is the viewer's. The ordering is what makes that
- * enforceable: decide cacheability *before* resolving the viewer, or mark the
- * response `private, no-store` the moment one is resolved. Marking an
- * admin-rendered response cacheable would let the platform serve it to
- * anonymous visitors on a later hit — a hit the Worker, and its auth check,
- * never runs for.
- *
- * ### A drift guard instead of an allow-list
- *
- * A client-side cache that admits whole resource types (a service worker's
- * list of "public" types) restates the read policy as a string array, and a
- * type that moves from public to owned silently stays on it.
- * {@link publicReach} derives the list from the policies instead. It compiles
- * each type's read scope for the anonymous principal: `All` when every row is
- * public, `Some` when only the rows a filter admits are (check each
- * representation with {@link publiclyServeable}), `None` when no row is, and
- * `Undecided` when the policies read rows in a way a scope can't express,
- * which a cache treats as `None`. Pin the result in a test, and a model change
- * that narrows a type fails the build.
+ * What a shared, viewer-less cache asks of authorization, kept apart: may a
+ * representation be served to any viewer ({@link publiclyServeable}), and must
+ * this viewer bypass the cache ({@link bypassesForFreshness})? {@link
+ * publicReach} derives the public types from the policies. A response rendered
+ * for a resolved principal is `private, no-store`.
  *
  * @module cacheability
  */
@@ -90,8 +43,9 @@ export type ServeableAxis =
 
 /**
  * Whether a representation's attributes may be stored in, and served from, a
- * cache with no viewer in its key. Fails closed on every axis — see the
- * module docs. A non-object representation is never serveable.
+ * cache with no viewer in its key. Fails closed on every axis: a present
+ * attribute must hold exactly the serveable literal, and a required one must be
+ * present. A non-object representation is never serveable.
  *
  * @since 0.1.0
  * @category predicates
@@ -117,7 +71,8 @@ export const publiclyServeable =
  * data: true when they hold **any** of `axes` (typically the axes that see
  * private and soft-deleted material). Never fails; `false` for anonymous.
  *
- * Not an authorization gate — see the module docs.
+ * Not an authorization gate: it only decides whom a public-only cache cannot
+ * serve fresh.
  *
  * @since 0.1.0
  * @category predicates
@@ -149,7 +104,8 @@ export const shouldIncludeDeleted =
 
 /**
  * How much of one resource type the anonymous principal may read, compiled
- * from the policies (see the module docs). Only `All` lets a cache admit a
+ * from the policies, so a model change that narrows a type fails a pinned
+ * test. Only `All` lets a cache admit a
  * type wholesale; `Undecided` is never public.
  *
  * @since 0.2.0

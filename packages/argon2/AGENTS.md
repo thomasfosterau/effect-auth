@@ -20,6 +20,7 @@ Archetype **Vendor adapter** (`.fallowrc.json` zone `vendor-adapters`, which may
 - **An unverifiable hash fails, never returns `false`**: a malformed PHC string, an unknown variant, Argon2 `v=0x10` (which the kernel itself would accept) or a hash the kernel reports as unverifiable (`verify` returning `-1`) is a `HashingError`. A wrong password is `false`.
 - **Hashes written by `hash-wasm` (0.1.x) verify**: `HashWasm.fixtures.ts` holds them, per variant, and the kernel must derive the argon2id ones byte for byte from the same salt.
 - **Input guards before the KDF**: empty password or hash is a `HashingError`; a password over `MAX_PASSWORD_BYTES` (1024 UTF-8 bytes) is refused by `hash` and reads as `false` in `verify` (anti-DoS).
+- **`WasmBinary.ts` is generated**: rerun `vpx scripts/generate-argon2-wasm.ts` after bumping `@thomasfosterau/argon2`, once that release's C ABI (`alloc`, `dealloc`, `hash`, `last_ptr`, `verify`) is checked unchanged; `Wasm.test.ts` fails on a stale version, digest or binary. Edit its header in the script, never in the file.
 - Spans keep the core hashers' names (`effect-auth.password.hash` / `.verify`, attribute `algorithm`).
 
 ## Terms

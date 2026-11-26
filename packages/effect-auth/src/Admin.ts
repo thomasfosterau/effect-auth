@@ -1,23 +1,9 @@
 /**
- * Administration for effect-auth.
- *
- * Mirrors better-auth's admin plugin: administrators can list users, change
- * roles, ban/unban users (revoking their sessions), delete users, revoke
- * sessions, and impersonate users.
- *
- * **Conventions:** admin status and ban state live on the user record:
- *
- * - a user is an admin when `user.attributes.role` is one of
- *   {@link AdminConfig.adminRoles} (default `["admin"]`) or their id is in
- *   {@link AdminConfig.adminUserIds};
- * - a ban is stored as `attributes.banned: true` with optional
- *   `attributes.banReason` (string) and `attributes.banExpires` (epoch ms;
- *   absent means permanent). A `banExpires` in the past means the ban has
- *   lapsed - see {@link isBanned}.
- *
- * `SessionService` refuses a banned user a new session and refuses their
- * existing ones, with no plugin needed; a ban also revokes the user's
- * sessions, API keys and OIDC grants.
+ * Administration: list users, change roles, ban and unban, delete, revoke
+ * sessions and impersonate. A user is an admin by `attributes.role` ({@link
+ * AdminConfig.adminRoles}) or by id ({@link AdminConfig.adminUserIds}). A ban
+ * (`attributes.banned`, optional `banExpires`) refuses sessions in core and
+ * revokes the user's credentials.
  *
  * @module admin
  */

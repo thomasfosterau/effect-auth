@@ -1,14 +1,8 @@
 /**
- * Username authentication: sign in with a username + password instead of an
- * email.
- *
- * Usernames are `Identifier` records (`type: "username"`, normalized lowercase
- * for case-insensitive uniqueness) — there is no bespoke username store.
- * Sign-up validates + reserves the username then delegates credential
- * creation to {@link EmailPasswordService}; sign-in resolves the user by
- * username identifier and verifies the password with the same
- * anti-enumeration error, the same `beforeAuthenticate` hook and the same
- * `SecondFactorGate` seam as email/password sign-in.
+ * Username sign-in: usernames are `username` identifiers, normalized to
+ * lowercase. Sign-up reserves one, then delegates to {@link
+ * EmailPasswordService}; sign-in resolves it and verifies the password with
+ * email sign-in's error, `beforeAuthenticate` hook and `SecondFactorGate`.
  */
 import { Context, Data, DateTime, Effect, Layer } from "effect";
 import * as Arr from "effect/Array";

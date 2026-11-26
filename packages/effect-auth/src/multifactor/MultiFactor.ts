@@ -1,13 +1,7 @@
 /**
- * Two-factor authentication (TOTP + backup codes) for effect-auth.
- *
- * Mirrors better-auth's multi-factor plugin: users enable 2FA by verifying
- * their password, receive a TOTP secret (as an otpauth:// URI for QR codes)
- * plus single-use backup codes, and must confirm with a valid TOTP code
- * before 2FA is considered active. Sign-in flows that detect an enabled
- * second factor create a short-lived pending challenge ("password OK,
- * awaiting second factor") which is redeemed with either a TOTP code or a
- * backup code to mint the session.
+ * Two-factor authentication with TOTP and backup codes: enrolment behind the
+ * password, confirmed by a first TOTP code, and a pending challenge after the
+ * first factor that a TOTP or backup code redeems for a session.
  *
  * @module multi-factor
  */

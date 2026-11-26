@@ -1,18 +1,8 @@
 /**
- * Have I Been Pwned plugin (transform hook with short-circuit).
- *
- * Rejects passwords that appear in the Pwned Passwords dataset using the
- * k-anonymity range API: the password is SHA-1 hashed, only the first 5 hex
- * characters are sent, and the returned suffix list is checked locally (the
- * full password/hash never leaves the process). Covers every hook that
- * carries a new plaintext password: `beforeSignUp`, `beforeResetPassword`,
- * `beforeChangePassword` and `beforeSetPassword`. Requests ask for padding
- * (`Add-Padding: true`), so the response size says nothing about the bucket.
- *
- * Availability over strictness: when the API cannot answer (a network error,
- * any non-2xx status such as a 429 or 503, or no answer within `timeout`),
- * the password is allowed by default (`failClosed: false`) and refused with
- * `failClosed: true`.
+ * Have I Been Pwned plugin: refuses a new password found in Pwned Passwords on
+ * sign-up, reset, change and set, sending only the first five hex digits of its
+ * SHA-1, with padding. When the API cannot answer, the password is allowed
+ * unless `failClosed: true`.
  *
  * @module plugins/hibp
  */

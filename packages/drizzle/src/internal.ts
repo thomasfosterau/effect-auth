@@ -1,10 +1,6 @@
 /**
- * Internal plumbing shared by every store and schema module in this package.
- *
- * Nothing here is re-exported from `index.ts`: it is the seam the store modules,
- * their request resolvers and the three dialect schemas have in common, kept in
- * a single place so the `AuthError` contract and the table-name defaults cannot
- * drift between them.
+ * Plumbing every store and schema module shares, so the `AuthError` contract
+ * and the table-name defaults cannot drift. Not re-exported.
  *
  * @internal
  */

@@ -1,37 +1,9 @@
 /**
- * Captcha plugin (transform hook with short-circuit).
- *
- * Verifies a captcha token against the provider's siteverify endpoint and
- * short-circuits with `CaptchaError` when the token is missing or
- * verification fails, on three endpoints:
- *
- * - `"signUp"`: `beforeSignUp`, the token from `SignUpInput.captchaToken`
- *   (the `SignUpPayload` HTTP schema).
- * - `"signIn"`: `beforeAuthenticate` for the password sign-in methods
- *   (`"email-password"` and `"username"`), the token from
- *   `SignInInput.captchaToken` / `UsernameSignInInput.captchaToken` (the
- *   `password` and `username` sign-in credentials).
- * - `"sendCode"`: `beforeSendCode`, every send of an email or SMS
- *   one-time code, of a magic link and of a password-reset link, the token
- *   from the send's `SendCodeOptions.captchaToken` (the `captchaToken`
- *   attribute of `POST /otp-challenges` and `POST /password-resets`). A send
- *   is the step that costs money, so it is where the captcha guards the
- *   passwordless flows; verifying a code or a link carries no token.
- *
- * Second-factor redemption carries no token: only someone who passed the
- * first factor reaches it.
- *
- * Supports Cloudflare Turnstile, Google reCAPTCHA and hCaptcha (all expose a
- * compatible `{ secret, response }` siteverify returning `{ success }`). The
- * client address, when the request has one, goes along as `remoteip`.
- *
- * `success: true` only says the token is genuine, so the plugin can also
- * check what the token was minted for: `expectedHostname`, `expectedAction`
- * and `minScore`. reCAPTCHA v3 answers `success: true` for every genuine
- * token, bots included, and leaves the verdict to `score`, so a
- * `recaptchaVersion: 3` configuration without `minScore` is refused when the
- * layer is built, and a token carrying a `score` that no `minScore` judges is
- * refused at verification.
+ * Captcha plugin for Turnstile, reCAPTCHA and hCaptcha: verifies the token on
+ * sign-up, password sign-in and every code or link send (the `"signUp"`,
+ * `"signIn"` and `"sendCode"` endpoints), failing with `CaptchaError`. It also
+ * checks `expectedHostname`, `expectedAction` and `minScore`, which reCAPTCHA
+ * v3 requires.
  *
  * @module plugins/captcha
  */

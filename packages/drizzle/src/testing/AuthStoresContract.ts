@@ -1,17 +1,8 @@
 /**
- * The contracts of the stores beyond sign-in — `EmailPasswordStore`,
- * `UserServiceStore`, `ApiKeyStore`, `RateLimitStore` and the two token stores —
- * as one suite each dialect's file runs against a real engine.
- *
- * `ApiKeyStore` runs the core's published conformance suite, and the two
- * token stores its per-user-delete suites. The others have none, so their cases here are written from the contracts' documented
- * semantics (`EmailPasswordStore`, `UserServiceStore` as core's `/sql` store
- * implements it, `RateLimitStore.increment`, `EmailVerificationStore`,
- * `PasswordResetStore`); the email-password cases end with a real sign-up and
- * sign-in through `EmailPasswordService`, the user-service cases with a round
- * trip through `UserService`.
- *
- * Never published (`tsconfig.json` excludes `src/testing/`).
+ * The contracts of the stores beyond sign-in, as one suite each dialect runs on
+ * a real engine: the core's conformance suites where they exist, and cases from
+ * the documented contracts otherwise, ending in real flows through
+ * `EmailPasswordService` and `UserService`. Never published.
  */
 
 import { createHash } from "node:crypto";

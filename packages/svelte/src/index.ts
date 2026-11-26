@@ -1,27 +1,16 @@
 /**
- * Svelte bindings for the effect-auth client.
+ * Svelte bindings for the effect-auth client: {@link atomStore} adapts any Atom
+ * to Svelte's store contract, so the session Atoms work with `$store`, and
+ * unstyled form components for sign-in, sign-up, password reset, magic links
+ * and email codes reach the client through {@link setAuthClient}.
  *
- * The session is an `effect/reactivity` Atom graph
- * (`makeSessionAtoms` from `@thomasfosterau/effect-auth/client/atoms`), read
- * through the application's own `AtomRegistry`. This package adapts Atoms to
- * Svelte's readable-store contract, so they work with the `$store` syntax
- * without importing `svelte/store`:
- *
+ * @example The session as Svelte stores
  * ```svelte
  * <script>
  *   const session = sessionStore(registry, auth);
  * </script>
  * {#if $session.data}Signed in as {$session.data.user.email}{/if}
  * ```
- *
- * {@link atomStore} is the whole Svelte↔Atom binding, over any Atom: the
- * session stores are it applied to the session Atoms. It is small enough to
- * live here until a shared Svelte Atom binding takes it over.
- *
- * The bundled form components are the other half of the package: real,
- * unstyled `.svelte` components for sign-in, sign-up, password reset, magic
- * links and email one-time codes, each owning its own submit, pending and error
- * state and reaching the client through {@link setAuthClient}'s context.
  *
  * @module effect-auth-svelte
  */

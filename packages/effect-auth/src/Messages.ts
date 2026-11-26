@@ -1,12 +1,9 @@
 /**
- * Pluggable message-resolution layer.
- *
- * Domain errors carry a stable `code` (e.g. `"PASSWORD_TOO_SHORT"`) plus
- * optional interpolation `params`. The `Messages` service maps
- * `(code, locale?, params?) → string`, enabling locale overrides without
+ * The {@link Messages} service resolves a domain error's stable `code`, with an
+ * optional locale and params, to text, so an application adds locales without
  * patching the library.
  *
- * Usage:
+ * @example A French catalog over the English default
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"

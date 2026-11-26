@@ -1,22 +1,9 @@
 /**
- * `@thomasfosterau/effect-auth-alchemy-cloudflare` — run effect-auth on
- * Cloudflare D1, built on Alchemy's Cloudflare provider
- * (`@alchemy.run/cloudflare`), on both sides of the deploy:
- *
- * - **Deploy side** — declare the {@link AuthSchema} action against your
- *   `Cloudflare.D1.Database` in your Alchemy program, and the engine applies
- *   the auth tables on deploy.
- * - **Runtime side** — provide {@link layer} with the client
- *   `Cloudflare.D1.QueryDatabase(database)` binds, and the whole auth stack
- *   (SessionService, EmailPasswordService, OAuth, WebAuthn, ...) has
- *   persistence.
- *
- * The queries are not this package's: every store comes from
- * `@thomasfosterau/effect-auth/sql`, written against `effect/sql`'s
- * `SqlClient`. All this package adds is a `SqlClient` over the provider's D1
- * client ({@link D1Client}) and the Alchemy action. Postgres (over Hyperdrive
- * or a URL) is the separate `@thomasfosterau/effect-auth-alchemy-postgres`
- * package, so a D1 app never loads `@effect/sql-pg`.
+ * `@thomasfosterau/effect-auth-alchemy-cloudflare`: effect-auth on Cloudflare
+ * D1 through Alchemy. Declare {@link AuthSchema} against a
+ * `Cloudflare.D1.Database` to apply the tables on deploy, and provide {@link
+ * layer} with the bound D1 client at runtime. The stores are
+ * `@thomasfosterau/effect-auth/sql`'s.
  */
 
 /** The provider's D1 client → `SqlClient` → every effect-auth store. */

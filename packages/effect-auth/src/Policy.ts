@@ -1,54 +1,8 @@
 /**
- * The policy kernel: `Policy` values, the pure decision procedure, and the
- * `enforce`/`check` entry points.
- *
- * A `Policy` is the primary object of the authorization framework
- * (`docs/better-auth-parity.md` §2.5, "Effect-native-first"). Policies come
- * in two kinds, and the types keep the difference visible:
- *
- * - {@link DeclarativePolicy} — pure data: a permit/forbid effect, PARC
- *   scopes (principal / action / resource), and an optional declarative
- *   `when` condition. Because it is data it is Schema-validated, storable,
- *   tenant-editable, and evaluated by a **pure, total** function over a
- *   pre-fetched {@link Entity.EntitySlice}.
- * - {@link CustomPolicy} — the first-class escape hatch: an arbitrary Effect
- *   predicate. Accepted everywhere policies are accepted, but opaque — not
- *   storable or analyzable, and its error/requirement channels surface in
- *   the `Policy<E, R>` type.
- *
- * ## Decision semantics (settled 2026-08-30)
- *
- * Default deny; forbid overrides permit; order-independent; the decision
- * carries its determining policies as a trace. Error posture deviates from
- * Cedar deliberately and is **fail-closed in both directions**: an erroring
- * permit cannot grant, and an erroring forbid DENIES (Cedar skips erroring
- * policies, which fails open for forbids). Errors are recorded in the trace.
- *
- * ## System principals are reached only by name
- *
- * A system principal (`System::"<name>"`, see the `System` module) is allowed
- * only by a permit that names it. The kernel enforces this, not each policy
- * author: a permit applies to a system principal only when its principal scope
- * names the `System` type (`eq`/`in` a `System::"…"` reference, or
- * `is("System")`). A permit scoped `any` (the default of {@link permit},
- * {@link permission}, {@link action} and {@link roleAtLeast}) or scoped to
- * another type or to a role (`in Role::"…"`) never matches one, and neither
- * does a {@link CustomPolicy} permit, whose predicate the kernel cannot see
- * into. Forbids are not narrowed: an unscoped forbid binds a system principal
- * like everyone else. For every other principal, scopes match as documented on
- * {@link Scope}.
- *
- * ## An empty entity id names no entity
- *
- * A request whose principal, action or resource has an empty id or an empty
- * type is refused before any policy runs: the decision is a deny with reason
- * `"invalid-request"`. `ReadScope.compile` agrees, compiling
- * such a principal or action to `ReadScope.deny`. Such a reference also
- * equals nothing in a scope or condition (`Entity.refEquals`), and no type
- * scope (`isType`) matches it, `isType("")` included. So neither `User::""`
- * nor `""::"u1"` is a "no user" stand-in: a signed-out caller is a principal
- * of its own type (`Anonymous::"anonymous"`), which user-typed policies never
- * match.
+ * The policy kernel: declarative and custom `Policy` values, the pure decision
+ * procedure and the `enforce` / `check` entry points. Default deny, forbid
+ * overrides permit, order does not matter, and errors fail closed both ways: an
+ * erroring permit cannot grant and an erroring forbid denies.
  *
  * @module policy
  */
@@ -507,7 +461,7 @@ export const decidePure = (
  * failures never escape: they become `error` outcomes, treated fail-closed
  * by {@link Decision} combination. Only the custom policies' requirements
  * (`R`) remain. A custom permit is `not-matched` for a system principal
- * without running its predicate (see the module docs); a custom forbid runs
+ * without running its predicate, which the kernel cannot see into; a custom forbid runs
  * as usual. A request that is not {@link isWellFormed} is denied with reason
  * `"invalid-request"`, and no predicate runs.
  */

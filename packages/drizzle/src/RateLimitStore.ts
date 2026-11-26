@@ -1,31 +1,9 @@
 /**
- * Drizzle-backed implementation of effect-auth's `RateLimitStore`: the store
- * `RateLimiter.layer()` counts through, and with it the `IPRateLimitPlugin` and
- * `RateLimitPlugin` hooks and `ApiKeyService`'s per-key limits.
- *
- * One row per rate-limit key in the `rateLimits` table of any dialect's
- * {@link Tables}, or an application's own table mapped with
- * `defineRateLimitTable`: the open window's `count`, the instant it resets, and the
- * instant a block set by `RateLimiter` lifts.
- *
- * ### Contract notes
- *
- * - `get` returns `null` on a miss; `delete` of a missing key is a no-op.
- * - `increment` counts one request without a read-modify-write, so two
- *   concurrent callers never see the same count (the contract's atomic step).
- *   It is two statements, each atomic on its own: an `UPDATE` that
- *   re-opens the key's window when it has expired (count `0`, a new reset time,
- *   no block), then an upsert that adds one to the count, inserting the row
- *   with a count of `1` when there is none. On PostgreSQL and SQLite the upsert
- *   returns the count it wrote (`RETURNING`). MySQL has no `RETURNING`, so the
- *   count is read back after the upsert; a concurrent increment between the two
- *   can only make it read higher, which refuses a request rather than letting
- *   one through.
- * - `ttl` is not stored: an expired window is re-opened by the next
- *   `increment`, and the rows of keys never seen again stay until
- *   {@link purgeExpired} deletes them.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `RateLimitStore`, one row per key (a dialect's {@link Tables}, or a
+ * table mapped with `defineRateLimitTable`). `increment` is two atomic
+ * statements, never a read-modify-write; on MySQL the count is read back, which
+ * can only refuse more. Rows of keys never seen again stay until {@link
+ * purgeExpired}.
  */
 
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";

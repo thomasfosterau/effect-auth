@@ -1,25 +1,11 @@
 /**
- * Unified delivery seams: {@link EmailSender} and {@link SmsSender}.
+ * Delivery seams: an adapter implements {@link EmailSender} or {@link
+ * SmsSender} once, or backs it with an effect-connect provider through
+ * `layerConnect`, and {@link emailCallbacks} / {@link smsCallbacks} derive
+ * every feature's send callback, keyed by a stable `purpose`. Each derived
+ * callback awaits its send.
  *
- * Every message-sending feature in effect-auth takes its own delivery
- * callback (`EmailVerification.sendEmail`, `MagicLink.sendMagicLink`,
- * `EmailOtp.sendVerificationOtp`, `PhoneOtp.sendOtp`, ...). Those callbacks
- * remain the full-control escape hatch — but they give delivery adapters
- * no single contract to implement.
- *
- * This module adds that contract: an adapter implements `EmailSender` and/or
- * `SmsSender` once (or `EmailSender.layerConnect` / `SmsSender.layerConnect`
- * back them with any effect-connect provider), and {@link emailCallbacks} / {@link smsCallbacks} derive
- * every per-feature callback from it. The sender receives the recipient, a
- * stable {@link EmailMessage.purpose | purpose} tag, and the flow's
- * parameters (token, OTP code, ...), and renders/sends however it likes —
- * template selection is keyed off `purpose`.
- *
- * Each derived callback awaits its send, so a failed send fails the flow that
- * made it. The flows that hide whether an account exists hand their send to
- * the host's `DeliveryScheduler` instead (see `DeliveryScheduler.ts`), whatever
- * callback they were given.
- *
+ * @example One adapter, every callback
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Queue } from "effect"

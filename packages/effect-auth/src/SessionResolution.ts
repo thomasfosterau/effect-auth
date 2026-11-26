@@ -1,38 +1,9 @@
 /**
- * Session resolution at an application's **own** edge — before any effect-auth
- * handler runs.
- *
- * An app that resolves the session itself (a SvelteKit `hooks.server.ts`, a
- * Worker that calls an auth service binding, an API gateway in front of
- * `Http.make`) has to answer three questions this module owns:
- *
- * 1. **Does this request carry a credential at all?** If not, resolution
- *    cannot succeed, so skip it. On a hot path this is the largest read-path
- *    win available — see {@link detectCredential} / {@link hasSessionCredential}.
- * 2. **What happens when resolution faults?** Fail open or fail closed. Both
- *    are here, both named, neither a default — see {@link resolveFailOpen}.
- * 3. **What just happened, for observability?** One derivation of one
- *    {@link AuthOutcome}, emitted as a metric and a span attribute by the
- *    resolver itself — see below.
- *
- * ### Why the outcome is not the caller's to derive
- *
- * Two edges that classify the same fault independently will eventually
- * disagree — one Worker logging `degraded` where another logs `skipped` for an
- * identical unreachable binding is the failure mode this exists to prevent.
- * So {@link resolve} and {@link resolveFailOpen} return the outcome *with* the
- * session, and record it themselves. There is no `deriveAuthOutcome` for a
- * caller to reimplement, and no counter to wire up: Effect's metrics and
- * tracing are no-ops until a backend is in context, so the instrumentation is
- * free when unused.
- *
- * ### Credential predicates take plain inputs
- *
- * Nothing here needs an `HttpServerRequest`, an `HttpClient` or a running
- * Effect HTTP stack. The predicates read a {@link CredentialSource}, which a
- * raw `Headers`, a plain header record, or a SvelteKit-style cookie jar all
- * satisfy — because the callers that need them most run before any of that
- * exists.
+ * Session resolution at an application's own edge: whether a request carries a
+ * credential ({@link detectCredential}), fail-closed or fail-open resolution
+ * ({@link resolve}, {@link resolveFailOpen}), and the one {@link AuthOutcome}
+ * the resolver records as a metric and span attribute. The predicates take
+ * plain headers or a cookie jar.
  *
  * @module session-resolution
  */

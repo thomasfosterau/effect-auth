@@ -95,7 +95,7 @@ const run = (): Promise<Observed> => {
 
       let phase = "outside";
       const fibers: Array<{ readonly phase: string; readonly inTransaction: boolean }> = [];
-      // Resolved per query, in the fiber that runs it — see the module docs.
+      // Resolved per query, in the fiber that runs it.
       const observedHandle = Effect.map(inTransaction, (transaction): EffectDrizzleDatabase => {
         fibers.push({ phase, inTransaction: transaction });
         return db;

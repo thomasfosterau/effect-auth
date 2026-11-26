@@ -1,11 +1,7 @@
 /**
- * The account-deletion seam: delete a user and everything the account
- * holds. `UserService.deleteUser` delegates to it through the context.
- *
- * This module holds the service's tag only, and imports no store, so
- * `User.ts` can depend on it: the stores the deletion clears live in modules
- * that import `User.ts` themselves. Its layer, which resolves those stores,
- * is `AccountManagement.ts`'s `accountDeletionLayer`.
+ * The account-deletion seam that `UserService.deleteUser` delegates to. It
+ * holds only the tag and imports no store, so `User.ts` imports it without a
+ * cycle; the layer is `AccountManagement.ts`'s `accountDeletionLayer`.
  *
  * @module AccountDeletion
  * @since 0.5.0

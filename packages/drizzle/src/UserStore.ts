@@ -1,19 +1,7 @@
 /**
- * Drizzle-backed implementation of effect-auth's `UserStore`, plus the
- * `Request`/`RequestResolver` pair that batches user reads.
- *
- * {@link make} is an `Effect` that reads {@link DrizzleDatabase} out of context
- * and returns a plain store object; {@link layer} lifts it into a `Layer` keyed
- * by `Auth.UserStore`. Both take an optional schema — any dialect's
- * {@link Tables} under any names, or an {@link AuthSchema} mapped onto the
- * application's own table — so switching database, table names or table shape
- * is a one-argument change.
- *
- * ### Contract notes
- *
- * - `get` returns `null` on a miss; it never fails with a "not found" error.
- * - Every driver failure surfaces as `Auth.AuthError` with the original error
- *   preserved as `cause`.
+ * Drizzle `UserStore` and the batched user reads, over a dialect's {@link
+ * Tables} or a `defineSchema` mapping. `get` is `null` on a miss and never
+ * reads `password_hash`.
  */
 
 import { eq, inArray } from "drizzle-orm";

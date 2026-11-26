@@ -1,17 +1,7 @@
 /**
- * Phone number authentication via SMS one-time passwords.
- *
- * Mirrors `EmailOtp.ts` (hashed OTP at rest, attempt limiting, purpose scoping,
- * anti-enumeration) — only the channel (SMS) and the user-lookup key (phone
- * number) differ. Two purposes are supported: `sign-in` and
- * `phone-verification`.
- *
- * Phone identity lives in a `phone` `Identifier` (globally unique, E.164 by
- * app policy) — there is no `User.phoneNumber` field or attribute convention.
- * Use {@link getPhoneNumber} to read a user's phone identifier.
- *
- * E.164 normalization is application policy: the default `normalizePhoneNumber`
- * only trims whitespace. Apps should plug a real E.164 normalizer via config.
+ * Phone sign-in and verification by SMS one-time code: the `EmailOtp` flows
+ * over a `phone` identifier ({@link getPhoneNumber}). E.164 normalization is
+ * the application's; the default `normalizePhoneNumber` only trims.
  */
 import { Context, Data, DateTime, Effect, Layer, Order } from "effect";
 import * as Arr from "effect/Array";

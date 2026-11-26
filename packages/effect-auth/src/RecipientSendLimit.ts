@@ -1,17 +1,8 @@
 /**
- * The per-recipient send cap, shared by every flow that sends a code or
- * a link to an address the caller names: the email and phone OTPs, the magic
- * link, the password reset and the email-verification resend. Internal: not
- * exported from any barrel.
- *
- * The per-IP limit bounds what one client sends, and the OTP
- * failure backoff bounds guessing; neither bounds what one recipient
- * receives from many clients. This counts sends per (recipient, purpose)
- * through the `RateLimiter` over the host's `RateLimitStore`, under the key
- * `recipient-send:<purpose>:<digest>`, where the digest is the `hashToken` of
- * the normalized address, so no raw address sits in the store. A flow counts a
- * request whatever the lookup of the address finds, so an unknown address is
- * capped exactly as a known one.
+ * The per-recipient send cap for every flow that sends a code or link to an
+ * address the caller names: sends per (purpose, recipient) through the
+ * `RateLimiter`, keyed by the address's digest. An unknown address is capped
+ * exactly as a known one. Internal.
  */
 import { Effect } from "effect";
 import type { Digest } from "effect/crypto";

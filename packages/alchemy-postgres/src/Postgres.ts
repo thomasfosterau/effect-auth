@@ -1,36 +1,17 @@
 /**
- * Postgres for effect-auth on Alchemy. This module provides a `SqlClient` over
- * a Cloudflare Hyperdrive binding (or any Postgres URL), wires the
- * `@thomasfosterau/effect-auth/sql` stores to it, and supplies the
- * {@link database} target that lets `AuthSchemaProvider` reconcile the schema
- * in Postgres on deploy.
+ * Postgres for effect-auth on Alchemy: a `SqlClient` over a Hyperdrive binding
+ * or any Postgres URL, the `@thomasfosterau/effect-auth/sql` stores over it
+ * ({@link layer}), and the {@link database} target `AuthSchemaProvider`
+ * reconciles on deploy. On Workers, `@effect/sql-pg` needs `nodejs_compat`.
  *
- * It mirrors `@thomasfosterau/effect-auth-alchemy-cloudflare`'s D1 wiring.
- * `@effect/sql-pg` is a required peer of this package, so a D1 app, which
- * installs only the Cloudflare package, never loads it. The database can be
- * any Postgres: PlanetScale, Neon, RDS or your own server; nothing here is
- * specific to one host.
- *
- * ### At runtime: the Hyperdrive binding
- *
- * A Worker reaches Postgres through Hyperdrive. Its binding carries a
- * `connectionString` that points at Hyperdrive's pooler, and {@link layer}
- * provides every effect-auth store over it:
- *
+ * @example At runtime, over Hyperdrive
  * ```ts skip-type-checking
  * import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
  *
  * const AppLayer = Auth.layer.pipe(Layer.provide(Postgres.layer(env.HYPERDRIVE)));
  * ```
  *
- * `@effect/sql-pg` opens its connections with `node:net` and `node:tls`, so
- * the Worker needs the `nodejs_compat` compatibility flag.
- *
- * ### On deploy: the `AuthSchema` target
- *
- * A Hyperdrive binding exists only inside a Worker. The deploy-time provider
- * therefore connects to the origin database by URL:
- *
+ * @example On deploy, by URL
  * ```ts skip-type-checking
  * AuthSchemaProvider({ database: Postgres.database(Redacted.make(process.env.DATABASE_URL)) });
  * ```

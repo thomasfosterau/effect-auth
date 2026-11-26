@@ -18,6 +18,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 - **TypeScript is split 6/7.** `typescript` is a TS6 alias for JS-API consumers; never bump it to 7. `@typescript/native` (TS7), `@effect/tsgo` and `vite-plus` move together, or `vp install` fails.
 - **`@effect-diagnostics` directives** work only unprefixed (`// @effect-diagnostics-next-line multipleEffectProvide:off`); the `effect/<rule>` form is silently ignored.
 - **The alchemy runtime suites** (`AuthSchema.test.ts`, alchemy-postgres's `Postgres.test.ts`) run in `test:alchemy`, not `test:unit`. The Postgres cases skip without `DATABASE_URL`; say so when you report gates.
+- **`check:dist` proves every published floor** (`scripts/check-dist.ts`). It packs each package (checking `repository.directory`, which npm resolves README links against), installs it with pnpm beside the lowest `effect` and third-party peer versions its packed ranges admit (one scratch project per floor; `autoInstallPeers` off, so it re-checks every installed range itself), imports every entry, and runs the core's behaviour phase (env layers, `protectedField`) and drizzle's query smoke and strict consumer type-check, on the floor and on `drizzleApplicationsPin`. Importing alone misses APIs that moved inside the range, so a new call near a floor joins the behaviour phase. A floor npm never published fails by name.
 
 ## Fallow
 

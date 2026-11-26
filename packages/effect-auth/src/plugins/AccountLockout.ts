@@ -1,81 +1,9 @@
 /**
- * Account lockout plugin (transform hook with short-circuit).
- *
- * Guards `beforeAuthenticate`, which every credential-verifying flow fires.
- * Each password, username and second-factor attempt is counted
- * before the credential is checked, and once `maxAttempts` attempts have been
- * counted without a session being issued, the account is locked for
- * `lockoutDurationMs`: `beforeAuthenticate` fails fast with
- * `AccountLockedError` while locked.
- *
- * - **Possession proofs are exempt**. A one-time code by email or SMS
- *   and a magic link (`isPossessionMethod`) are neither refused by the lock
- *   nor counted toward it, so knowing a handle is not enough to block the
- *   owner's passwordless recovery. Their guesses stay bounded without it: a
- *   code accepts `maxAttempts` wrong guesses (default 3), the address's
- *   wrong codes put its sends into a backoff no resend resets, a
- *   magic-link token is 256 random bits and an unknown one is an unkeyed
- *   attempt `IPRateLimitPlugin` counts, and `RateLimitPlugin` /
- *   `IPRateLimitPlugin` count every attempt. A session one of them issues
- *   clears the lock like any other the user earned.
- * - **Passkeys are exempt too**. A WebAuthn assertion is a signature
- *   no attacker can guess, and a credential id is not secret (a bound
- *   challenge lists it), so counting passkey attempts would let anyone who
- *   holds one lock the account. Passkey verification stays under
- *   `IPRateLimitPlugin`.
- * - **Unkeyed attempts pass** (an unknown challenge or token names no
- *   account): there is nothing to count them under.
- *
- * - **Keyed on the account.** The counter is keyed on the resolved user
- *   (`lockout:user:<id>`), so every handle of one account (its email, its
- *   username, its phone number) shares one count. A handle no account holds
- *   is keyed on the handle itself (`lockout:email:<address>`, ...), so an
- *   unknown handle locks after the same number of attempts a known one does
- *   (see `authenticationSubject`).
- * - **Cleared only when the user earns a session** (`afterCreateSession`),
- *   never by a correct password that only earned a second-factor challenge
- *   (an attacker who has the password cannot reset the count by signing in
- *   again), and never by an admin impersonation (`isImpersonationSession`),
- *   which the user did not earn.
- * - **Second factor has its own per-user count** (`lockout:second-factor:
- *   user:<id>`, `maxSecondFactorAttempts`), independent of the challenge
- *   tokens: each challenge caps its own wrong codes, but the user's count
- *   runs across every challenge, so fresh challenges buy no fresh guesses.
- *   While it is locked, second-factor redemption fails with
- *   `AccountLockedError`; only someone who passed the first factor can drive
- *   it, so it is not a lever for locking out an account by its handle alone.
- *
- * The clearing tap is isolated: a transient store error while clearing the
- * counter can never abort a sign-in that already succeeded.
- *
- * OWASP recommends account lockout as brute-force mitigation; better-auth does
- * not ship it.
- *
- * ## Deliberate tradeoff: lockout-as-DoS
- *
- * Because the counter is keyed on the target account and increments before
- * credentials are checked, anyone who knows a victim's email or username can
- * submit `maxAttempts` wrong passwords and lock that account for
- * `lockoutDurationMs`, repeatably, and the lock refuses the password,
- * passkey and second-factor methods of that account until it lapses (a magic
- * link or a one-time code still signs the owner in). That is inherent to account-keyed lockout (the same tradeoff OWASP
- * documents). Mitigations, in order of preference:
- *
- * - Stack {@link ../plugins/IPRateLimit.ts | IPRateLimitPlugin} alongside this
- *   plugin so a single origin can't grind an account down — the IP dimension
- *   throttles the attacker without hard-blocking the legitimate owner.
- * - Add a captcha (`CaptchaPlugin`) in front of sign-in to raise the cost of
- *   scripted re-locking.
- * - Keep `lockoutDurationMs` modest (the 15-minute default) so a targeted
- *   victim is inconvenienced, not locked out indefinitely.
- *
- * ## Store-outage behavior
- *
- * By default a lockout-store error fails the sign-in **closed** (an outage
- * blocks sign-ins, but brute-force protection never silently disappears).
- * Set `onStoreError: "fail-open"` to prefer availability: store errors are
- * logged and the sign-in proceeds without lockout protection for the
- * duration of the outage.
+ * Account lockout: counts password, username and second-factor attempts per
+ * account and refuses with `AccountLockedError` for `lockoutDurationMs` after
+ * `maxAttempts`. Possession proofs and passkeys are exempt. Anyone who knows a
+ * handle can lock its account, so pair it with `IPRateLimitPlugin`. Store
+ * errors fail closed unless `onStoreError: "fail-open"`.
  *
  * @module plugins/account-lockout
  */

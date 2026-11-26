@@ -1,41 +1,9 @@
 /**
- * The session-context seam: the context services that carry "who is this
- * execution", and the `Layer` constructors that provide them from an
- * **already-resolved** session.
- *
- * ### Why this is separate from the middleware
- *
- * `AuthMiddleware` does two things at once: it *resolves* a credential out of
- * an `HttpServerRequest`, and it *provides* the result to the handler. Only
- * the first half is HTTP-specific. An app that resolves the session at its own
- * edge — a SvelteKit `hooks.server.ts` that fills `event.locals`, a Worker
- * route that dispatches before any router runs, a test harness that says "run
- * this as this fixture user" — has the *result* already and needs only the
- * second half.
- *
- * This module is that second half. It owns the tags; `http/HttpMiddleware.ts`
- * re-exports them and provides them from a request, so the same `Effect` runs
- * unchanged under an `HttpApi` handler, under a hand-rolled edge, and under a
- * test.
- *
- * ### Which service should my code depend on?
- *
- * | Service               | Holds                      | Depend on it when |
- * | --------------------- | -------------------------- | ----------------- |
- * | {@link MaybeCurrentSession} | `Option<SessionWithUser>` | **read-path code** — anything that must run for anonymous callers *without failing* |
- * | {@link CurrentUser}   | `User`                     | code that already sits behind a required-auth gate |
- * | {@link CurrentSession}| `Session`                  | as above, when the session record itself is needed |
- *
- * `MaybeCurrentSession` is the one to reach for by default. "Signed out" is a
- * *value* there (`Option.none()`), so a predicate like "may this viewer see
- * deleted rows?" can answer `false` for an anonymous caller instead of failing
- * — which is most of a real read path. `CurrentUser` is the convenience for
- * the gated case, and `requireCurrentUser` is the derived accessor that turns
- * the anonymous branch into a typed failure.
- *
- * Every constructor here also provides `CurrentPrincipal`, so the policy
- * kernel (`Authorizer.check` / `authorize`, `protectedField`) works in all
- * three contexts without the call site restating who the principal is.
+ * The services that say who this execution is, and layers that provide them
+ * from an already-resolved session, so one `Effect` runs under a handler, a
+ * hand-rolled edge or a test. Depend on {@link MaybeCurrentSession} on read
+ * paths and {@link CurrentUser} behind a gate. Every layer provides
+ * `CurrentPrincipal` too.
  *
  * @example Running gated code in a runtime that never saw an HTTP request
  * ```ts

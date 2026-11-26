@@ -1,42 +1,9 @@
 /**
- * Reference-material read access: corpus rows with no owner, written at a
- * corpus-write rung and read along the same visibility axis as owned material
- * (`OwnedAccess.Visibility`), with no draft or moderation axis.
- *
- * | visibility         | who may view                                                       |
- * | ------------------ | ------------------------------------------------------------------ |
- * | absent (no axis)   | everyone: the view has no visibility column                        |
- * | `public`           | everyone, anonymous included                                       |
- * | `followers`        | the row's followers-of account and its followers (`IsFollower`); the `viewPrivate` axis |
- * | `group`            | the members of the row's group (`IsMember`); the `viewPrivate` axis |
- * | `private`          | the `viewPrivate` axis only                                        |
- *
- * The followers-of account is a reader, not an owner: it reads its
- * `followers` rows and nothing else, so its `private` rows stay the axis's
- * alone. A followers-of account or group that is absent or not a string names
- * nobody: the row reads as `private`, and no seam is asked about it.
- *
- * ### No axis is a property of the view
- *
- * `visibility` left out of a {@link ReferenceRow} means the view has no
- * visibility column at all, so every row is visible. The policies read that
- * as the context fact `unscoped`, not as a missing row attribute, so a
- * compiled list scope never reads a NULL `visibility` column as "no axis":
- * compile with `context: { unscoped: true }` for a view without the column
- * (the scope is then `AllowAll`) and `{ unscoped: false }` for one with it,
- * where a NULL reads as `private`. A compile that omits the fact fails closed.
- *
- * ### The same read scope
- *
- * {@link ReferenceAccess.readScope} returns `OwnedAccess.OwnedReadScope` —
- * `all`, `public` or `member { userId, following, groups }` — so one renderer
- * filters both kinds and the two readings cannot disagree. For a reference
- * view the `member` arm reads: public rows, OR `followers` rows whose
- * followers-of account is `userId` or in `following`, OR `group` rows whose
- * group is in `groups`.
- *
- * The four role axes, and the fail-closed rule for a role outside the ladder,
- * are described in the `OwnedAccess` module docs.
+ * Read access to reference material: unowned corpus rows on `OwnedAccess`'s
+ * visibility axis, with no draft or moderation axis. Compile a view without a
+ * visibility column with `context: { unscoped: true }`; otherwise a `NULL`
+ * reads as `private`. {@link ReferenceAccess.readScope} has the owned shape, so
+ * one renderer filters both.
  *
  * @module reference-access
  */

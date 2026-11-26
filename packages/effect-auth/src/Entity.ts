@@ -1,20 +1,8 @@
 /**
- * Entity vocabulary for the authorization kernel.
- *
- * The authorization model is Cedar-shaped (reviewed against docs.cedarpolicy.com;
- * see `docs/better-auth-parity.md` §2.5): every party to an authorization
- * decision — principals, resources, and actions alike — is an **entity**,
- * identified by a typed reference (`User::"u1"`-style), carrying an
- * attribute bag, and optionally belonging to parent entities (groups, roles,
- * organizations, action groups). Hierarchy membership (`in`) is what makes
- * RBAC (`principal in Role::"admin"`) and ReBAC plain data checks.
- *
- * Everything in this module is pure data + total functions: an
- * {@link EntitySlice} is the pre-fetched fragment of the entity graph that a
- * decision needs, and evaluation over it never performs IO. Resolving a
- * slice from stores is the Effect shell's job (`AttributeProvider` /
- * `EntityStore`), keeping decisions deterministic and replayable from a
- * logged slice.
+ * The kernel's entity vocabulary, Cedar-shaped: principals, actions and
+ * resources are entities with a typed reference (`User::"u1"`), an attribute
+ * bag and parents. An {@link EntitySlice} is the pre-fetched part of the graph
+ * a decision needs, so decisions stay pure and replayable from a logged slice.
  *
  * @module entity
  */

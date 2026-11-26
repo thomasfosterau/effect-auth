@@ -1,19 +1,8 @@
 /**
- * Render an effect-auth read scope (`ReadScope` in the core) as a SQL `WHERE`
- * fragment, over the columns of whatever relation a LIST reads.
- *
- * The scope is the policy set's set-shaped answer; this module is its SQL
- * projection. The fragment it returns is two-valued on every row: each
- * comparison is guarded by an `IS NOT NULL`, so SQL's third truth value never
- * reaches a `NOT`, and a NULL column decides exactly as the core's
- * `ReadScope.matches` decides an absent attribute.
- *
- * ### Fail closed
- *
- * - A scope attribute with no column in `columns` renders the whole scope as
- *   `1 = 0`: a binding that names a column the relation lacks lists nothing.
- * - A named set with no fragment in `sets` is dropped through
- *   `ReadScope.withoutSets`, which narrows the scope (never widens it).
+ * Renders a core `ReadScope` as a SQL `WHERE` fragment over a relation's
+ * columns. Every comparison is guarded by `IS NOT NULL`, so the fragment stays
+ * two-valued. It fails closed: a scope attribute with no column renders `1 =
+ * 0`, and a set with no fragment is dropped through `withoutSets`.
  *
  * @module read-scope
  */

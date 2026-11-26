@@ -1,30 +1,11 @@
 /**
- * Trusted-device tokens for skipping second-factor challenges.
+ * Trusted-device tokens that skip second-factor challenges, off by default. The
+ * cookie is `<rawToken>.<hmac>`; the HMAC is checked first and only the token's
+ * digest is stored. A password change or reset and disabling multi-factor
+ * revoke every device. The gate reads the cookie from {@link
+ * TrustedDeviceCookieRef}.
  *
- * OFF by default — opt-in by including `TrustedDeviceService.layer(config)` in
- * your service graph. Tokens are HMAC-SHA256-signed so they cannot be forged;
- * only the SHA-256 hash of the raw token is stored at rest (via `hashToken`),
- * so a stolen database does not allow replay. Revocation is immediate: a
- * password change (by default), a password reset and disabling multi-factor
- * revoke every device of the user through `TrustedDeviceStore`; call
- * `revokeAll` on sign-out-everywhere.
- *
- * **NEVER** use a trusted-device token to satisfy step-up authentication for
- * sensitive operations — always require a fresh second factor there.
- *
- * ### Cookie format
- *
- * `<rawToken>.<hmac>` — the raw token (32-byte base64url) followed by a dot
- * separator and its HMAC-SHA256 hex digest. Only the raw-token half is hashed
- * for DB storage; the HMAC half is verified first (constant-time) before any
- * DB lookup, eliminating oracle attacks on the hash.
- *
- * ### Per-request injection
- *
- * The gate reads the device cookie from `TrustedDeviceCookieRef`, a
- * `Context.Reference` with no requirements (R = never). Override it at the
- * HTTP request boundary before running sign-in:
- *
+ * @example Providing the device cookie per request
  * ```ts
  * import assert from "node:assert/strict"
  * import { Context, Effect } from "effect"
