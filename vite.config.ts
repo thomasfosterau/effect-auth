@@ -194,11 +194,13 @@ export default defineConfig({
       },
       {
         // Plain Node tooling that runs no Effect (the dist smoke test and the
-        // task-graph builders): native loops, `.length`, `JSON`, `Error`,
-        // `try`/`catch` and synchronous `fs` are the idiom there.
+        // task-graph builders, the release script): native loops, `.length`,
+        // `JSON`, `Error`, `try`/`catch`, synchronous `fs` and `fetch` are the
+        // idiom there.
         files: ["**/scripts/**", "vite.tasks.ts", "**/vite.config.ts"],
         rules: {
           "effect/avoid-direct-json": "off",
+          "effect/avoid-native-fetch": "off",
           "effect/avoid-native-object-helpers": "off",
           "effect/avoid-sync-fs": "off",
           "effect/avoid-try-catch": "off",
