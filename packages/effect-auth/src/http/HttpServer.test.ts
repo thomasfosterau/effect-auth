@@ -6077,7 +6077,7 @@ describe("make with strict", () => {
       ),
     );
     // Never completed: only interruption ends this step.
-    const gate = Effect.runSync(Deferred.make<void>());
+    const gate = Deferred.makeUnsafe<void>();
     const waiting = Layer.effectDiscard(
       Deferred.await(gate).pipe(
         Effect.onInterrupt(() => Effect.sync(() => void (interrupted = true))),
@@ -6170,7 +6170,7 @@ describe("make with strict", () => {
 
   it("interrupts the build before it releases what the build acquired", () => {
     const events: Array<string> = [];
-    const gate = Effect.runSync(Deferred.make<void>());
+    const gate = Deferred.makeUnsafe<void>();
     const waiting = Layer.effectDiscard(
       Deferred.await(gate).pipe(
         Effect.onInterrupt(() => Effect.sync(() => void events.push("interrupted"))),
@@ -6192,7 +6192,7 @@ describe("make with strict", () => {
 
   it("runs the build's unwinding to the end before it throws when the build yields while it unwinds", async () => {
     const events: Array<string> = [];
-    const gate = Effect.runSync(Deferred.make<void>());
+    const gate = Deferred.makeUnsafe<void>();
     // The interrupted build yields before it records the interrupt, so its next
     // step is a task on the build's own dispatcher.
     const waiting = Layer.effectDiscard(

@@ -783,7 +783,7 @@ describe("OidcProviderService token state", () => {
     // scheduler orders them.
     let armed = false;
     let arrived = 0;
-    const bothRead = Effect.runSync(Deferred.make<void>());
+    const bothRead = Deferred.makeUnsafe<void>();
     const { provider } = setup((store) => ({
       ...store,
       get: (hash) =>
