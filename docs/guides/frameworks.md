@@ -21,7 +21,7 @@ import * as Auth from "@thomasfosterau/effect-auth";
 import * as Http from "@thomasfosterau/effect-auth/http";
 import * as Sql from "@thomasfosterau/effect-auth/sql";
 import { SqlClientLayer } from "./db"; // your effect/sql driver, e.g. @effect/sql-pg
-import { sendResetEmail } from "./mail"; // (email, token) => Effect<void, PasswordResetError>
+import { sendResetEmail, sendVerificationEmail } from "./mail"; // (email, token) => Effect<void, …>
 
 // The stores, and the root secret (`AUTH_SECRET`) the services key from. Run
 // `Sql.migrate` once at deploy or startup.
@@ -31,22 +31,22 @@ const stores = Layer.merge(Sql.layer, Auth.RootSecret.RootSecret.layerConfig).pi
 
 // Each stage provides the next; `provideMerge` keeps every service in the output.
 const base = Layer.mergeAll(
-  Auth.Hooks.Default, // no-op hooks; compose plugins here instead
+  Auth.Hooks.Hooks.Default, // no-op hooks; compose plugins here instead
   Auth.Password.PasswordHasher.layer(),
-  Auth.RateLimiter.layer(), // the per-address limits the handler applies by default
+  Auth.RateLimit.RateLimiter.layer(), // the per-address limits the handler applies by default
 ).pipe(Layer.provideMerge(stores));
 const sessionsAndUsers = Layer.mergeAll(
-  Auth.SessionService.layer({
+  Auth.SessionService.SessionService.layer({
     sessionExpiresIn: { activePeriod: 30 * 864e5, idlePeriod: 14 * 864e5 },
   }),
-  Auth.UserService.layer(),
+  Auth.User.UserService.layer(),
 ).pipe(Layer.provideMerge(base));
 const signIn = Layer.mergeAll(
   Auth.Email.EmailPasswordService.layer(),
-  Auth.Email.EmailVerificationService.layer({}),
+  Auth.Email.EmailVerificationService.layer({ sendEmail: sendVerificationEmail }),
   Auth.Password.PasswordResetService.layer({ sendResetPassword: sendResetEmail }),
 ).pipe(Layer.provideMerge(sessionsAndUsers));
-const services = Auth.AuthLifecycleService.layer().pipe(Layer.provideMerge(signIn));
+const services = Auth.AuthLifecycle.AuthLifecycleService.layer().pipe(Layer.provideMerge(signIn));
 
 export const prefix = "/api/auth";
 const CLIENT_ADDRESS_HEADER = "x-client-address";
@@ -60,7 +60,7 @@ const auth = Http.makeAsync({
   cookie,
   trustedOrigins: ["https://app.example.com"],
   // The rate limits key on the visitor's address, read only from this header.
-  trustedProxy: Auth.ClientIP.trustedHeader(CLIENT_ADDRESS_HEADER),
+  trustedProxy: Auth.ClientIP.ClientIP.trustedHeader(CLIENT_ADDRESS_HEADER),
 });
 
 // The header carries the address the framework saw, never one the browser sent.
@@ -89,7 +89,7 @@ export const getSession = (request: Request, clientAddress: string | undefined) 
     Http.RemoteSession.resolveAtEdgeFailOpen({
       client: sessions,
       request,
-      clientAddress,
+      ...(clientAddress !== undefined && { clientAddress }),
       onDegraded: (cause) => Effect.logError("session lookup degraded", cause),
     }),
   );
@@ -108,7 +108,7 @@ What it relies on:
   `Request` carries none. `withClientAddress` writes the address the framework knows (the socket,
   or the framework's own resolution of it) into one header, replacing anything the browser sent
   there, and the handler trusts only that header. Behind a platform that sets an address header the
-  client cannot forge, trust that header instead and drop the rewrite: `Auth.ClientIP.cloudflare`
+  client cannot forge, trust that header instead and drop the rewrite: `Auth.ClientIP.ClientIP.cloudflare`
   behind Cloudflare.
 - **`getSession`** answers `{ session, setCookie, outcome, credentialClass }`. `session` is an
   `Option` of `{ session, user }`. A request with no session cookie, bearer token or API key is
@@ -277,7 +277,7 @@ app.get("/me", (c) => c.json({ user: Option.getOrNull(c.get("auth").session)?.us
 ```
 
 `getConnInfo` comes from the adapter for your runtime (`hono/bun`, `hono/deno`,
-`@hono/node-server/conninfo`). On Cloudflare Workers, trust `Auth.ClientIP.cloudflare` in the
+`@hono/node-server/conninfo`). On Cloudflare Workers, trust `Auth.ClientIP.ClientIP.cloudflare` in the
 shared module and pass `undefined`.
 
 ## Express
