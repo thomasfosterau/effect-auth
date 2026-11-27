@@ -166,6 +166,20 @@ export const SessionWithUser = Schema.Struct({
 export type SessionWithUser = typeof SessionWithUser.Type;
 
 /**
+ * What `SessionService.validateSession` answers: the session and its user and,
+ * when the backend replaced the credential while reading it, the replacement
+ * in `reissued` (a session service over a sealed cookie whose access token it
+ * refreshed). The core's own service never reissues. The HTTP tier writes
+ * `reissued.token` where the presented token came from (the session cookie,
+ * the multi-session list, the `set-auth-token` header) and never into a body;
+ * a caller outside it that reads `reissued` must hand the new token to the
+ * client, or the next request presents one the backend already spent.
+ */
+export type ValidatedSession = SessionWithUser & {
+  readonly reissued?: IssuedSession | undefined;
+};
+
+/**
  * A session just issued: the stored record (its `id` the digest the store keys
  * it by) and the raw bearer `token` the client presents. `SessionService`'s
  * `createSession` returns it, and every sign-in result carries both fields.

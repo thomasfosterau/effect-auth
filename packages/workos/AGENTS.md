@@ -1,0 +1,27 @@
+# @thomasfosterau/effect-auth-workos
+
+WorkOS as an effect-auth backend: WorkOS User Management keeps the users, passwords and sessions, and the core's services (`SessionService`, `EmailPasswordService`, `AuthLifecycleService`, the email flows, `OAuthService` and `SsoService` over AuthKit) run over its API, so `Http.make`, the hooks and the abuse plugins work unchanged. **`"private": true` until the details in issue #900 are checked against a live environment**; never publish it before then.
+
+## Boundary
+
+Archetype **Backend adapter** (`.fallowrc.json` zone `backend-adapters`, which may import `core` and `ladder`). Peer: `effect` (`catalog:peers`). Depends on `@thomasfosterau/effect-auth` (`workspace:^`) only, and on its root alone: no `./http`, `./client` or `./sql` import outside the suites (`ModuleGraph.test.ts`). No WorkOS SDK: every call is `effect/http` through the core's `OutboundHttp.send`, so it runs on Workers. It is a package rather than a core subpath so its release can wait on that live check without holding the core.
+
+## Invariants
+
+- **The session is a stateless sealed cookie**: `w1~<key id>~<base64url(iv ‖ tag ‖ ciphertext)>`, AES-256-GCM under an HKDF-SHA256 key from `cookiePassword` (at least 32 bytes, `CookiePasswordError` at build), with fixed associated data (`Seal.ts`). It seals the refresh token, the _verified_ access-token claims and the WorkOS user, never the access token itself. A cookie that does not open is `SessionNotFoundError`; there is no plaintext or unsealed fallback. `previousCookiePasswords` keep opening their cookies (named by key id); the first password seals.
+- **An access token is verified once, when it arrives** (sign-in, refresh, organization switch): RS256 over the JWKS at `/sso/jwks/<clientId>` through the core's `remoteJwksVerifier` (`tokenType: null`, since WorkOS sets no `typ`), the configured `issuer`, `exp`, then `sub_profile` absent or `user` and `sub_type` absent (a user token, as the WorkOS SDK checks), and `sub` equal to the answer's user. `validateSession` reads the sealed claims and makes no WorkOS call while they are fresh.
+- **A stale cookie is refreshed and reissued, never answered in a body**: `validateSession` refreshes past `exp - clockSkewLeeway` and answers `reissued`, which the core's HTTP tier writes only to the response headers (`Types.ValidatedSession`, the core AGENTS.md). A WorkOS 4xx (not 429) to a refresh is `SessionExpiredError`; a fault is `AuthError`. Concurrent requests holding one cookie share one refresh per refresh token for 30 s per process, so a single-use refresh token is spent once. `sessionMaxAge` (from the sign-in) ends a session whatever its token says.
+- **Revocation outlives the access token only with `RevokedSessions`**: sign-out, `invalidateUserSessions`, `revokeOtherSessions`, `revokeSessionById` and the `session.revoked` webhook record the WorkOS session id; `validateSession` refuses a recorded one. Without the service a revoked session lasts until its access token expires (minutes). Use the `KeyValueStore` layer across instances.
+- **Impersonation is explicit**: a WorkOS impersonation sets `workos.impersonator` and the core's `impersonatedBy` on the session, so the core treats it as someone else's session (lockout, `Guard`). WorkOS-specific attributes are namespaced `workos.*` (`SessionAttribute`, `UserAttribute`).
+- **The core's hooks run at the core's points**: `beforeSignIn`, `beforeAuthenticate` (before every grant that checks a credential), `beforeSendCode` (before every send), `before/afterCreateSession`, `before/afterValidateSession`, the sign-out hooks with the WorkOS session id. A new flow fires the same hooks its core counterpart does.
+- **A password-reset request answers an unknown address as a known one** (a WorkOS 4xx is swallowed). With `delivery: "app"` the reset link and the Magic Auth code go through the core `EmailSender` on a detached send; the layer dies at build without one.
+- **AuthKit and SSO callbacks spend their `state` first** through the core `OAuthStateStore` (`hashedStateStore`, so the store holds its digest), then check its 10-minute expiry, then exchange the code with the PKCE verifier derived from the state under the root secret (never stored).
+- **Webhooks are verified before they are parsed**: `t=<ms>,v1=<hex>`, HMAC-SHA256 of `<t>.<raw body>` compared with `timingSafeEqualBytes`, within 180 s either way. Verify the raw body as received.
+- **What WorkOS does not support is refused, never faked**: `createSession`, `setSessionAttributes`, `setPassword`, `clearPassword`, the two-step email verification, OTP `check`, provider-account linking and SSO connection management fail with `AuthError` or `SsoError`; the `PasswordHasher` refuses every call. MFA and passkeys are out of v1.
+- **Every detail the WorkOS SDK's source does not settle carries `TODO(#900)`**; the fake in `FakeWorkOS.fixtures.ts` follows the SDK's (de)serializers for the rest. The API key is sent only as the bearer credential and the `client_secret` of `/authenticate`, and no log line carries it, a token or a body (`WorkOS.ts` logs route, status, code and request id).
+
+## Terms
+
+- **Sealed cookie** — the session token this backend issues: the encrypted record above, opened on every request.
+- **AuthKit** — WorkOS's hosted sign-in (`/user_management/authorize`); `OAuthService` with `"authkit"`, a social provider name, `connection:<id>` or `organization:<id>`.
+- **Magic Auth** — WorkOS's emailed sign-in code, served as the core `EmailOtpService` (`"sign-in"` only).

@@ -37,8 +37,9 @@ Provide `EmailPasswordService.layer()` with its stores (in memory, `/sql` or an 
 | [`effect-auth-alchemy-postgres`](packages/alchemy-postgres)     | Alchemy schema resource and Postgres stores                     |
 | [`effect-auth-argon2`](packages/argon2)                         | Argon2id over WebAssembly, for Workers                          |
 | [`effect-auth-better-auth`](packages/better-auth)               | BetterAuth as the backend for the core services (private)       |
+| [`effect-auth-workos`](packages/workos)                         | WorkOS AuthKit as the backend for the core services (private)   |
 
-All are published under `@thomasfosterau/`, except `effect-auth-better-auth`, which is not published yet.
+All are published under `@thomasfosterau/`, except `effect-auth-better-auth` and `effect-auth-workos`, which are not published yet.
 
 ## Links
 

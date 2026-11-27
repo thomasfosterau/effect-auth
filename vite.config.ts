@@ -131,12 +131,14 @@ export default defineConfig({
         // The adapters' third-party shapes: SvelteKit serializes load and
         // action data with devalue, which cannot carry an `Option`, and its
         // event API answers `undefined`; Drizzle column and row types; Better
-        // Auth's API objects; the D1 and `effect/sql` driver API; Node's
-        // child-process API in the workerd suite.
+        // Auth's API objects; the WorkOS wire shapes and the fake that serves
+        // them; the D1 and `effect/sql` driver API; Node's child-process API
+        // in the workerd suite.
         files: [
           "packages/sveltekit/src/**",
           "packages/drizzle/src/**",
           "packages/better-auth/src/**",
+          "packages/workos/src/FakeWorkOS.fixtures.ts",
           "packages/alchemy-cloudflare/src/D1Client.ts",
           "packages/argon2/src/Workerd.test.ts",
         ],
@@ -267,6 +269,12 @@ export default defineConfig({
         },
       },
       {
+        // The fake WorkOS answers the API's wire shapes as they are, whatever
+        // their schema, so its answer builders take any object.
+        files: ["packages/workos/src/FakeWorkOS.fixtures.ts"],
+        rules: { "effect/no-object-parameters": "off" },
+      },
+      {
         // Type tests assert rejections with an expect-error directive, and
         // the barrel tests assert that a member is absent from a namespace.
         files: ["**/*.test.ts"],
@@ -286,8 +294,9 @@ export default defineConfig({
       {
         // Published wire contract: these schemas name JSON fields fixed by
         // the HTTP API (JSON:API attributes, SCIM 2.0, OAuth registration),
-        // the captcha vendors' answers (`success`) and stored records
-        // (`verified`), and the tests decode those same bodies.
+        // the captcha vendors' answers (`success`), WorkOS's API
+        // (`email_verified`) and stored records (`verified`), and the tests
+        // decode those same bodies.
         files: [
           "packages/effect-auth/src/http/HttpApiSchema.ts",
           "packages/effect-auth/src/http/HttpApi.ts",
@@ -295,6 +304,7 @@ export default defineConfig({
           "packages/effect-auth/src/KeyValueStores.ts",
           "packages/effect-auth/src/plugins/Captcha.ts",
           "packages/sveltekit/src/Actions.ts",
+          "packages/workos/src/Schemas.ts",
           "packages/effect-auth/src/http/HttpServer.test.ts",
           "packages/effect-auth/src/http/HttpServerModules.test.ts",
           "packages/effect-auth/src/http/ApiKeyResolution.test.ts",
@@ -566,6 +576,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#check",
           "@thomasfosterau/effect-auth-svelte#check",
           "@thomasfosterau/effect-auth-sveltekit#check",
+          "@thomasfosterau/effect-auth-workos#check",
         ],
       },
       // The API reference for every package; only the core's examples run.
@@ -580,6 +591,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#docs",
           "@thomasfosterau/effect-auth-svelte#docs",
           "@thomasfosterau/effect-auth-sveltekit#docs",
+          "@thomasfosterau/effect-auth-workos#docs",
         ],
       },
       "check:dist": { command: "vpx scripts/check-dist.ts", cache: false },
@@ -621,6 +633,7 @@ export default defineConfig({
           "@thomasfosterau/effect-auth-drizzle#build",
           "@thomasfosterau/effect-auth-svelte#build",
           "@thomasfosterau/effect-auth-sveltekit#build",
+          "@thomasfosterau/effect-auth-workos#build",
         ],
         cache: false,
       },

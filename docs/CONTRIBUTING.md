@@ -1,6 +1,6 @@
 # Contributing
 
-effect-auth is a pnpm workspace of seven `@thomasfosterau/effect-auth*` packages under `packages/*`; the core is `packages/effect-auth`. Each package's `AGENTS.md` holds its boundary and invariants.
+effect-auth is a pnpm workspace of nine `@thomasfosterau/effect-auth*` packages under `packages/*`; the core is `packages/effect-auth`. Each package's `AGENTS.md` holds its boundary and invariants.
 
 ## Workflow
 

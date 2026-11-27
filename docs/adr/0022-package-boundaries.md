@@ -62,6 +62,9 @@ Applied:
 - `effect-auth-better-auth` brings `better-auth` and is a package, of a new archetype: a
   **backend adapter**, which implements the core's service contracts (not its stores) over another
   auth library's runtime. Its fallow zone `backend-adapters` may import `core` and `ladder`.
+- `effect-auth-workos` is a backend adapter over WorkOS User Management's HTTP API. It brings no
+  dependency, which rule 1 would make a core subpath. It is a package so that its release can wait
+  on a check against a live WorkOS environment without holding the core.
 
 ## Consequences
 

@@ -135,6 +135,7 @@ import * as S from "./HttpApiSchema.ts";
 import type * as Types from "../Types.ts";
 import { sessionCredentialClass } from "../Types.ts";
 import {
+  carryReissued,
   dataCookieName,
   internalServerError,
   resolveCookieConfig,
@@ -350,7 +351,7 @@ const resolveSessionFromRequest = (
 ): Effect.Effect<
   Option.Option<Types.SessionWithUser>,
   S.Unauthorized | AuthError,
-  SessionService | Hooks
+  SessionService | Hooks | HttpServerRequest.HttpServerRequest
 > =>
   Effect.gen(function* () {
     // --- Cache path ---
@@ -381,7 +382,7 @@ const resolveSessionFromRequest = (
       .validateSession(sessionId)
       .pipe(Effect.catch(sessionValidationFailure));
 
-    return Option.some(resolved);
+    return Option.some(yield* carryReissued(cfg, sessionId, resolved));
   });
 
 /**
@@ -568,12 +569,11 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
           : new S.Unauthorized({ message: "Not authenticated" });
       }
       const sessionService = yield* SessionService;
-      const resolved = yield* sessionService
-        .validateSession(token)
-        .pipe(
-          Effect.catch(sessionValidationFailure),
-          Effect.catchTag("AuthError", internalServerError),
-        );
+      const resolved = yield* sessionService.validateSession(token).pipe(
+        Effect.catch(sessionValidationFailure),
+        Effect.catchTag("AuthError", internalServerError),
+        Effect.flatMap((validated) => carryReissued(cfg, token, validated)),
+      );
       return yield* handler.pipe(
         Effect.provideService(CurrentSession, resolved.session),
         Effect.provideService(CurrentUser, resolved.user),
