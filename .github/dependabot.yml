@@ -49,6 +49,11 @@ updates:
       # `typescript` is the TS6 alias every JS-API consumer requires; a major bump would be TS7.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # `vite` (aliased to vite-plus-core), `vitest` and `@vitest/*` are pinned
+      # to what `vite-plus` depends on and move by hand with it.
+      - dependency-name: "vite"
+      - dependency-name: "vitest"
+      - dependency-name: "@vitest/*"
     # A dependency joins the first group it matches, so the named sets come
     # first and `toolchain` takes every other development dependency.
     # Production dependencies outside a named set get a PR each.
