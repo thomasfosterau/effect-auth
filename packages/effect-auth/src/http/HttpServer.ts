@@ -1896,8 +1896,8 @@ const passwordPolicyFailure = (e: {
 
 /**
  * The failures every hook-guarded flow can meet, as `catchTags` cases: a rate
- * limit, a locked or banned account, and the captcha and pwned-password
- * plugins' refusals.
+ * limit, a locked or banned account, and the captcha, pwned-password and
+ * confusables plugins' refusals.
  */
 const hookFailures = {
   RateLimitError: (e: { readonly code: string; readonly message: string }) =>
@@ -1906,6 +1906,7 @@ const hookFailures = {
   UserBannedError: forbiddenFor,
   CaptchaError: badRequestFor,
   PwnedPasswordError: badRequestFor,
+  ConfusableEmailError: badRequestFor,
 };
 
 /**
@@ -1920,6 +1921,7 @@ const hookRefusals = <A, E, R>(
   UserBannedError: refuse,
   CaptchaError: refuse,
   PwnedPasswordError: refuse,
+  ConfusableEmailError: refuse,
 });
 
 /** What a sign-in, sign-up or verification produced, before it is answered. */
@@ -2541,6 +2543,7 @@ export const emailChangesGroupLayer = (
                   Effect.fail(new S.BadRequest({ message: e.message, code: e.code })),
                 ReauthenticationRequiredError: (e) =>
                   Effect.fail(new S.Forbidden({ message: e.message, code: e.code })),
+                ...hookFailures,
                 AuthError: (e) => internalServerError(e),
                 HashingError: (e) => internalServerError(e),
                 ImpersonationForbiddenError: forbiddenFor,

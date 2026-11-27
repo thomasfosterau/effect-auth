@@ -406,6 +406,12 @@ export default defineConfig({
         },
       },
       {
+        // RFC 3492's decoder is a state machine over the label's code units:
+        // its loops and running counters are the algorithm as specified.
+        files: ["packages/effect-auth/src/plugins/Punycode.ts"],
+        rules: { "effect/imperative-loops": "off" },
+      },
+      {
         // Direct `node:crypto` use is corralled in scrypt, which
         // `effect/crypto` lacks. It imports `Buffer` from `node:buffer` where
         // it needs it, so the global stays banned here too: `nodejs_compat`

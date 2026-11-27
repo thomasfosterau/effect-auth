@@ -33,6 +33,7 @@ export const ErrorCode = {
   SIGN_UP_DISABLED: "SIGN_UP_DISABLED",
   INVALID_INPUT: "INVALID_INPUT",
   CAPTCHA_FAILED: "CAPTCHA_FAILED",
+  CONFUSABLE_EMAIL: "CONFUSABLE_EMAIL",
 
   // Account access
   ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
@@ -329,6 +330,25 @@ export class InvalidInputError extends Schema.TaggedError<
 }) {
   get code(): typeof ErrorCode.INVALID_INPUT {
     return ErrorCode.INVALID_INPUT;
+  }
+}
+
+/**
+ * An email address that mixes scripts or passes for an ASCII address, which
+ * `ConfusablesPlugin` refuses as a new address. `reason` says which check
+ * refused it; the address is left out, so the error can be logged.
+ *
+ * @since 0.9.0
+ */
+export class ConfusableEmailError extends Schema.TaggedError<
+  ConfusableEmailError,
+  { readonly brand: unique symbol }
+>()("ConfusableEmailError", {
+  message: Schema.String,
+  reason: Schema.Literals(["mixed-script", "ascii-lookalike"]),
+}) {
+  get code(): typeof ErrorCode.CONFUSABLE_EMAIL {
+    return ErrorCode.CONFUSABLE_EMAIL;
   }
 }
 

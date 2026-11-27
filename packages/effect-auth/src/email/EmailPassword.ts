@@ -640,6 +640,7 @@ export const make = (
               field: "email",
             });
           }
+          yield* hooks.beforeClaimEmail({ email, flow: "sign-up" });
 
           yield* validatePasswordLength(input.password, {
             minPasswordLength: resolved.minPasswordLength,

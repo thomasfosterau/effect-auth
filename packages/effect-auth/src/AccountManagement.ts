@@ -25,6 +25,7 @@ import { isImpersonationSession } from "./Types.ts";
 import type * as Types from "./Types.ts";
 import { UserServiceStore } from "./User.ts";
 import { SessionService } from "./SessionService.ts";
+import { type HookError, Hooks } from "./Hooks.ts";
 import { ensureUserRemovable, purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { normalizeEmail } from "./Normalize.ts";
 import * as Identifier from "./Identifier.ts";
@@ -177,7 +178,8 @@ export class AccountManagementService extends Context.Service<
      *   signs in again, through whatever method they have, and retries. When
      *   the account is enrolled in a second factor, that sign-in passed it.
      *
-     * Then it notifies the current address (`sendEmailChangeNotice`), checks
+     * Then it notifies the current address (`sendEmailChangeNotice`), runs
+     * the `beforeClaimEmail` hook (when a `Hooks` layer is present), checks
      * the new address is free, and issues a token delivered to the new
      * address. Returns the token (for the caller to decide delivery and
      * anti-enumeration; the HTTP layer answers `202` either way).
@@ -195,6 +197,7 @@ export class AccountManagementService extends Context.Service<
       | Errors.ReauthenticationRequiredError
       | Errors.HashingError
       | Errors.ImpersonationForbiddenError
+      | HookError
     >;
 
     /**
@@ -301,6 +304,8 @@ const make = (
     const store = hashedAccountTokens(yield* AccountManagementStore, yield* tokenHasher);
     const sessions = yield* SessionService;
     const crypto = yield* SecureRandom.SecureRandom;
+    // Optional, so an app that wires no plugins needs no `Hooks` layer.
+    const hooks = yield* Effect.serviceOption(Hooks);
     // Optional: an app without passwords re-authenticates every account by
     // a recent sign-in.
     const passwords = Option.getOrUndefined(yield* Effect.serviceOption(EmailPasswordStore));
@@ -376,6 +381,9 @@ const make = (
         const oldEmail = Identifier.anyEmailValue(yield* identifiers.listByUser(userId));
         if (Option.isSome(oldEmail) && oldEmail.value !== newEmail) {
           yield* config.sendEmailChangeNotice({ user, oldEmail: oldEmail.value, newEmail });
+        }
+        if (Option.isSome(hooks)) {
+          yield* hooks.value.beforeClaimEmail({ email: newEmail, flow: "email-change", userId });
         }
 
         // Uniqueness: reject if another account already owns the address.

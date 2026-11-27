@@ -136,6 +136,8 @@ const catalog: Catalog = {
   [ErrorCode.SIGN_UP_DISABLED]: "Email/password sign-up is disabled",
   [ErrorCode.INVALID_INPUT]: "A required field is missing or invalid",
   [ErrorCode.CAPTCHA_FAILED]: "Captcha verification failed",
+  [ErrorCode.CONFUSABLE_EMAIL]:
+    "This email address can be mistaken for another; please use a different one",
 
   [ErrorCode.ACCOUNT_LOCKED]: "Account temporarily locked due to too many failed sign-in attempts",
   [ErrorCode.USER_BANNED]: "Your account has been suspended",
