@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { KeyValueStore } from "effect/persistence";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { createAuthClient } from "@thomasfosterau/effect-auth/client";

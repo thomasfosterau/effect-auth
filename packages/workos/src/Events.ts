@@ -4,7 +4,9 @@
  *
  * @since 0.1.0
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import { List, WireEvent } from "./Schemas.ts";
 import { WorkOSClient, type WorkOSError } from "./WorkOS.ts";
 import { typeEvent, type WorkOSEvent } from "./Webhook.ts";
@@ -19,14 +21,14 @@ export interface ListOptions {
   /** The event names to read (`["session.revoked", "user.deleted"]`). */
   readonly events: ReadonlyArray<string>;
   /** The cursor the previous page answered, to read on from it. */
-  readonly after?: string | undefined;
-  readonly organizationId?: string | undefined;
-  readonly limit?: number | undefined;
+  readonly after?: string;
+  readonly organizationId?: string;
+  readonly limit?: number;
 }
 
 /**
- * One page of events and the cursor to read the next from (`undefined` when
- * there is none yet: poll again later with the same cursor).
+ * One page of events and the cursor to read the next from (`None` when there
+ * is none yet: poll again later with the same cursor).
  *
  * @since 0.1.0
  * @category reading
@@ -34,7 +36,7 @@ export interface ListOptions {
 export const list = (
   options: ListOptions,
 ): Effect.Effect<
-  { readonly events: ReadonlyArray<WorkOSEvent>; readonly after: string | undefined },
+  { readonly events: ReadonlyArray<WorkOSEvent>; readonly after: Option.Option<string> },
   WorkOSError,
   WorkOSClient
 > =>
@@ -44,17 +46,17 @@ export const list = (
       method: "GET",
       path: "/events",
       route: "/events",
-      query: {
+      query: R.getSomes({
         // The WorkOS SDK sends a list as one comma-separated value.
-        events: options.events.join(","),
-        after: options.after,
-        organization_id: options.organizationId,
-        limit: options.limit === undefined ? undefined : `${options.limit}`,
-      },
+        events: Option.some(options.events.join(",")),
+        after: Option.fromUndefinedOr(options.after),
+        organization_id: Option.fromUndefinedOr(options.organizationId),
+        limit: Option.map(Option.fromUndefinedOr(options.limit), String),
+      }),
       schema: List(WireEvent),
     });
     return {
       events: page.data.map(typeEvent),
-      after: page.list_metadata?.after ?? options.after,
+      after: Option.fromNullishOr(page.list_metadata?.after ?? options.after),
     };
   });

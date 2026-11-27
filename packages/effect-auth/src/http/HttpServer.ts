@@ -2836,7 +2836,7 @@ export const deviceSessionsGroupLayer = (
               // is a 500, not a shorter list.
               (token) =>
                 sessionManager.validateSession(token).pipe(
-                  Effect.map((validated) => ({ token, validated })),
+                  Effect.map((result) => ({ token, validated: result })),
                   Effect.asSome,
                   Effect.catch(sessionValidationFailure),
                   Effect.catchTags({

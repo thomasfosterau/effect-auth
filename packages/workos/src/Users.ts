@@ -7,7 +7,10 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Layer from "effect/Layer";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -71,18 +74,25 @@ export const toIdentifier = (user: WireUser): Auth.Identifier => ({
   createdAt: instant(user.created_at),
 });
 
-const userIdOf = (identifierId: string): string | undefined =>
+const userIdOf = (identifierId: string): Option.Option<string> =>
   identifierId.startsWith(IDENTIFIER_PREFIX)
-    ? identifierId.slice(IDENTIFIER_PREFIX.length)
-    : undefined;
+    ? Option.some(identifierId.slice(IDENTIFIER_PREFIX.length))
+    : Option.none();
 
-/** `null` for a 404, so a store miss reads as one. */
-const orNull = <A>(effect: Effect.Effect<A, WorkOSError>) =>
+/** `None` for a 404, so a store miss reads as one. */
+const orNone = <A>(effect: Effect.Effect<A, WorkOSError>) =>
   effect.pipe(
+    Effect.asSome,
     Effect.catchTag("WorkOSError", (error) =>
-      error.status === 404 ? Effect.succeed(null) : Effect.fail(toAuthError(error)),
+      error.status === 404 ? Effect.succeedNone : Effect.fail(toAuthError(error)),
     ),
   );
+
+const found = (userId: string) => (user: Option.Option<WireUser>) =>
+  Option.match(user, {
+    onNone: () => Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+    onSome: (wire) => Effect.succeed(toUser(wire)),
+  });
 
 /**
  * Reads and writes of WorkOS users.
@@ -93,7 +103,7 @@ const orNull = <A>(effect: Effect.Effect<A, WorkOSError>) =>
 export const makeUsers = Effect.fn("WorkOS.Users.make")(function* () {
   const workos = yield* WorkOSClient;
   const getWire = (userId: string) =>
-    orNull(
+    orNone(
       workos.request({
         method: "GET",
         path: path`/user_management/users/${userId}`,
@@ -111,11 +121,11 @@ export const makeUsers = Effect.fn("WorkOS.Users.make")(function* () {
         schema: List(WireUser),
       })
       .pipe(
-        Effect.map((page) => page.data[0] ?? null),
+        Effect.map((page) => Arr.head(page.data)),
         Effect.mapError(toAuthError),
       );
   const update = (userId: string, body: Schema.JsonObject) =>
-    orNull(
+    orNone(
       workos.request({
         method: "PUT",
         path: path`/user_management/users/${userId}`,
@@ -136,8 +146,7 @@ export const makeUsers = Effect.fn("WorkOS.Users.make")(function* () {
 export const userStoreLayer: Layer.Layer<Auth.UserStore, never, WorkOSClient> = Layer.effect(
   Auth.UserStore,
   Effect.map(makeUsers(), ({ getWire }) => ({
-    get: (userId: string) =>
-      Effect.map(getWire(userId), (user) => (user === null ? null : toUser(user))),
+    get: (userId: string) => Effect.map(getWire(userId), Option.map(toUser)),
   })),
 );
 
@@ -153,17 +162,13 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Work
   Layer.effect(
     Auth.IdentifierStore,
     Effect.map(makeUsers(), ({ getWire, byEmail, update }) => {
-      const fromUserId = (userId: string | undefined) =>
-        userId === undefined
-          ? Effect.succeed(null)
-          : Effect.map(getWire(userId), (user) => (user === null ? null : toIdentifier(user)));
+      const fromUserId = (userId: string) => Effect.map(getWire(userId), Option.map(toIdentifier));
       return Auth.IdentifierStore.of({
         getByValue: (type, value) =>
           type !== "email"
-            ? Effect.succeed(null)
-            : Effect.map(byEmail(value), (user) => (user === null ? null : toIdentifier(user))),
-        listByUser: (userId) =>
-          Effect.map(fromUserId(userId), (identifier) => (identifier === null ? [] : [identifier])),
+            ? Effect.succeedNone
+            : Effect.map(byEmail(value), Option.map(toIdentifier)),
+        listByUser: (userId) => Effect.map(fromUserId(userId), Option.toArray),
         create: (identifier) =>
           Effect.fail(
             new Auth.IdentifierRefusedError({
@@ -176,18 +181,18 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Work
           to: Auth.Identifier,
         ) {
           const userId = userIdOf(from.id);
-          if (userId === undefined || to.type !== "email") return null;
-          const user = yield* update(userId, {
+          if (Option.isNone(userId) || to.type !== "email") return Option.none();
+          const user = yield* update(userId.value, {
             email: to.value,
             email_verified: to.verified,
           });
-          return user === null ? null : toIdentifier(user);
+          return Option.map(user, toIdentifier);
         }),
         setVerified: Effect.fn("WorkOS.IdentifierStore.setVerified")(function* (id: string) {
           const userId = userIdOf(id);
-          if (userId === undefined) return null;
-          const user = yield* update(userId, { email_verified: true });
-          return user === null ? null : toIdentifier(user);
+          if (Option.isNone(userId)) return Option.none();
+          const user = yield* update(userId.value, { email_verified: true });
+          return Option.map(user, toIdentifier);
         }),
         delete: () => Effect.fail(unsupported("Removing a WorkOS user's email")),
         // Deleting the WorkOS user removes its email with it.
@@ -212,10 +217,6 @@ export const userServiceLayer: Layer.Layer<Auth.UserService, never, WorkOSClient
   Effect.gen(function* () {
     const { getWire, update } = yield* makeUsers();
     const workos = yield* WorkOSClient;
-    const found = (userId: string) => (user: WireUser | null) =>
-      user === null
-        ? Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId }))
-        : Effect.succeed(toUser(user));
     return Auth.UserService.of({
       getUser: (userId) => Effect.flatMap(getWire(userId), found(userId)),
       updateUser: (userId, updates) => {
@@ -243,12 +244,12 @@ export const userServiceLayer: Layer.Layer<Auth.UserService, never, WorkOSClient
           });
         }
         const current = yield* getWire(userId);
-        if (current === null) {
+        if (Option.isNone(current)) {
           return yield* new Auth.UserNotFoundError({ message: "User not found", userId });
         }
         return yield* Effect.flatMap(
           update(userId, {
-            metadata: { ...current.metadata, ...R.filter(attributes, P.isString) },
+            metadata: { ...current.value.metadata, ...R.filter(attributes, P.isString) },
           }),
           found(userId),
         );

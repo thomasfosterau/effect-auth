@@ -7,7 +7,8 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
@@ -38,9 +39,9 @@ export const sessionRoles = (session: Auth.Session): ReadonlyArray<string> => {
  */
 export interface EntityResolverOptions {
   /** Role inheritance, as `Auth.Rbac`'s `roleHierarchy`: `{ admin: ["member"] }`. */
-  readonly roleHierarchy?: Readonly<Record<string, ReadonlyArray<string>>> | undefined;
+  readonly roleHierarchy?: Readonly<Record<string, ReadonlyArray<string>>>;
   /** The principal type the session's user is, `User` by default (`Auth.Rbac.DefaultPrincipalType`). */
-  readonly principalType?: string | undefined;
+  readonly principalType?: string;
 }
 
 /**

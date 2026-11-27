@@ -784,6 +784,24 @@ describe("RemoteJwksVerifier", () => {
       ),
     );
 
+  const verifyWithTokenType = (
+    tokenType: string | null | undefined,
+    issuer: string,
+    token: string,
+  ) =>
+    runVerifier(
+      Effect.result(
+        Effect.gen(function* () {
+          const verifier = yield* Jwt.remoteJwksVerifier({
+            jwksUri: rsaJwksUrl,
+            issuer,
+            ...(tokenType !== undefined && { tokenType }),
+          });
+          return yield* verifier.verify(token);
+        }),
+      ),
+    );
+
   beforeAll(async () => {
     // Sign a token to trigger lazy key-pair creation in the remote store.
     signedToken = await runRemote(
@@ -1005,30 +1023,16 @@ describe("RemoteJwksVerifier", () => {
 
   it("checks no typ with tokenType null, and still checks the issuer", async () => {
     const untyped = { alg: "RS256", kid: "rsa-1" };
-    const verifyWith = (tokenType: string | null | undefined, issuer: string, token: string) =>
-      runVerifier(
-        Effect.result(
-          Effect.gen(function* () {
-            const verifier = yield* Jwt.remoteJwksVerifier({
-              jwksUri: rsaJwksUrl,
-              issuer,
-              ...(tokenType !== undefined && { tokenType }),
-            });
-            return yield* verifier.verify(token);
-          }),
-        ),
-      );
     const token = rsaSigned(rsaClaims(), untyped);
-
-    const refused = await verifyWith(undefined, baseConfig.issuer, token);
+    const refused = await verifyWithTokenType(undefined, baseConfig.issuer, token);
     assert(Result.isFailure(refused));
     expect(refused.failure.message).toContain("Token type");
 
-    const accepted = await verifyWith(null, baseConfig.issuer, token);
+    const accepted = await verifyWithTokenType(null, baseConfig.issuer, token);
     assert(Result.isSuccess(accepted));
     expect(accepted.success["sub"]).toBe("rsa-user");
 
-    const wrongIssuer = await verifyWith(null, "https://wrong-issuer.example.com", token);
+    const wrongIssuer = await verifyWithTokenType(null, "https://wrong-issuer.example.com", token);
     assert(Result.isFailure(wrongIssuer));
   });
 

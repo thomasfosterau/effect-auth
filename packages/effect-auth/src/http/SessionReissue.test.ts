@@ -1,5 +1,11 @@
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { DateTime, Effect, FileSystem, Layer, Path, Struct } from "effect";
+import * as Arr from "effect/Array";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Struct from "effect/Struct";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
@@ -112,12 +118,11 @@ const serve = (service: typeof SessionService.Service, bearerMode?: "opt-in") =>
   return handler;
 };
 
-const cookieOf = (response: Response): string | undefined =>
-  response.headers
-    .getSetCookie()
-    .find((line) => line.startsWith("conduit_session="))
-    ?.split(";")[0]
-    ?.slice("conduit_session=".length);
+const cookieOf = (response: Response): Option.Option<string> =>
+  Option.map(
+    Arr.findFirst(response.headers.getSetCookie(), (line) => line.startsWith("conduit_session=")),
+    (line) => (line.split(";")[0] ?? "").slice("conduit_session=".length),
+  );
 
 describe("a credential reissued by validateSession", () => {
   it("replaces the session cookie, is no-store, and never reaches the body", async () => {
@@ -126,7 +131,7 @@ describe("a credential reissued by validateSession", () => {
       new Request("http://localhost/account", { headers: { cookie: "conduit_session=token-1" } }),
     );
     expect(first.status).toBe(200);
-    expect(cookieOf(first)).toBe("token-2");
+    expect(cookieOf(first)).toEqual(Option.some("token-2"));
     expect(first.headers.get("cache-control")).toContain("no-store");
     expect(await first.clone().text()).not.toContain("token-2");
     expect(await first.json()).toEqual({
@@ -143,7 +148,7 @@ describe("a credential reissued by validateSession", () => {
       new Request("http://localhost/account", { headers: { cookie: "conduit_session=token-2" } }),
     );
     expect(second.status).toBe(200);
-    expect(cookieOf(second)).toBe("token-3");
+    expect(cookieOf(second)).toEqual(Option.some("token-3"));
   });
 
   it("hands the optional middleware's handler no reissued token", async () => {
@@ -152,7 +157,7 @@ describe("a credential reissued by validateSession", () => {
       new Request("http://localhost/maybe", { headers: { cookie: "conduit_session=token-1" } }),
     );
     expect(response.status).toBe(200);
-    expect(cookieOf(response)).toBe("token-2");
+    expect(cookieOf(response)).toEqual(Option.some("token-2"));
     expect(await response.json()).toEqual({ keys: ["session", "user"] });
   });
 
@@ -165,6 +170,6 @@ describe("a credential reissued by validateSession", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("set-auth-token")).toBe("token-2");
-    expect(cookieOf(response)).toBeUndefined();
+    expect(Option.isNone(cookieOf(response))).toBe(true);
   });
 });

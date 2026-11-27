@@ -5,7 +5,7 @@
  *
  * @since 0.1.0
  */
-import { Layer } from "effect";
+import * as Layer from "effect/Layer";
 import { FetchHttpClient, type HttpClient } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as AuthKit from "./AuthKit.ts";

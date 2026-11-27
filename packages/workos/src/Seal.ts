@@ -7,10 +7,12 @@
  *
  * @since 0.1.0
  */
-import { Data, Effect, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { Aead, Kdf, SecureRandom } from "effect/crypto";
 import { Base64Url, Hex } from "effect/encoding";
 
@@ -32,9 +34,12 @@ const AAD = encoder.encode("effect-auth-workos/session/v1");
  * @since 0.1.0
  * @category errors
  */
-export class CookiePasswordError extends Data.TaggedError("CookiePasswordError")<{
-  readonly message: string;
-}> {}
+export class CookiePasswordError extends Schema.TaggedError<
+  CookiePasswordError,
+  { readonly brand: unique symbol }
+>()("CookiePasswordError", {
+  message: Schema.String,
+}) {}
 
 /**
  * Seal and open session cookie values.

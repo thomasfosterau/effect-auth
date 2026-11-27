@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -254,7 +256,7 @@ describe("sessions", () => {
           );
         const base = { sub: user.id, sid: "session_x", iat: 0, exp: 300 };
         const wrongIssuer = yield* issue({ ...base, iss: "https://evil.test" });
-        assert(Result.isFailure(wrongIssuer));
+        expect(Result.isFailure(wrongIssuer)).toBe(true);
         const otherUser = yield* issue({ ...base, iss: Fake.ISSUER, sub: "user_other" });
         assert(Result.isFailure(otherUser));
         const machine = yield* issue({ ...base, iss: Fake.ISSUER, sub_type: "m2m" });
@@ -357,13 +359,15 @@ describe("email verification", () => {
 
 describe("password reset", () => {
   it("answers an unknown address as a known one", async () => {
-    await run(() =>
-      Effect.gen(function* () {
-        yield* (yield* Auth.Password.PasswordResetService).requestPasswordReset(
-          "nobody@example.com",
-        );
-      }),
-    );
+    await expect(
+      run(() =>
+        Effect.gen(function* () {
+          yield* (yield* Auth.Password.PasswordResetService).requestPasswordReset(
+            "nobody@example.com",
+          );
+        }),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it("resets with the WorkOS token and ends every session", async () => {
@@ -519,11 +523,12 @@ describe("Authorization", () => {
   });
 });
 
+const sealer = (passwords: ReadonlyArray<string>) =>
+  Backend.Seal.make(passwords.map((p) => Redacted.make(p))).pipe(
+    Effect.provide(Auth.PlatformCrypto.layer),
+  );
+
 describe("Seal", () => {
-  const sealer = (passwords: ReadonlyArray<string>) =>
-    Backend.Seal.make(passwords.map((p) => Redacted.make(p))).pipe(
-      Effect.provide(Auth.PlatformCrypto.layer),
-    );
   const a = "a".repeat(32);
   const b = "b".repeat(32);
 

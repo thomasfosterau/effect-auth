@@ -8,7 +8,8 @@
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -57,7 +58,7 @@ export const passwordGrantError = (
   return toAuthError(error);
 };
 
-const splitName = (name: string | undefined) => {
+const splitName = (name?: string) => {
   if (name === undefined) return {};
   const [first, ...rest] = name.trim().split(/\s+/);
   return { first_name: first ?? "", last_name: rest.join(" ") };
@@ -89,11 +90,21 @@ const signUpError = (
 const decodeSid = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ sid: Schema.String })),
 );
-const unverifiedSessionId = (accessToken: string): string | undefined => {
-  const bytes = Result.getOrUndefined(Base64Url.decode(accessToken.split(".")[1] ?? ""));
-  if (bytes === undefined) return undefined;
-  return Option.getOrUndefined(decodeSid(new TextDecoder().decode(bytes)))?.sid;
-};
+const unverifiedSessionId = (accessToken: string): Option.Option<string> =>
+  Option.map(
+    Option.flatMap(Result.getSuccess(Base64Url.decode(accessToken.split(".")[1] ?? "")), (bytes) =>
+      decodeSid(new TextDecoder().decode(bytes)),
+    ),
+    ({ sid }) => sid,
+  );
+
+const answer = (result: Auth.Email.AuthResult): Auth.AuthLifecycleResult => ({
+  user: result.user,
+  ...(result.identifier !== undefined && { identifier: result.identifier }),
+  ...(result.session !== undefined && { session: result.session, token: result.token }),
+  ...(result.rememberMe !== undefined && { rememberMe: result.rememberMe }),
+  needsEmailVerification: result.session === undefined,
+});
 
 /**
  * The core `EmailPasswordService` over WorkOS.
@@ -133,7 +144,7 @@ export const emailPasswordLayer: Layer.Layer<
       yield* hooks.beforeAuthenticate({
         method: "email-password",
         identifier: { type: "email", value: email },
-        captchaToken: input.captchaToken,
+        ...(input.captchaToken !== undefined && { captchaToken: input.captchaToken }),
       });
       const auth = yield* passwordGrant(email, input.password);
       const issued = yield* sessions.issue(auth, input.sessionAttributes);
@@ -218,7 +229,7 @@ export const emailPasswordLayer: Layer.Layer<
           ),
         );
         const probeId = unverifiedSessionId(probe.access_token);
-        if (probeId !== undefined) yield* revoke(probeId);
+        if (Option.isSome(probeId)) yield* revoke(probeId.value);
         const { newPassword } = yield* hooks.beforeChangePassword({
           userId: input.userId,
           newPassword: input.newPassword,
@@ -263,13 +274,6 @@ export const authLifecycleLayer: Layer.Layer<
     const emailPassword = yield* Auth.Email.EmailPasswordService;
     const verification = yield* Auth.Email.EmailVerificationService;
     const users = yield* Auth.UserStore;
-    const answer = (result: Auth.Email.AuthResult): Auth.AuthLifecycleResult => ({
-      user: result.user,
-      ...(result.identifier !== undefined && { identifier: result.identifier }),
-      ...(result.session !== undefined && { session: result.session, token: result.token }),
-      ...(result.rememberMe !== undefined && { rememberMe: result.rememberMe }),
-      needsEmailVerification: result.session === undefined,
-    });
     return Auth.AuthLifecycleService.of({
       signUp: (input) => Effect.map(emailPassword.signUp(input), answer),
       signIn: (input) =>
@@ -287,14 +291,14 @@ export const authLifecycleLayer: Layer.Layer<
         input: Auth.VerifyEmailInput,
       ) {
         const result = yield* verification.verifyToken(input.token);
-        const user = yield* users.get(result.userId);
-        if (user === null) {
+        const found = yield* users.get(result.userId);
+        if (Option.isNone(found)) {
           return yield* new Auth.UserNotFoundError({
             message: "User not found",
             userId: result.userId,
           });
         }
-        return { user, needsEmailVerification: false };
+        return { user: found.value, needsEmailVerification: false };
       }),
     });
   }),

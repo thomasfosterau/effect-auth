@@ -6,7 +6,11 @@
  *
  * @since 0.1.0
  */
-import { Clock, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -42,10 +46,19 @@ export const DEFAULT_TOLERANCE_MS = 180_000;
  * @since 0.1.0
  * @category errors
  */
-export class WebhookVerificationError extends Data.TaggedError("WebhookVerificationError")<{
-  readonly message: string;
-  readonly reason: "missing-header" | "malformed-header" | "stale" | "bad-signature" | "bad-body";
-}> {}
+export class WebhookVerificationError extends Schema.TaggedError<
+  WebhookVerificationError,
+  { readonly brand: unique symbol }
+>()("WebhookVerificationError", {
+  message: Schema.String,
+  reason: Schema.Literals([
+    "missing-header",
+    "malformed-header",
+    "stale",
+    "bad-signature",
+    "bad-body",
+  ]),
+}) {}
 
 /**
  * A verified WorkOS event. The events this package acts on are decoded
@@ -118,25 +131,26 @@ const parseHeader = (header: string) => {
 
 /**
  * Verify a webhook and decode its event. `header` is the `WorkOS-Signature`
- * value (`undefined` when absent), `rawBody` the body exactly as received.
+ * value (`None` when absent), `rawBody` the body exactly as received.
  *
  * @since 0.1.0
  * @category verification
  */
 export const verify = (
   rawBody: string,
-  header: string | undefined,
+  header: Option.Option<string>,
   secret: Redacted.Redacted,
   tolerance: number = DEFAULT_TOLERANCE_MS,
 ): Effect.Effect<WorkOSEvent, WebhookVerificationError | Auth.AuthError, Mac.Mac> =>
   Effect.gen(function* () {
-    if (header === undefined || header === "") {
+    const present = Option.filter(header, (value) => value !== "");
+    if (Option.isNone(present)) {
       return yield* new WebhookVerificationError({
         message: "The webhook has no signature",
         reason: "missing-header",
       });
     }
-    const parsed = parseHeader(header);
+    const parsed = parseHeader(present.value);
     if (parsed === undefined) {
       return yield* new WebhookVerificationError({
         message: "The webhook signature is malformed",
@@ -181,8 +195,8 @@ export const verify = (
  * @category models
  */
 export interface EventHandlers {
-  readonly onUserDeleted?: ((userId: string) => Effect.Effect<void, Auth.AuthError>) | undefined;
-  readonly onEvent?: ((event: WorkOSEvent) => Effect.Effect<void, Auth.AuthError>) | undefined;
+  readonly onUserDeleted?: (userId: string) => Effect.Effect<void, Auth.AuthError>;
+  readonly onEvent?: (event: WorkOSEvent) => Effect.Effect<void, Auth.AuthError>;
 }
 
 /**

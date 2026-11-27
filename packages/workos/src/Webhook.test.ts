@@ -1,5 +1,8 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { Hex } from "effect/encoding";
@@ -45,7 +48,9 @@ const body = (event: string, data: Schema.Json) =>
   encodeJson({ id: "event_1", event, data, created_at: "2026-01-01T00:00:00.000Z" });
 
 const sign = (raw: string, t: number, key = "whsec_test") =>
-  Effect.map(Auth.hmac("sha256", key, `${t}.${raw}`), (mac) => `t=${t}, v1=${Hex.encode(mac)}`);
+  Effect.map(Auth.hmac("sha256", key, `${t}.${raw}`), (mac) =>
+    Option.some(`t=${t}, v1=${Hex.encode(mac)}`),
+  );
 
 const run = <A, E>(program: Effect.Effect<A, E, Auth.PlatformCrypto.Services | RevokedSessions>) =>
   Effect.runPromise(
@@ -80,11 +85,11 @@ describe("Webhook.verify", () => {
     await run(
       Effect.gen(function* () {
         const raw = body("user.deleted", user);
-        const check = (header: string | undefined, payload = raw) =>
+        const check = (header: Option.Option<string>, payload = raw) =>
           Effect.map(Effect.result(verify(payload, header, secret)), reasonOf);
-        expect(yield* check(undefined)).toBe("missing-header");
-        expect(yield* check("v1=abc")).toBe("malformed-header");
-        expect(yield* check(`t=${NOW}, v1=zz`)).toBe("malformed-header");
+        expect(yield* check(Option.none())).toBe("missing-header");
+        expect(yield* check(Option.some("v1=abc"))).toBe("malformed-header");
+        expect(yield* check(Option.some(`t=${NOW}, v1=zz`))).toBe("malformed-header");
         expect(yield* check(yield* sign(raw, NOW - 181_000))).toBe("stale");
         expect(yield* check(yield* sign(raw, NOW + 181_000))).toBe("stale");
         expect(yield* check(yield* sign(raw, NOW, "whsec_other"))).toBe("bad-signature");

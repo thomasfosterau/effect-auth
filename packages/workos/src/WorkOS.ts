@@ -6,9 +6,12 @@
  *
  * @since 0.1.0
  */
-import { Config, Context, Data, Effect, Layer, Redacted } from "effect";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Option from "effect/Option";
-import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 import * as Auth from "@thomasfosterau/effect-auth";
@@ -32,32 +35,32 @@ export interface WorkOSConfig {
    */
   readonly cookiePassword: Redacted.Redacted;
   /** Earlier cookie passwords, still accepted when opening a cookie. */
-  readonly previousCookiePasswords?: ReadonlyArray<Redacted.Redacted> | undefined;
+  readonly previousCookiePasswords?: ReadonlyArray<Redacted.Redacted>;
   /** The API origin (default `https://api.workos.com`). */
-  readonly baseUrl?: string | undefined;
+  readonly baseUrl?: string;
   /**
    * The `iss` an access token must carry (default
    * `<baseUrl>/user_management/<clientId>`). An environment on a custom
    * AuthKit domain names that domain here.
    */
-  readonly issuer?: string | undefined;
+  readonly issuer?: string;
   /** Where AuthKit and SSO send the browser back with a code. */
-  readonly redirectUri?: string | undefined;
+  readonly redirectUri?: string;
   /**
    * Who sends Magic Auth codes and password-reset links: WorkOS from its
    * dashboard templates (`"workos"`, the default), or the app through the
    * core `EmailSender` (`"app"`), with the code or token WorkOS answers. Turn
    * WorkOS's own email for those off in the dashboard for `"app"`.
    */
-  readonly delivery?: "workos" | "app" | undefined;
+  readonly delivery?: "workos" | "app";
   /**
    * How long a session cookie lives, in milliseconds, from the sign-in
    * (default 30 days). Match the session lifetime set in the WorkOS
    * dashboard: WorkOS refuses a refresh past it whatever the cookie says.
    */
-  readonly sessionMaxAge?: number | undefined;
+  readonly sessionMaxAge?: number;
   /** Clock tolerance for access-token `exp`, in milliseconds (default 30 s). */
-  readonly clockSkewLeeway?: number | undefined;
+  readonly clockSkewLeeway?: number;
 }
 
 /**
@@ -72,7 +75,7 @@ export interface ResolvedConfig {
   readonly cookiePasswords: ReadonlyArray<Redacted.Redacted>;
   readonly baseUrl: string;
   readonly issuer: string;
-  readonly redirectUri: string | undefined;
+  readonly redirectUri: Option.Option<string>;
   readonly delivery: "workos" | "app";
   readonly sessionMaxAge: number;
   readonly clockSkewLeeway: number;
@@ -86,22 +89,39 @@ const DAY = 24 * 60 * 60 * 1000;
  * @since 0.1.0
  * @category constructors
  */
-export const resolveConfig = (config: WorkOSConfig): ResolvedConfig => {
-  const baseUrl = (config.baseUrl ?? "https://api.workos.com").replace(/\/+$/, "");
+export const resolveConfig = (options: WorkOSConfig): ResolvedConfig => {
+  const baseUrl = (options.baseUrl ?? "https://api.workos.com").replace(/\/+$/, "");
   return {
-    apiKey: config.apiKey,
-    clientId: config.clientId,
-    cookiePasswords: [config.cookiePassword, ...(config.previousCookiePasswords ?? [])],
+    apiKey: options.apiKey,
+    clientId: options.clientId,
+    cookiePasswords: [options.cookiePassword, ...(options.previousCookiePasswords ?? [])],
     baseUrl,
     // TODO(#900): the default issuer is from memory of the AuthKit docs; check
     // it against a live access token before the package is published.
-    issuer: config.issuer ?? `${baseUrl}/user_management/${config.clientId}`,
-    redirectUri: config.redirectUri,
-    delivery: config.delivery ?? "workos",
-    sessionMaxAge: config.sessionMaxAge ?? 30 * DAY,
-    clockSkewLeeway: config.clockSkewLeeway ?? 30_000,
+    issuer: options.issuer ?? `${baseUrl}/user_management/${options.clientId}`,
+    redirectUri: Option.fromUndefinedOr(options.redirectUri),
+    delivery: options.delivery ?? "workos",
+    sessionMaxAge: options.sessionMaxAge ?? 30 * DAY,
+    clockSkewLeeway: options.clockSkewLeeway ?? 30_000,
   };
 };
+
+const fromEnvironment = (values: {
+  readonly apiKey: Redacted.Redacted;
+  readonly clientId: string;
+  readonly cookiePassword: Redacted.Redacted;
+  readonly redirectUri: Option.Option<string>;
+  readonly issuer: Option.Option<string>;
+}): WorkOSConfig => ({
+  apiKey: values.apiKey,
+  clientId: values.clientId,
+  cookiePassword: values.cookiePassword,
+  ...Option.match(values.redirectUri, {
+    onNone: () => ({}),
+    onSome: (redirectUri) => ({ redirectUri }),
+  }),
+  ...Option.match(values.issuer, { onNone: () => ({}), onSome: (issuer) => ({ issuer }) }),
+});
 
 /**
  * The {@link WorkOSConfig} from the environment: `WORKOS_API_KEY`,
@@ -117,15 +137,7 @@ export const config: Config.Config<WorkOSConfig> = Config.all({
   cookiePassword: Config.Redacted("WORKOS_COOKIE_PASSWORD"),
   redirectUri: Config.option(Config.String("WORKOS_REDIRECT_URI")),
   issuer: Config.option(Config.String("WORKOS_ISSUER")),
-}).pipe(
-  Config.map((values): WorkOSConfig => ({
-    apiKey: values.apiKey,
-    clientId: values.clientId,
-    cookiePassword: values.cookiePassword,
-    redirectUri: Option.getOrUndefined(values.redirectUri),
-    issuer: Option.getOrUndefined(values.issuer),
-  })),
-);
+}).pipe(Config.map(fromEnvironment));
 
 /**
  * A WorkOS request that did not succeed: a non-2xx answer (`status`, WorkOS's
@@ -135,15 +147,18 @@ export const config: Config.Config<WorkOSConfig> = Config.all({
  * @since 0.1.0
  * @category errors
  */
-export class WorkOSError extends Data.TaggedError("WorkOSError")<{
-  readonly message: string;
-  readonly status: number;
-  readonly code?: string | undefined;
-  readonly requestId?: string | undefined;
+export class WorkOSError extends Schema.TaggedError<
+  WorkOSError,
+  { readonly brand: unique symbol }
+>()("WorkOSError", {
+  message: Schema.String,
+  status: Schema.Finite,
+  code: Schema.optionalKey(Schema.String),
+  requestId: Schema.optionalKey(Schema.String),
   /** The pending-authentication token an `email_verification_required` answer carries. */
-  readonly pendingAuthenticationToken?: string | undefined;
-  readonly cause?: unknown;
-}> {}
+  pendingAuthenticationToken: Schema.optionalKey(Schema.String),
+  cause: Schema.optionalKey(Schema.Unknown),
+}) {}
 
 /**
  * The `AuthError` for a failure no domain error describes, the
@@ -176,10 +191,10 @@ export interface RequestOptions<S extends Schema.Top> {
   readonly path: string;
   /** The span's name for it, the path template (`/user_management/users/{id}`). */
   readonly route: string;
-  readonly body?: Schema.JsonObject | undefined;
-  readonly query?: Record<string, string | undefined> | undefined;
+  readonly body?: Schema.JsonObject;
+  readonly query?: Readonly<Record<string, string>>;
   /** The answer's schema; omit for an answer whose body is not read. */
-  readonly schema?: S | undefined;
+  readonly schema?: S;
 }
 
 /**
@@ -200,13 +215,13 @@ export class WorkOSClient extends Context.Service<
 >()("@effect-auth/workos/WorkOSClient") {
   /** The client over the `HttpClient` in context, for a custom transport or a test. */
   static readonly layerHttpClient = (
-    config: WorkOSConfig,
+    options: WorkOSConfig,
   ): Layer.Layer<WorkOSClient, never, HttpClient.HttpClient> =>
-    Layer.effect(WorkOSClient, make(resolveConfig(config)));
+    Layer.effect(WorkOSClient, make(resolveConfig(options)));
 
   /** The client over the platform `fetch` (`FetchHttpClient.Fetch` replaces it). */
-  static readonly layer = (config: WorkOSConfig): Layer.Layer<WorkOSClient> =>
-    WorkOSClient.layerHttpClient(config).pipe(Layer.provide(FetchHttpClient.layer));
+  static readonly layer = (options: WorkOSConfig): Layer.Layer<WorkOSClient> =>
+    WorkOSClient.layerHttpClient(options).pipe(Layer.provide(FetchHttpClient.layer));
 
   /** The client from {@link config}. */
   static readonly layerConfig: Layer.Layer<WorkOSClient, Config.ConfigError> = Layer.unwrap(
@@ -227,15 +242,16 @@ export const path = (strings: TemplateStringsArray, ...ids: ReadonlyArray<string
 
 const decodeErrorBody = Schema.decodeUnknownOption(Schema.fromJsonString(ErrorBody));
 
-const errorFrom = (status: number, body: string, requestId: string | undefined): WorkOSError => {
+const errorFrom = (status: number, body: string, requestId?: string): WorkOSError => {
   const fields = Option.getOrUndefined(decodeErrorBody(body));
   const code = fields?.code ?? fields?.error ?? fields?.errors?.[0]?.code ?? undefined;
+  const pendingAuthenticationToken = fields?.pending_authentication_token ?? undefined;
   return new WorkOSError({
     message: `WorkOS answered ${status}${code === undefined ? "" : ` (${code})`}`,
     status,
-    code: code ?? undefined,
-    requestId,
-    pendingAuthenticationToken: fields?.pending_authentication_token ?? undefined,
+    ...(code !== undefined && { code }),
+    ...(requestId !== undefined && { requestId }),
+    ...(pendingAuthenticationToken !== undefined && { pendingAuthenticationToken }),
   });
 };
 
@@ -246,9 +262,7 @@ const make = (resolved: ResolvedConfig) =>
     const request = <S extends Schema.Top = typeof Schema.Unknown>(options: RequestOptions<S>) =>
       Effect.gen(function* () {
         const url = new URL(resolved.baseUrl + options.path);
-        url.search = new URLSearchParams(
-          R.getSomes(R.map(options.query ?? {}, Option.fromUndefinedOr)),
-        ).toString();
+        url.search = new URLSearchParams(options.query ?? {}).toString();
         let req = HttpClientRequest.make(options.method)(url).pipe(
           HttpClientRequest.bearerToken(Redacted.value(resolved.apiKey)),
           HttpClientRequest.acceptJson,

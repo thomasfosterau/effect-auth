@@ -7,8 +7,11 @@
  *
  * @since 0.1.0
  */
-import { Clock, Data, Effect, Layer } from "effect";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { MagicAuth, PasswordReset, UserEnvelope } from "./Schemas.ts";
 import { WorkOSAuthenticate, WorkOSSessions } from "./Session.ts";
@@ -30,9 +33,27 @@ type Otp = typeof Auth.Email.EmailOtpService.Service;
  * @since 0.1.0
  * @category errors
  */
-export class DeliveryConfigError extends Data.TaggedError("DeliveryConfigError")<{
-  readonly message: string;
-}> {}
+export class DeliveryConfigError extends Schema.TaggedError<
+  DeliveryConfigError,
+  { readonly brand: unique symbol }
+>()("DeliveryConfigError", {
+  message: Schema.String,
+}) {}
+
+const invalidCode = () => new Auth.EmailVerificationError({ message: "Invalid or expired code" });
+
+const verifyInTwoSteps = () =>
+  Effect.fail(
+    new Auth.EmailVerificationError({
+      message: "The WorkOS backend verifies in one step (verifyToken)",
+    }),
+  );
+
+const invalidResetToken = () =>
+  new Auth.PasswordResetError({ message: "Invalid or expired token" });
+
+const onlySignIn = () =>
+  new Auth.Email.EmailOtpError({ message: "WorkOS Magic Auth codes are for sign-in only" });
 
 /** The core `EmailSender` when `delivery: "app"` needs one; the layer dies without it. */
 const appSender = Effect.fn("WorkOS.appSender")(function* () {
@@ -58,10 +79,10 @@ const appSender = Effect.fn("WorkOS.appSender")(function* () {
  */
 export const parseVerificationToken = (
   token: string,
-): { readonly userId: string; readonly code: string } | undefined => {
+): Option.Option<{ readonly userId: string; readonly code: string }> => {
   const at = token.lastIndexOf(":");
-  if (at <= 0 || at === token.length - 1) return undefined;
-  return { userId: token.slice(0, at), code: token.slice(at + 1) };
+  if (at <= 0 || at === token.length - 1) return Option.none();
+  return Option.some({ userId: token.slice(0, at), code: token.slice(at + 1) });
 };
 
 /**
@@ -84,7 +105,6 @@ export const emailVerificationLayer: Layer.Layer<
   Effect.gen(function* () {
     const workos = yield* WorkOSClient;
     const hooks = yield* Auth.Hooks;
-    const invalid = () => new Auth.EmailVerificationError({ message: "Invalid or expired code" });
 
     const send = Effect.fn("WorkOS.EmailVerification.send")(function* (
       rawUserId: string,
@@ -113,8 +133,9 @@ export const emailVerificationLayer: Layer.Layer<
 
     const verifyToken = Effect.fn("WorkOS.EmailVerification.verifyToken")(function* (raw: string) {
       const { token } = yield* hooks.beforeVerifyEmail({ token: raw });
-      const parsed = parseVerificationToken(token);
-      if (parsed === undefined) return yield* invalid();
+      const found = parseVerificationToken(token);
+      if (Option.isNone(found)) return yield* invalidCode();
+      const parsed = found.value;
       const { user } = yield* workos
         .request({
           method: "POST",
@@ -123,7 +144,7 @@ export const emailVerificationLayer: Layer.Layer<
           body: { code: parsed.code },
           schema: UserEnvelope,
         })
-        .pipe(Effect.mapError((error) => (refused(error) ? invalid() : toAuthError(error))));
+        .pipe(Effect.mapError((error) => (refused(error) ? invalidCode() : toAuthError(error))));
       return yield* hooks.afterVerifyEmail({
         userId: user.id,
         email: Auth.normalizeEmail(user.email),
@@ -131,19 +152,12 @@ export const emailVerificationLayer: Layer.Layer<
       });
     });
 
-    const twoStep = () =>
-      Effect.fail(
-        new Auth.EmailVerificationError({
-          message: "The WorkOS backend verifies in one step (verifyToken)",
-        }),
-      );
-
     return Auth.Email.EmailVerificationService.of({
       createVerification: send,
       resendVerification: send,
       verifyToken,
-      peekToken: twoStep,
-      burnToken: twoStep,
+      peekToken: verifyInTwoSteps,
+      burnToken: verifyInTwoSteps,
     });
   }),
 );
@@ -167,7 +181,6 @@ export const passwordResetLayer: Layer.Layer<
     const sessions = yield* Auth.SessionService;
     const hooks = yield* Auth.Hooks;
     const app = yield* appSender();
-    const invalid = () => new Auth.PasswordResetError({ message: "Invalid or expired token" });
 
     return Auth.Password.PasswordResetService.of({
       requestPasswordReset: Effect.fn("WorkOS.PasswordReset.requestPasswordReset")(function* (
@@ -179,7 +192,7 @@ export const passwordResetLayer: Layer.Layer<
           method: "password-reset",
           purpose: "password-reset",
           address: email,
-          captchaToken: options?.captchaToken,
+          ...(options?.captchaToken !== undefined && { captchaToken: options.captchaToken }),
         });
         const reset = yield* workos
           .request({
@@ -240,7 +253,7 @@ export const passwordResetLayer: Layer.Layer<
                   ? new Auth.PasswordResetError({
                       message: "The password does not meet the WorkOS password policy",
                     })
-                  : invalid(),
+                  : invalidResetToken(),
             ),
           );
         yield* sessions.invalidateUserSessions(user.id);
@@ -276,8 +289,6 @@ export const magicAuthLayer: Layer.Layer<
     const { authenticate } = yield* WorkOSAuthenticate;
     const hooks = yield* Auth.Hooks;
     const app = yield* appSender();
-    const onlySignIn = () =>
-      new Auth.Email.EmailOtpError({ message: "WorkOS Magic Auth codes are for sign-in only" });
 
     return Auth.Email.EmailOtpService.of({
       send: Effect.fn("WorkOS.MagicAuth.send")(function* (
@@ -289,7 +300,7 @@ export const magicAuthLayer: Layer.Layer<
           method: "email-otp",
           purpose,
           address: email,
-          captchaToken: options?.captchaToken,
+          ...(options?.captchaToken !== undefined && { captchaToken: options.captchaToken }),
         });
         const created = yield* workos
           .request({

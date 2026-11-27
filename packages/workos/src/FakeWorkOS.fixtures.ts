@@ -5,7 +5,11 @@
  * (de)serializers, which is what "the published package's source" means for
  * the details the suites pin.
  */
-import { Clock, Data, DateTime, Effect, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
@@ -90,9 +94,12 @@ const encoder = new TextEncoder();
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 const b64 = (value: Schema.Json) => Base64Url.encode(encoder.encode(encodeJson(value)));
 const iso = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
-class SubtleCryptoError extends Data.TaggedError("SubtleCryptoError")<{
-  readonly cause: unknown;
-}> {}
+class SubtleCryptoError extends Schema.TaggedError<
+  SubtleCryptoError,
+  { readonly brand: unique symbol }
+>()("SubtleCryptoError", {
+  cause: Schema.Unknown,
+}) {}
 const subtle = <A>(run: () => Promise<A>) =>
   Effect.tryPromise({ try: run, catch: (cause) => new SubtleCryptoError({ cause }) }).pipe(
     Effect.orDie,
@@ -100,8 +107,11 @@ const subtle = <A>(run: () => Promise<A>) =>
 
 /** An answer: its body is any JSON-serializable value (wire shapes included). */
 type Answer = { readonly status: number; readonly body: object | undefined };
-const ok = (body: object): Answer => ({ status: 200, body });
-const created = (body: object): Answer => ({ status: 201, body });
+const answerWith =
+  (status: number) =>
+  (body: object): Answer => ({ status, body });
+const ok = answerWith(200);
+const created = answerWith(201);
 const fail = (
   status: number,
   code: string,
@@ -112,6 +122,14 @@ const fail = (
 });
 const page = (data: ReadonlyArray<object>): Answer =>
   ok({ data: [...data], list_metadata: { before: null, after: null } });
+
+/** Take `key`'s value out of `map`: a single-use read. */
+const take = <V>(map: MutableHashMap.MutableHashMap<string, V>, key: string | undefined) => {
+  if (key === undefined) return Option.none<V>();
+  const value = MutableHashMap.get(map, key);
+  MutableHashMap.remove(map, key);
+  return value;
+};
 
 /** The fake. Build it once per test: its state is its own. */
 export const make = Effect.fn("FakeWorkOS.make")(function* (options: FakeOptions = {}) {
@@ -154,13 +172,6 @@ export const make = Effect.fn("FakeWorkOS.make")(function* (options: FakeOptions
   const nextId = (prefix: string) => {
     counter += 1;
     return `${prefix}_${counter.toString().padStart(6, "0")}`;
-  };
-  /** Take `key`'s value out of `map`: a single-use read. */
-  const take = <V>(map: MutableHashMap.MutableHashMap<string, V>, key: string | undefined) => {
-    if (key === undefined) return Option.none<V>();
-    const value = MutableHashMap.get(map, key);
-    MutableHashMap.remove(map, key);
-    return value;
   };
 
   const sign = (claims: Schema.JsonObject) =>
@@ -472,7 +483,7 @@ export const make = Effect.fn("FakeWorkOS.make")(function* (options: FakeOptions
       : Effect.succeed(userRoute(method, user.value, sub, action, body, now));
   };
 
-  const endpoints = (body: Body, now: number): Record<string, () => Effect.Effect<Answer>> => ({
+  const endpoints = (body: Body, now: number) => ({
     "POST authenticate": () => authenticate(body),
     "POST sessions/revoke": () => Effect.succeed(revokeSession(body)),
     "POST magic_auth": () => magicAuth(body, now),
@@ -495,7 +506,7 @@ export const make = Effect.fn("FakeWorkOS.make")(function* (options: FakeOptions
         .map(decodeURIComponent);
       if (root !== "user_management") return fail(404, "not_found");
       if (resource === "users") return yield* usersRoute(method, rest, body, query, now);
-      const handler = R.get(
+      const handler = R.get<string, () => Effect.Effect<Answer>>(
         endpoints(body, now),
         `${method} ${resource}${rest[0] === undefined ? "" : `/${rest[0]}`}`,
       );

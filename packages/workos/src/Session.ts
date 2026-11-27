@@ -8,7 +8,11 @@
  *
  * @since 0.1.0
  */
-import { Clock, Context, Effect, Layer, Redacted } from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Arr from "effect/Array";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
@@ -54,9 +58,9 @@ export const AccessTokenClaims = Schema.Struct({
   sub: Schema.String,
   sid: Schema.String,
   iss: Schema.String,
-  exp: Schema.Number,
-  iat: Schema.Number,
-  auth_time: Schema.optional(Schema.Number),
+  exp: Schema.Finite,
+  iat: Schema.Finite,
+  auth_time: Schema.optional(Schema.Finite),
   org_id: Schema.optional(Schema.String),
   role: Schema.optional(Schema.String),
   roles: Schema.optional(Schema.Array(Schema.String)),
@@ -74,7 +78,7 @@ const Sealed = Schema.Struct({
   refreshToken: Schema.String,
   claims: AccessTokenClaims,
   user: WireUser,
-  startedAt: Schema.Number,
+  startedAt: Schema.Finite,
   authenticationMethod: Schema.optional(Schema.String),
   impersonator: Schema.optional(Impersonator),
   attributes: Auth.Attributes,
@@ -112,13 +116,11 @@ export class RevokedSessions extends Context.Service<
     RevokedSessions,
     Effect.gen(function* () {
       const store = KeyValueStore.prefix(yield* KeyValueStore.KeyValueStore, "workos-revoked:");
-      const fault = (cause: unknown) =>
-        new Auth.AuthError({ message: "The revoked-session store failed", cause });
       return {
         revoke: (sessionId, ttlMs) =>
           Effect.flatMap(Clock.currentTimeMillis, (now) =>
             store.set(sessionId, `${now + ttlMs}`),
-          ).pipe(Effect.mapError(fault)),
+          ).pipe(Effect.mapError(revokedStoreFault)),
         isRevoked: Effect.fn("WorkOS.RevokedSessions.isRevoked")(function* (sessionId: string) {
           const until = yield* store.get(sessionId);
           if (until === undefined) return false;
@@ -126,7 +128,7 @@ export class RevokedSessions extends Context.Service<
           if (Number(until) > now) return true;
           yield* store.remove(sessionId);
           return false;
-        }, Effect.mapError(fault)),
+        }, Effect.mapError(revokedStoreFault)),
       };
     }),
   );
@@ -233,6 +235,51 @@ const sessionOver = (error: WorkOSError): boolean =>
   error.status >= 400 && error.status < 500 && error.status !== 429;
 
 /** The WorkOS session machinery and the `SessionService` over it. */
+const revokedStoreFault = (cause: unknown) =>
+  new Auth.AuthError({ message: "The revoked-session store failed", cause });
+
+const sealedFrom = (
+  auth: AuthenticationResponse,
+  claims: AccessTokenClaims,
+  now: number,
+  previous?: Pick<Sealed, "startedAt" | "attributes">,
+): Sealed => ({
+  v: 1,
+  refreshToken: auth.refresh_token,
+  claims,
+  user: auth.user,
+  startedAt: previous?.startedAt ?? (claims.auth_time ?? Math.floor(now / 1000)) * 1000,
+  attributes: previous?.attributes ?? {},
+  ...(auth.authentication_method != null && {
+    authenticationMethod: auth.authentication_method,
+  }),
+  ...(auth.impersonator != null && { impersonator: auth.impersonator }),
+});
+
+const notFound = (sessionId = "") =>
+  new Auth.SessionNotFoundError({ message: "Session not found", sessionId });
+
+const fromWireSession = (s: WireSession): Auth.Session => ({
+  id: s.id,
+  userId: s.user_id,
+  createdAt: instant(s.created_at),
+  lastActivityAt: instant(s.updated_at),
+  expiresAt: instant(s.expires_at),
+  attributes: {
+    ...(s.organization_id != null && { [SessionAttribute.organizationId]: s.organization_id }),
+    ...(s.auth_method != null && { [SessionAttribute.authenticationMethod]: s.auth_method }),
+    ...(s.impersonator != null && {
+      [SessionAttribute.impersonator]: {
+        email: s.impersonator.email,
+        reason: s.impersonator.reason ?? null,
+      },
+      impersonatedBy: s.impersonator.email,
+    }),
+    ...(s.ip_address != null && { ipAddress: s.ip_address }),
+    ...(s.user_agent != null && { userAgent: s.user_agent }),
+  },
+});
+
 export const make = Effect.fn("WorkOS.Session.make")(function* () {
   const workos = yield* WorkOSClient;
   const { config } = workos;
@@ -284,7 +331,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       schema: AuthenticationResponse,
     });
 
-  const refresh = (refreshToken: string, organizationId: string | undefined) =>
+  const refresh = (refreshToken: string, organizationId?: string) =>
     authenticate({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -298,7 +345,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
     string,
     { readonly at: number; readonly answer: Effect.Effect<AuthenticationResponse, WorkOSError> }
   >();
-  const refreshShared = (refreshToken: string, organizationId: string | undefined) =>
+  const refreshShared = (refreshToken: string, organizationId?: string) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       MutableHashMap.forEach(refreshes, (entry, key) => {
@@ -312,24 +359,6 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       return yield* answer;
     });
 
-  const sealedFrom = (
-    auth: AuthenticationResponse,
-    claims: AccessTokenClaims,
-    previous: Pick<Sealed, "startedAt" | "attributes"> | undefined,
-    now: number,
-  ): Sealed => ({
-    v: 1,
-    refreshToken: auth.refresh_token,
-    claims,
-    user: auth.user,
-    startedAt: previous?.startedAt ?? (claims.auth_time ?? Math.floor(now / 1000)) * 1000,
-    attributes: previous?.attributes ?? {},
-    ...(auth.authentication_method != null && {
-      authenticationMethod: auth.authentication_method,
-    }),
-    ...(auth.impersonator != null && { impersonator: auth.impersonator }),
-  });
-
   const issue = (auth: AuthenticationResponse, attributes: Auth.Attributes = {}) =>
     Effect.gen(function* () {
       const claims = yield* verifyAccessToken(auth.access_token);
@@ -338,7 +367,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       }
       const args = yield* hooks.beforeCreateSession({ userId: auth.user.id, attributes });
       const now = yield* Clock.currentTimeMillis;
-      const base = sealedFrom(auth, claims, undefined, now);
+      const base = sealedFrom(auth, claims, now);
       const sealed: Sealed = { ...base, attributes: args.attributes ?? {} };
       const token = yield* seal(sealed);
       const session = yield* hooks.afterCreateSession(toSession(sealed, config.sessionMaxAge));
@@ -346,7 +375,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
     });
 
   /** Refresh a sealed session into a new cookie. */
-  const refreshSealed = (sealed: Sealed, organizationId: string | undefined) =>
+  const refreshSealed = (sealed: Sealed, organizationId?: string) =>
     Effect.gen(function* () {
       const auth = yield* refreshShared(sealed.refreshToken, organizationId).pipe(
         Effect.catchTag(
@@ -367,12 +396,9 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
         return yield* new Auth.AuthError({ message: "WorkOS refreshed another user's session" });
       }
       const now = yield* Clock.currentTimeMillis;
-      const next = sealedFrom(auth, claims, sealed, now);
+      const next = sealedFrom(auth, claims, now, sealed);
       return { sealed: next, token: yield* seal(next) };
     });
-
-  const notFound = (sessionId = "") =>
-    new Auth.SessionNotFoundError({ message: "Session not found", sessionId });
 
   const revokeAtWorkOS = (sessionId: string) =>
     workos
@@ -405,27 +431,6 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
         Effect.map((page) => page.data.filter((s) => s.status === "active")),
         Effect.mapError(toAuthError),
       );
-
-  const fromWireSession = (s: WireSession): Auth.Session => ({
-    id: s.id,
-    userId: s.user_id,
-    createdAt: instant(s.created_at),
-    lastActivityAt: instant(s.updated_at),
-    expiresAt: instant(s.expires_at),
-    attributes: {
-      ...(s.organization_id != null && { [SessionAttribute.organizationId]: s.organization_id }),
-      ...(s.auth_method != null && { [SessionAttribute.authenticationMethod]: s.auth_method }),
-      ...(s.impersonator != null && {
-        [SessionAttribute.impersonator]: {
-          email: s.impersonator.email,
-          reason: s.impersonator.reason ?? null,
-        },
-        impersonatedBy: s.impersonator.email,
-      }),
-      ...(s.ip_address != null && { ipAddress: s.ip_address }),
-      ...(s.user_agent != null && { userAgent: s.user_agent }),
-    },
-  });
 
   const validateSession = Effect.fn("WorkOS.validateSession")(function* (token: string) {
     const opened = yield* open(token);
