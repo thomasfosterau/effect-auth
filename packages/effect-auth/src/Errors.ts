@@ -687,10 +687,13 @@ export class ResendTooSoonError extends Schema.TaggedError<
  * has other members. Transfer ownership, or remove the other members, first;
  * nothing of the user was deleted.
  */
-export class LastOrganizationOwnerError extends Data.TaggedError("LastOrganizationOwnerError")<{
-  readonly message: string;
-  readonly organizationId: string;
-}> {
+export class LastOrganizationOwnerError extends Schema.TaggedError<
+  LastOrganizationOwnerError,
+  { readonly brand: unique symbol }
+>()("LastOrganizationOwnerError", {
+  message: Schema.String,
+  organizationId: Schema.String,
+}) {
   get code(): typeof ErrorCode.LAST_ORGANIZATION_OWNER {
     return ErrorCode.LAST_ORGANIZATION_OWNER;
   }

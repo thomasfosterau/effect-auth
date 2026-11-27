@@ -525,6 +525,14 @@ const expectAlike = (
 const missingPermission = (permission: string) =>
   `Missing permission '${permission}' in this organization`;
 
+const buildWithCreatorRole = (context: Context.Context<BaseServices>) =>
+  Effect.runPromiseExit(
+    OrganizationModule.make({ creatorRole: "founder" }).pipe(
+      Effect.provide(Layer.merge(Layer.succeedContext(context), proofLayer())),
+      Effect.provideService(UserStore, userStore),
+    ),
+  );
+
 describe("OrganizationService", () => {
   beforeEach(resetStores);
 
@@ -1213,20 +1221,12 @@ describe("OrganizationService", () => {
   });
 
   it("dies at build when the deprecated creatorRole disagrees with OrganizationOwnerRole", async () => {
-    const build = (context: Context.Context<BaseServices>) =>
-      Effect.runPromiseExit(
-        OrganizationModule.make({ creatorRole: "founder" }).pipe(
-          Effect.provide(Layer.merge(Layer.succeedContext(context), proofLayer())),
-          Effect.provideService(UserStore, userStore),
-        ),
-      );
-
-    const disagreeing = await build(testContext);
+    const disagreeing = await buildWithCreatorRole(testContext);
     assert(Exit.isFailure(disagreeing));
     expect(Cause.squash(disagreeing.cause)).toBeInstanceOf(
       OrganizationModule.OrganizationConfigError,
     );
-    const agreeing = await build(
+    const agreeing = await buildWithCreatorRole(
       Context.add(testContext, OrganizationModule.OrganizationOwnerRole, "founder"),
     );
     expect(Exit.isSuccess(agreeing)).toBe(true);

@@ -60,20 +60,18 @@ const phoneOtpPurposes = R.keys({
  * organization's last owner.
  */
 export interface MembershipStores {
-  readonly organizations?:
-    | {
-        readonly store: Pick<
-          typeof OrganizationStore.Service,
-          | "getOrganizationById"
-          | "listMembersByUser"
-          | "listMembersByOrganization"
-          | "deleteMember"
-          | "listTeamsForMember"
-          | "removeTeamMember"
-        >;
-        readonly ownerRole: string;
-      }
-    | undefined;
+  readonly organizations?: {
+    readonly store: Pick<
+      typeof OrganizationStore.Service,
+      | "getOrganizationById"
+      | "listMembersByUser"
+      | "listMembersByOrganization"
+      | "deleteMember"
+      | "listTeamsForMember"
+      | "removeTeamMember"
+    >;
+    readonly ownerRole: string;
+  };
 }
 
 /** The stores {@link purgeUser} clears that are present in the context. */
@@ -136,10 +134,10 @@ export const ensureUserRemovable = (
           if (Arr.isReadonlyArrayEmpty(others) || Arr.some(others, isOwner)) {
             return yield* Effect.void;
           }
-          const name = Option.match(
-            yield* store.getOrganizationById(membership.organizationId),
-            { onNone: () => membership.organizationId, onSome: (organization) => organization.name },
-          );
+          const name = Option.match(yield* store.getOrganizationById(membership.organizationId), {
+            onNone: () => membership.organizationId,
+            onSome: (organization) => organization.name,
+          });
           return yield* new Errors.LastOrganizationOwnerError({
             message: `This user is the last owner of the organization '${name}', which has other members; transfer its ownership first`,
             organizationId: membership.organizationId,

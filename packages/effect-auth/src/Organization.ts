@@ -57,9 +57,12 @@ export class OrganizationError extends Schema.TaggedError<
  * @since 0.9.0
  * @category errors
  */
-export class OrganizationConfigError extends Data.TaggedError("OrganizationConfigError")<{
-  readonly message: string;
-}> {}
+export class OrganizationConfigError extends Schema.TaggedError<
+  OrganizationConfigError,
+  { readonly brand: unique symbol }
+>()("OrganizationConfigError", {
+  message: Schema.String,
+}) {}
 
 /**
  * An organization (team / tenant).

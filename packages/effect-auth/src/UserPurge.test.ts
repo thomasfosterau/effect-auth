@@ -77,18 +77,14 @@ const memoryOrganizations = (): typeof OrganizationStore.Service => {
       Effect.sync(
         () => (MutableHashMap.set(organizations, organization.id, organization), organization),
       ),
-    getOrganizationById: (id) =>
-      Effect.sync(() => Option.getOrNull(MutableHashMap.get(organizations, id))),
+    getOrganizationById: (id) => Effect.sync(() => MutableHashMap.get(organizations, id)),
     getOrganizationBySlug: notUsed,
     updateOrganization: notUsed,
     deleteOrganization: notUsed,
     createMember: (member) => Effect.sync(() => ((members = [...members, member]), member)),
     getMember: (organizationId, userId) =>
       Effect.sync(() =>
-        Arr.findFirst(
-          members,
-          (m) => m.organizationId === organizationId && m.userId === userId,
-        ).pipe(Option.getOrNull),
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
       ),
     getMemberById: notUsed,
     updateMember: notUsed,
@@ -308,7 +304,7 @@ const addMember = (
       organizationId,
       userId,
       role,
-      ...(status === undefined ? {} : { status }),
+      ...definedKeys({ status }),
       createdAt: yield* Clock.currentTimeMillis,
     });
   });
@@ -732,6 +728,14 @@ describe("a deleted user's address can be claimed again, and nothing sent before
   });
 });
 
+const expectLastOwner = (error: { readonly _tag: string }, acme: string) => {
+  expect(error).toBeInstanceOf(LastOrganizationOwnerError);
+  expect(error).toMatchObject({
+    organizationId: acme,
+    message: expect.stringContaining("'Acme'"),
+  });
+};
+
 describe("the last owner of an organization that has other members is not deleted", () => {
   /** The doomed user owns "Acme" alone; the bystander is a plain member of it. */
   const seedSharedOrganization = Effect.fn("seedSharedOrganization")(function* (outbox: Outbox) {
@@ -743,22 +747,14 @@ describe("the last owner of an organization that has other members is not delete
   });
 
   /** The doomed account still holds everything, and Acme keeps both members. */
-  const untouched = (seeded: Effect.Success<ReturnType<typeof seedSharedOrganization>>) =>
+  const untouched = (shared: Effect.Success<ReturnType<typeof seedSharedOrganization>>) =>
     Effect.gen(function* () {
-      expect(yield* inventory(seeded.doomed)).toEqual(seeded.before);
-      expect(seeded.before).toEqual({ ...held, memberships: 2 });
+      expect(yield* inventory(shared.doomed)).toEqual(shared.before);
+      expect(shared.before).toEqual({ ...held, memberships: 2 });
       expect(
-        (yield* (yield* OrganizationStore).listMembersByOrganization(seeded.acme)).length,
+        (yield* (yield* OrganizationStore).listMembersByOrganization(shared.acme)).length,
       ).toBe(2);
     });
-
-  const expectLastOwner = (error: { readonly _tag: string }, acme: string) => {
-    expect(error).toBeInstanceOf(LastOrganizationOwnerError);
-    expect(error).toMatchObject({
-      organizationId: acme,
-      message: expect.stringContaining("'Acme'"),
-    });
-  };
 
   const servicePaths: ReadonlyArray<
     readonly [string, (userId: string) => Effect.Effect<unknown, { readonly _tag: string }, World>]
@@ -782,7 +778,7 @@ describe("the last owner of an organization that has other members is not delete
             Effect.tapError(() =>
               Effect.gen(function* () {
                 const kept = yield* (yield* AccountManagementStore).get(sha256Hex(token));
-                expect(kept).not.toBeNull();
+                expect(Option.isSome(kept)).toBe(true);
               }),
             ),
           );
@@ -803,7 +799,10 @@ describe("the last owner of an organization that has other members is not delete
     await run(
       Effect.gen(function* () {
         const seeded = yield* seedSharedOrganization(outbox);
-        expectLastOwner(yield* Effect.flip(remove(seeded.doomed.user.id)), seeded.acme);
+        expectLastOwner(
+          yield* Effect.flip(Effect.asVoid(remove(seeded.doomed.user.id))),
+          seeded.acme,
+        );
         yield* untouched(seeded);
       }),
     );
@@ -831,9 +830,9 @@ describe("the last owner of an organization that has other members is not delete
     const { run, handler, outbox } = await harness();
     const { seeded, adminToken } = await run(
       Effect.gen(function* () {
-        const seeded = yield* seedSharedOrganization(outbox);
+        const shared = yield* seedSharedOrganization(outbox);
         const { token } = yield* seedAdmin();
-        return { seeded, adminToken: token };
+        return { seeded: shared, adminToken: token };
       }),
     );
     const response = await handler(
