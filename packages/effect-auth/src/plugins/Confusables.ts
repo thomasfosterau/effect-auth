@@ -72,7 +72,7 @@ const ASCII = /^\p{ASCII}*$/u;
  * @example
  * ```ts
  * import * as assert from "node:assert"
- * import { skeleton } from "@thomasfosterau/effect-auth/plugins"
+ * import { skeleton } from "@thomasfosterau/effect-auth/Plugins"
  *
  * assert.equal(skeleton("pаypal"), skeleton("paypal"))
  * assert.notEqual(skeleton("paypal"), skeleton("paypals"))
@@ -202,7 +202,7 @@ const isEmpty = (set: ScriptSet): boolean =>
  * @example
  * ```ts
  * import * as assert from "node:assert"
- * import { restrictionLevel } from "@thomasfosterau/effect-auth/plugins"
+ * import { restrictionLevel } from "@thomasfosterau/effect-auth/Plugins"
  *
  * assert.equal(restrictionLevel("paypal"), "ascii")
  * assert.equal(restrictionLevel("пример"), "single-script")
@@ -283,7 +283,7 @@ export interface ConfusablesConfig {
  * ```ts
  * import * as assert from "node:assert"
  * import * as Option from "effect/Option"
- * import { confusableEmailReason } from "@thomasfosterau/effect-auth/plugins"
+ * import { confusableEmailReason } from "@thomasfosterau/effect-auth/Plugins"
  *
  * assert.deepEqual(confusableEmailReason("pаypal@example.com"), Option.some("mixed-script"))
  * assert.deepEqual(confusableEmailReason("раураl@example.com"), Option.some("mixed-script"))
@@ -327,8 +327,8 @@ export const confusableEmailReason = (
  * ```ts
  * import * as assert from "node:assert"
  * import { Effect, Exit, Layer } from "effect"
- * import { Hooks } from "@thomasfosterau/effect-auth"
- * import { ConfusablesPlugin } from "@thomasfosterau/effect-auth/plugins"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { ConfusablesPlugin } from "@thomasfosterau/effect-auth/Plugins"
  *
  * const claim = (email: string) =>
  *   Effect.gen(function* () {
