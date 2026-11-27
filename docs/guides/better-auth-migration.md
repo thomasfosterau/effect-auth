@@ -42,29 +42,40 @@ It covers sessions, users, identifier reads and email or username sign-in. Every
 
 ### Config → layers, concretely
 
-A minimal Better Auth instance with email+password and GitHub becomes a layer graph. Each service asks for its stores; you provide them once, and `Http.makeAsync` takes the whole thing as `services`:
+A minimal Better Auth instance with email+password becomes a layer graph. Each service asks for its stores and for the services below it, so the graph is built in stages: `Layer.provideMerge` feeds each stage to the next and keeps every service in the output. (`Layer.mergeAll` alone does not wire siblings together: a `SessionService` beside `Hooks` still lacks `Hooks`.) `Http.makeAsync` takes the whole thing as `services`:
 
 ```ts
 import { Layer } from "effect";
 import * as Auth from "@thomasfosterau/effect-auth";
 import * as Http from "@thomasfosterau/effect-auth/http";
 import * as Sql from "@thomasfosterau/effect-auth/sql";
+import { SqlClientLayer } from "./db"; // your effect/sql driver, e.g. @effect/sql-pg
+import { sendResetEmail, sendVerificationEmail } from "./mail"; // (email, token) => Effect<void, …>
 
-const stores = Sql.layer.pipe(Layer.provide(SqlClientLayer));
+// The stores, and the root secret (`AUTH_SECRET`) the services key from.
+const stores = Layer.merge(Sql.layer, Auth.RootSecret.RootSecret.layerConfig).pipe(
+  Layer.provideMerge(SqlClientLayer),
+);
 
-const services = Layer.mergeAll(
-  Auth.SessionService.SessionService.layer({
-    sessionExpiresIn: { activePeriod: 30 * 864e5, idlePeriod: 14 * 864e5 },
-  }),
-  Auth.AuthLifecycle.AuthLifecycleService.layer(),
-  Auth.Email.EmailPasswordService.layer(),
+const base = Layer.mergeAll(
+  Auth.Hooks.Hooks.Default, // Better Auth's plugins go here, see below
   Auth.Password.PasswordHasher.layer(),
-  Auth.User.UserService.layer(),
-  Auth.Hooks.Hooks.Default,
   // The per-address limits Http.makeAsync applies by default count here; the
   // counters live in the same database (`auth_rate_limits`).
   Auth.RateLimit.RateLimiter.layer(),
 ).pipe(Layer.provideMerge(stores));
+const sessionsAndUsers = Layer.mergeAll(
+  Auth.SessionService.SessionService.layer({
+    sessionExpiresIn: { activePeriod: 30 * 864e5, idlePeriod: 14 * 864e5 },
+  }),
+  Auth.User.UserService.layer(),
+).pipe(Layer.provideMerge(base));
+const signIn = Layer.mergeAll(
+  Auth.Email.EmailPasswordService.layer(),
+  Auth.Email.EmailVerificationService.layer({ sendEmail: sendVerificationEmail }),
+  Auth.Password.PasswordResetService.layer({ sendResetPassword: sendResetEmail }),
+).pipe(Layer.provideMerge(sessionsAndUsers));
+const services = Auth.AuthLifecycle.AuthLifecycleService.layer().pipe(Layer.provideMerge(signIn));
 
 const { handler } = await Http.makeAsync({
   services,
@@ -74,6 +85,8 @@ const { handler } = await Http.makeAsync({
   trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
 });
 ```
+
+GitHub sign-in is `Auth.OAuth.OAuthService`, merged in as one more stage; [Social OAuth](#social-oauth) below covers it.
 
 `Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path. [The frameworks guide](frameworks.md) shows the mount, the session read and the cookie relay in Next.js, Nuxt, Astro, Hono and Express.
 
