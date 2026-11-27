@@ -241,7 +241,7 @@ const parseInstant = (
   }
   return Option.match(DateTime.make(value), {
     onNone: () => fail(`SAML ${what} "${value}" is not a valid instant`),
-    onSome: (instant) => Effect.succeed(Option.some(DateTime.toEpochMillis(instant))),
+    onSome: (instant) => Effect.succeedSome(DateTime.toEpochMillis(instant)),
   });
 };
 

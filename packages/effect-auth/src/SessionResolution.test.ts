@@ -252,7 +252,7 @@ describe("SessionResolution.resolve (fail closed)", () => {
     const result = await Effect.runPromise(
       SessionResolution.resolve({
         credential: true,
-        resolve: Effect.succeed(Option.some(resolved)),
+        resolve: Effect.succeedSome(resolved),
       }),
     );
     expect(result.outcome).toBe("resolved");
@@ -285,7 +285,7 @@ describe("SessionResolution.resolve (fail closed)", () => {
     const result = await Effect.runPromise(
       SessionResolution.resolve({
         credential: SessionResolution.detectCredential(request({})),
-        resolve: Effect.succeed(Option.some(resolved)),
+        resolve: Effect.succeedSome(resolved),
       }),
     );
     expect(result.outcome).toBe("skipped");
@@ -339,7 +339,7 @@ describe("SessionResolution.resolveFailOpen", () => {
     const result = await Effect.runPromise(
       SessionResolution.resolveFailOpen({
         credential: true,
-        resolve: Effect.succeed(Option.some(resolved)),
+        resolve: Effect.succeedSome(resolved),
         onDegraded: () => Effect.void,
       }),
     );
@@ -360,9 +360,9 @@ describe("SessionResolution.resolveFailOpen", () => {
         }),
       ).then((r) => r.outcome);
 
-    expect(await run(false, Effect.succeed(Option.some(resolved)))).toBe("skipped");
-    expect(await run(true, Effect.succeed(Option.some(resolved)))).toBe("resolved");
-    expect(await run(true, Effect.succeed(Option.none()))).toBe("anonymous");
+    expect(await run(false, Effect.succeedSome(resolved))).toBe("skipped");
+    expect(await run(true, Effect.succeedSome(resolved))).toBe("resolved");
+    expect(await run(true, Effect.succeedNone)).toBe("anonymous");
     expect(await run(true, Effect.fail(new Unreachable()))).toBe("degraded");
   });
 });
