@@ -4,10 +4,10 @@ The `/client`, `/client/atoms` and `/client/testing` subpaths in detail. The [cl
 
 The browser half of [effect-auth](https://github.com/thomasfosterau/effect-auth), in two subpaths:
 
-- `/client`: a small client over the effect-auth HTTP contract (plain `fetch`, no Effect runtime in the bundle). It holds no session state; it tells its observers when a call changed the session.
+- `/client`: a small client over the effect-auth HTTP contract (plain `fetch`; absence is an `Option`, so `effect/Option` is the one Effect module in the bundle). It holds no session state; it tells its observers when a call changed the session.
 - `/client/atoms`: the session as [`effect/reactivity`](https://effect.website/) Atoms over that client, read through your application's `AtomRegistry`, so auth shares one Atom graph and one runtime with the rest of the page.
 
-Only the wire _types_ come from the `/http` subpath, and those erase at compile time, so nothing server-side reaches the browser bundle. `/client` needs `effect` for its types only; `/client/atoms` imports `effect` at runtime, and only it does. The root barrel re-exports neither.
+Only the wire _types_ come from the `/http` subpath, and those erase at compile time, so nothing server-side reaches the browser bundle. `/client` imports only `effect/Option` at runtime; `/client/atoms` adds the rest of `effect` and `effect/reactivity`. The root barrel re-exports neither.
 
 ## Usage
 
@@ -69,16 +69,16 @@ Every request is sent with `credentials: "include"`, so the session cookie flows
 
 | Atom            | Value                                                                                 |
 | --------------- | ------------------------------------------------------------------------------------- |
-| `result`        | `AsyncResult<SessionWithUserView \| null, AuthClientError>`, the session read itself  |
+| `result`        | `AsyncResult<Option<SessionWithUserView>, AuthClientError>`, the session read itself  |
 | `state`         | `SessionState`: `{ data, isPending, error }`                                          |
-| `data`          | The `SessionWithUserView`, or `null` when signed out                                  |
+| `data`          | `Option<SessionWithUserView>`: `None` when signed out                                 |
 | `isSignedIn`    | `boolean`                                                                             |
 | `isPending`     | `boolean`: the read is in flight                                                      |
-| `error`         | The last unexpected `AuthClientError`, or `null`                                      |
+| `error`         | `Option<AuthClientError>`: the last unexpected error                                  |
 | `sessions`      | `AsyncResult<readonly SessionView[], AuthClientError>`, the signed-in user's sessions |
 | `sessionsState` | `SessionListState`: `{ data, isPending, error }` over `sessions`                      |
 
-The read is lazy: nothing is fetched until a registry reads or mounts an Atom, and it starts pending, so a UI never flashes "signed out" before the first fetch. A `401` is `data: null`, not an error; any other failure keeps the last `data` and sets `error`; a refetch superseded by a later one is interrupted, so its answer never lands. While a session Atom is mounted, every session-changing call refetches it before it resolves; with nothing mounted, the round trip is skipped, and the next subscriber starts from the last read. `registry.refresh(auth.isSignedIn)` (or any session Atom) refetches; `registry.refresh(auth.sessions)` re-reads the list.
+The read is lazy: nothing is fetched until a registry reads or mounts an Atom, and it starts pending, so a UI never flashes "signed out" before the first fetch. A `401` is `data: None`, not an error; any other failure keeps the last `data` and sets `error`; a refetch superseded by a later one is interrupted, so its answer never lands. While a session Atom is mounted, every session-changing call refetches it before it resolves; with nothing mounted, the round trip is skipped, and the next subscriber starts from the last read. `registry.refresh(auth.isSignedIn)` (or any session Atom) refetches; `registry.refresh(auth.sessions)` re-reads the list.
 
 A session change propagates through the graph: an Atom of your own that reads `auth.data` or `auth.isSignedIn` recomputes on sign-in and sign-out with no invalidation list, and `sessions` refetches when the session's id changes (signed out, it is empty without a request).
 
@@ -90,7 +90,7 @@ Each method resolves to the contract's own view type (`Http.*`). Groups:
 
 | Group            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session and user | `signUp`, `signIn`, `signOut`, `signInAnonymous`, `signInUsername`, `getSession` (`null` when signed out), `updateUser`, `changePassword`, `listSessions`, `revokeSession`, `revokeOtherSessions`, `jwtToken`, `jwks`                                                                                                                                                                                                                                                         |
+| Session and user | `signUp`, `signIn`, `signOut`, `signInAnonymous`, `signInUsername`, `getSession` (`None` when signed out), `updateUser`, `changePassword`, `listSessions`, `revokeSession`, `revokeOtherSessions`, `jwtToken`, `jwks`                                                                                                                                                                                                                                                         |
 | Email            | `sendVerificationEmail`, `verifyEmail`, `passwordResetRequest`, `passwordResetConfirm`, `magicLink.send` / `.verify`, `emailOtp.send` / `.signIn`, `changeEmail.request` / `.confirm`                                                                                                                                                                                                                                                                                         |
 | Phone and others | `phoneOtp.send` / `.signIn`, `googleOneTap.nonce` / `.signIn`, `device.code` / `.token` / `.lookup` / `.approve` / `.deny` (RFC 8628)                                                                                                                                                                                                                                                                                                                                         |
 | Account          | `identifiers.list` / `.delete`, `deleteUser.request` / `.confirm`, `multiSession.list` / `.setActive` / `.revoke`                                                                                                                                                                                                                                                                                                                                                             |

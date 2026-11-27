@@ -177,8 +177,9 @@ directories, each with its own `index.ts` barrel and matching
   consumer apps), plus `SessionCookieCache.ts` (signed session-data cookie,
   re-exported here from its root file).
 - **`client/`** (the `./client` subpaths only): `Client.ts` (`./client`), the
-  browser client over the HTTP contract (plain `fetch`, type-only imports from
-  `http/`, so no Effect runtime reaches the bundle), which holds no session
+  browser client over the HTTP contract (plain `fetch`, `effect/Option` as its
+  one runtime import and type-only imports from `http/`, so nothing
+  server-side and no other Effect module reaches the bundle), which holds no session
   state and announces session-changing calls through `onSessionChange`;
   `SessionAtoms.ts` (`./client/atoms`), the session as `effect/reactivity`
   Atoms over the client, the one client module that imports `effect` at

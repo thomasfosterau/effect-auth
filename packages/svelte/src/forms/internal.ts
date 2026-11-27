@@ -9,6 +9,7 @@
  * @module forms/internal
  */
 import type { AuthClient } from "@thomasfosterau/effect-auth/client";
+import * as Option from "effect/Option";
 
 /**
  * The result an authenticating call resolves to. Derived from the client rather
@@ -31,8 +32,8 @@ export type SecondFactorChallenge = NonNullable<AuthSuccess["secondFactor"]>;
  */
 export const routeSignInResult =
   (
-    onSuccess: ((result: AuthSuccess) => void) | undefined,
-    onSecondFactor: ((challenge: SecondFactorChallenge) => void) | undefined,
+    onSuccess?: (result: AuthSuccess) => void,
+    onSecondFactor?: (challenge: SecondFactorChallenge) => void,
   ) =>
   (result: AuthSuccess): void => {
     if (result.secondFactor !== undefined) onSecondFactor?.(result.secondFactor);
@@ -52,21 +53,21 @@ export type EmailOtpPurpose = Parameters<AuthClient["emailOtp"]["send"]>[0]["pur
  */
 export interface AuthFormClasses {
   /** The `<form>` root. Replaces both `ea-form` and the per-form modifier. */
-  readonly form?: string | undefined;
+  readonly form?: string;
   /** The wrapper around one label + input pair. Default `ea-field`. */
-  readonly field?: string | undefined;
+  readonly field?: string;
   /** Every `<label>`. Default `ea-label`. */
-  readonly label?: string | undefined;
+  readonly label?: string;
   /** Every `<input>`. Default `ea-input`. */
-  readonly input?: string | undefined;
+  readonly input?: string;
   /** The submit `<button>`. Default `ea-submit`. */
-  readonly submit?: string | undefined;
+  readonly submit?: string;
   /** The `role="alert"` error element. Default `ea-error`. */
-  readonly error?: string | undefined;
+  readonly error?: string;
   /** The `role="status"` success element. Default `ea-status`. */
-  readonly status?: string | undefined;
+  readonly status?: string;
   /** A secondary `type="button"` control, e.g. the OTP form's "start over". Default `ea-restart`. */
-  readonly restart?: string | undefined;
+  readonly restart?: string;
 }
 
 /** {@link AuthFormClasses} with every slot filled in. @internal */
@@ -84,19 +85,19 @@ export interface ResolvedClasses {
 /** Props every bundled form accepts. `TResult` is what `onSuccess` receives. */
 export interface AuthFormBaseProps<TResult> {
   /** Client to use, overriding the one `setAuthClient` put in context. */
-  readonly client?: AuthClient | undefined;
+  readonly client?: AuthClient;
   /** Called with the client's result after a successful submit. */
-  readonly onSuccess?: ((result: TResult) => void) | undefined;
+  readonly onSuccess?: (result: TResult) => void;
   /** Called with the thrown value after a failed submit. */
-  readonly onError?: ((error: unknown) => void) | undefined;
+  readonly onError?: (error: unknown) => void;
   /** Appended to the `<form>` root's class list. */
-  readonly class?: string | undefined;
+  readonly class?: string;
   /** Per-element class overrides. */
-  readonly classes?: AuthFormClasses | undefined;
+  readonly classes?: AuthFormClasses;
 }
 
-const joinClasses = (...parts: ReadonlyArray<string | undefined>): string =>
-  parts.filter((part): part is string => part !== undefined && part.length > 0).join(" ");
+const joinClasses = (...parts: ReadonlyArray<string>): string =>
+  parts.filter((part) => part.length > 0).join(" ");
 
 /**
  * Resolve the class name for every element of a form.
@@ -106,10 +107,10 @@ const joinClasses = (...parts: ReadonlyArray<string | undefined>): string =>
  */
 export const resolveClasses = (
   modifier: string,
-  className: string | undefined,
-  classes: AuthFormClasses | undefined,
+  className?: string,
+  classes?: AuthFormClasses,
 ): ResolvedClasses => ({
-  form: joinClasses(classes?.form ?? `ea-form ea-${modifier}`, className),
+  form: joinClasses(classes?.form ?? `ea-form ea-${modifier}`, className ?? ""),
   field: classes?.field ?? "ea-field",
   label: classes?.label ?? "ea-label",
   input: classes?.input ?? "ea-input",
@@ -128,7 +129,7 @@ export const resolveClasses = (
  */
 export const mergeLabels = <T extends Record<string, string>>(
   defaults: T,
-  overrides: Partial<T> | undefined,
+  overrides?: Partial<T>,
 ): T => {
   if (overrides === undefined) return defaults;
   const merged = { ...defaults };
@@ -143,10 +144,10 @@ export const mergeLabels = <T extends Record<string, string>>(
 export interface FormFailure {
   readonly message: string;
   /**
-   * The field the failure belongs to, or `null` when it came from the server —
+   * The field the failure belongs to, or `None` when it came from the server —
    * which reports "these credentials are wrong", not "this input is wrong".
    */
-  readonly field: string | null;
+  readonly field: Option.Option<string>;
 }
 
 /** The message of a thrown value, or `fallback` when it has none. @internal */
@@ -159,5 +160,20 @@ export const messageOf = (cause: unknown, fallback: string): string =>
  *
  * @internal
  */
-export const isInvalid = (failure: FormFailure | null, field: string): boolean =>
-  failure !== null && (failure.field === null || failure.field === field);
+export const isInvalid = (failure: Option.Option<FormFailure>, field: string): boolean =>
+  Option.exists(failure, (found) =>
+    Option.match(found.field, { onNone: () => true, onSome: (named) => named === field }),
+  );
+
+/**
+ * The `captchaToken` member of a send's payload: present only when the form
+ * was given a `captchaToken` prop and it has a token now.
+ *
+ * @internal
+ */
+export const captchaField = (
+  read?: () => Option.Option<string>,
+): { readonly captchaToken?: string } =>
+  read === undefined
+    ? {}
+    : Option.match(read(), { onNone: () => ({}), onSome: (captchaToken) => ({ captchaToken }) });

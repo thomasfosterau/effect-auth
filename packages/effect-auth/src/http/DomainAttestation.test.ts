@@ -210,8 +210,8 @@ describe("HTTP domain claims", () => {
 
     const operator = await signUp(server, browser, "ops@platform.test", true);
     const current = await operator.client.getSession();
-    assert(current !== null, "the operator is signed in");
-    const { user } = current;
+    assert(Option.isSome(current), "the operator is signed in");
+    const { user } = current.value;
     const attested = await operator.client.admin.attestDomain({
       organizationId: org.id,
       domain: "acme.test",
@@ -388,8 +388,9 @@ describe("HTTP domain claims", () => {
     const org = await owner.client.organization.create({ name: "Acme", slug: "acme" });
     const claim = await owner.client.organization.addDomain(org.id, { domain: "acme.test" });
     const member = await signUp(server, browser, "member@acme.test");
-    const memberSession = await member.client.getSession();
-    assert(memberSession !== null, "the member is signed in");
+    const signedIn = await member.client.getSession();
+    assert(Option.isSome(signedIn), "the member is signed in");
+    const memberSession = signedIn.value;
     // Stamped as provisioned by the organization: a user it manages.
     Option.map(MutableHashMap.get(server.usersById, memberSession.user.id), (user) =>
       MutableHashMap.set(server.usersById, user.id, {

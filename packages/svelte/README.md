@@ -25,6 +25,7 @@ export const registry = AtomRegistry.make();
 
 ```svelte
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { sessionStore, listSessionsStore } from "@thomasfosterau/effect-auth-svelte";
   import { auth, registry } from "$lib/auth";
 
@@ -34,8 +35,11 @@ export const registry = AtomRegistry.make();
 
 {#if $session.isPending}
   Loading…
-{:else if $session.data}
-  Signed in as {$session.data.user.email} — {$sessions.data?.length ?? 0} active sessions
+{:else if Option.isSome($session.data)}
+  Signed in as {$session.data.value.user.email} — {Option.match($sessions.data, {
+    onNone: () => 0,
+    onSome: (list) => list.length,
+  })} active sessions
   <button onclick={sessions.refetch}>Refresh</button>
 {/if}
 ```

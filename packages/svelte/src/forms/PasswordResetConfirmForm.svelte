@@ -10,6 +10,7 @@
   ```
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
@@ -28,7 +29,7 @@
     labels: labelOverrides = undefined,
   }: PasswordResetConfirmFormProps = $props();
 
-  const client = resolveAuthClient(() => clientProp);
+  const client = resolveAuthClient(() => Option.fromUndefinedOr(clientProp));
   const uid = $props.id();
   const submission = createSubmission();
 
@@ -44,11 +45,7 @@
       submission.fail(labels.mismatch, "confirmPassword");
       return;
     }
-    void submission.run(() => client.passwordResetConfirm({ token, newPassword }), {
-      fallback: labels.error,
-      onSuccess,
-      onError,
-    });
+    void submission.run(() => client.passwordResetConfirm({ token, newPassword }), labels.error, onSuccess, onError);
   };
 </script>
 

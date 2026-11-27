@@ -16,7 +16,8 @@
  *
  * @module context
  */
-import { getContext, setContext, untrack } from "svelte";
+import * as Option from "effect/Option";
+import { getContext, hasContext, setContext, untrack } from "svelte";
 import type { AuthClient } from "@thomasfosterau/effect-auth/client";
 
 /**
@@ -45,9 +46,8 @@ export const setAuthClient = (client: AuthClient): AuthClient => setContext(auth
  * initialisation.
  */
 export const getAuthClient = (): AuthClient => {
-  const client = getContext<AuthClient | undefined>(authClientKey);
-  if (client === undefined) throw new Error(MISSING_CLIENT);
-  return client;
+  if (!hasContext(authClientKey)) throw new Error(MISSING_CLIENT);
+  return getContext<AuthClient>(authClientKey);
 };
 
 /**
@@ -63,8 +63,5 @@ export const getAuthClient = (): AuthClient => {
  *
  * @internal
  */
-export const resolveAuthClient = (override: () => AuthClient | undefined): AuthClient => {
-  const client = untrack(override) ?? getContext<AuthClient | undefined>(authClientKey);
-  if (client === undefined) throw new Error(MISSING_CLIENT);
-  return client;
-};
+export const resolveAuthClient = (override: () => Option.Option<AuthClient>): AuthClient =>
+  Option.getOrElse(untrack(override), getAuthClient);

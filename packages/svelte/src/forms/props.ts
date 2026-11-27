@@ -4,6 +4,7 @@
  *
  * @module forms/props
  */
+import type * as Option from "effect/Option";
 import type {
   AuthFormBaseProps,
   AuthSuccess,
@@ -20,7 +21,7 @@ export interface SecondFactorProps {
    * yet. Redeem the challenge with `client.multiFactor.continueChallenge`.
    * Without it, such an answer calls neither callback.
    */
-  readonly onSecondFactor?: ((challenge: SecondFactorChallenge) => void) | undefined;
+  readonly onSecondFactor?: (challenge: SecondFactorChallenge) => void;
 }
 
 /** Every visible string `SignInForm` renders. */
@@ -51,8 +52,8 @@ export interface SignInFormProps extends AuthFormBaseProps<AuthSuccess>, SecondF
    * `client.signIn`; `"username"` calls `client.signInUsername`, which the
    * server only answers when the username module is configured.
    */
-  readonly variant?: "email" | "username" | undefined;
-  readonly labels?: Partial<SignInLabels> | undefined;
+  readonly variant?: "email" | "username";
+  readonly labels?: Partial<SignInLabels>;
 }
 
 /** Every visible string `SignUpForm` renders. */
@@ -82,8 +83,8 @@ export interface SignUpFormProps extends AuthFormBaseProps<AuthSuccess> {
    * payload carries an optional `name`; a blank name is omitted from the
    * request rather than sent as `""`.
    */
-  readonly showName?: boolean | undefined;
-  readonly labels?: Partial<SignUpLabels> | undefined;
+  readonly showName?: boolean;
+  readonly labels?: Partial<SignUpLabels>;
 }
 
 /** Every visible string `PasswordResetRequestForm` renders. */
@@ -108,7 +109,7 @@ export const PASSWORD_RESET_REQUEST_LABELS: PasswordResetRequestLabels = {
 /** Props for `PasswordResetRequestForm`. */
 export interface PasswordResetRequestFormProps
   extends AuthFormBaseProps<StatusResponse>, SendCaptchaProps {
-  readonly labels?: Partial<PasswordResetRequestLabels> | undefined;
+  readonly labels?: Partial<PasswordResetRequestLabels>;
 }
 
 /** Every visible string `PasswordResetConfirmForm` renders. */
@@ -138,7 +139,7 @@ export const PASSWORD_RESET_CONFIRM_LABELS: PasswordResetConfirmLabels = {
 export interface PasswordResetConfirmFormProps extends AuthFormBaseProps<StatusResponse> {
   /** The single-use token from the reset email, usually a URL query parameter. */
   readonly token: string;
-  readonly labels?: Partial<PasswordResetConfirmLabels> | undefined;
+  readonly labels?: Partial<PasswordResetConfirmLabels>;
 }
 
 /** Every visible string `MagicLinkForm` renders. */
@@ -164,15 +165,15 @@ export const MAGIC_LINK_LABELS: MagicLinkLabels = {
  * The captcha token for a code or link send, read when the form submits. Pass
  * it when the server's `CaptchaPlugin` guards sends (its `sendCode` endpoint,
  * on by default): render your captcha widget beside the form and return its
- * current token, or `undefined` before it has one (the server then refuses the
+ * current token, or `None` before it has one (the server then refuses the
  * send). Omit it when sends are not captcha-guarded.
  */
 export interface SendCaptchaProps {
-  readonly captchaToken?: (() => string | undefined) | undefined;
+  readonly captchaToken?: () => Option.Option<string>;
 }
 
 export interface MagicLinkFormProps extends AuthFormBaseProps<StatusResponse>, SendCaptchaProps {
-  readonly labels?: Partial<MagicLinkLabels> | undefined;
+  readonly labels?: Partial<MagicLinkLabels>;
 }
 
 /** Every visible string `EmailOtpForm` renders. */
@@ -212,6 +213,6 @@ export interface EmailOtpFormProps
    * What the emailed code is for. Defaults to `"sign-in"`, the only purpose
    * whose verification issues a session.
    */
-  readonly purpose?: EmailOtpPurpose | undefined;
-  readonly labels?: Partial<EmailOtpLabels> | undefined;
+  readonly purpose?: EmailOtpPurpose;
+  readonly labels?: Partial<EmailOtpLabels>;
 }

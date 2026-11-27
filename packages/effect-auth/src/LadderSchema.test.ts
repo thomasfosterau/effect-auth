@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Ladder from "./Ladder.ts";
 import * as LadderSchema from "./LadderSchema.ts";
@@ -28,6 +29,6 @@ describe("LadderSchema.rung", () => {
 
   it("types a decoded role as the ladder's rung union", () => {
     const role: Ladder.RungOf<typeof Roles> = Schema.decodeSync(LadderSchema.rung(Roles))("editor");
-    expect(Roles.hasAtLeast({ role }, "commenter")).toBe(true);
+    expect(Roles.hasAtLeast(Option.some({ role }), "commenter")).toBe(true);
   });
 });

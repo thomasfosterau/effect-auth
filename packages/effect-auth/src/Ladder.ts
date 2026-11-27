@@ -1,8 +1,11 @@
+import * as Option from "effect/Option";
+
 /**
  * An ordered role ladder, least to most privileged: a rank function, the one
  * "at least this rung" comparison and named capability axes. An unknown rung
- * and anonymous satisfy nothing. The module imports nothing, so a browser can
- * load `./ladder`. The example is on {@link make}.
+ * and anonymous satisfy nothing. The module imports only `effect/Option`, so a
+ * browser loads `./ladder` without the rest of the Effect runtime. The example
+ * is on {@link make}.
  *
  * @since 0.1.0
  * @category models
@@ -16,11 +19,11 @@ export interface Ladder<Rung extends string> {
   readonly isRung: (role: unknown) => role is Rung;
   /**
    * Whether `holder` holds `min` (a rung or an axis) or a more privileged rung.
-   * Fails closed on anonymous (`null` / `undefined`) and on a role string that
-   * is not on the ladder.
+   * Fails closed on anonymous (`None`) and on a role string that is not on the
+   * ladder.
    */
   readonly hasAtLeast: (
-    holder: RungHolder | null | undefined,
+    holder: Option.Option<RungHolder>,
     min: NoInfer<Rung> | Axis<NoInfer<Rung>>,
   ) => boolean;
   /** The rungs that satisfy `min`: `min` itself and every rung above it. */
@@ -100,6 +103,7 @@ export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
  * @example
  * ```ts
  * import assert from "node:assert/strict"
+ * import * as Option from "effect/Option"
  * import * as Ladder from "@thomasfosterau/effect-auth/ladder"
  *
  * export const Roles = Ladder.make(["user", "contributor", "moderator", "admin"])
@@ -112,9 +116,9 @@ export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
  *   viewDeleted: "moderator",
  * })
  *
- * assert.equal(Roles.hasAtLeast({ role: "moderator" }, Axes.corpusWrite), true)
- * assert.equal(Roles.hasAtLeast({ role: "superadmin" }, "user"), false) // off the ladder
- * assert.equal(Roles.hasAtLeast(null, "user"), false) // anonymous
+ * assert.equal(Roles.hasAtLeast(Option.some({ role: "moderator" }), Axes.corpusWrite), true)
+ * assert.equal(Roles.hasAtLeast(Option.some({ role: "superadmin" }), "user"), false) // off the ladder
+ * assert.equal(Roles.hasAtLeast(Option.none(), "user"), false) // anonymous
  * ```
  *
  * @since 0.1.0
@@ -142,9 +146,9 @@ export const make = <const Rungs extends readonly [string, ...Array<string>]>(
     return rung;
   };
 
-  const hasAtLeast = (holder: RungHolder | null | undefined, min: Rung | Axis<Rung>): boolean => {
-    if (holder === null || holder === undefined) return false;
-    const held = rank(holder.role);
+  const hasAtLeast = (holder: Option.Option<RungHolder>, min: Rung | Axis<Rung>): boolean => {
+    if (Option.isNone(holder)) return false;
+    const held = rank(holder.value.role);
     // `held >= 0` is what makes an off-ladder role fail closed even against
     // an off-ladder `min` (which `axis` refuses to build, but a cast could).
     return held >= 0 && held >= rank(minOf(min));

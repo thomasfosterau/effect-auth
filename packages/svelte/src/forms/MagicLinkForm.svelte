@@ -5,11 +5,12 @@
   calls `client.magicLink.verify({ token })` with the token from the URL.
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
   import SubmitButton from "./SubmitButton.svelte";
-  import { isInvalid, mergeLabels, resolveClasses } from "./internal.ts";
+  import { captchaField, isInvalid, mergeLabels, resolveClasses } from "./internal.ts";
   import { createSubmission } from "./submission.svelte.ts";
   import { MAGIC_LINK_LABELS, type MagicLinkFormProps } from "./props.ts";
 
@@ -23,7 +24,7 @@
     captchaToken = undefined,
   }: MagicLinkFormProps = $props();
 
-  const client = resolveAuthClient(() => clientProp);
+  const client = resolveAuthClient(() => Option.fromUndefinedOr(clientProp));
   const uid = $props.id();
   const submission = createSubmission();
 
@@ -34,11 +35,7 @@
 
   const handleSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
-    void submission.run(() => client.magicLink.send({ email, captchaToken: captchaToken?.() }), {
-      fallback: labels.error,
-      onSuccess,
-      onError,
-    });
+    void submission.run(() => client.magicLink.send({ email, ...captchaField(captchaToken) }), labels.error, onSuccess, onError);
   };
 </script>
 

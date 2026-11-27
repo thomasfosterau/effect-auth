@@ -115,12 +115,14 @@ export default defineConfig({
         // Values whose absence a third party spells `null` or `undefined`:
         // JSON (`Types.Json`, the attribute values `Entity` reads from it),
         // SQL rows and the values bound to them (`./sql`), node-saml's parsed
-        // XML (`./saml`) and Node's callback API (the scrypt suite).
+        // XML (`./saml`), the JSON:API relationship the client reads
+        // (`client/Wire.ts`) and Node's callback API (the scrypt suite).
         files: [
           "packages/effect-auth/src/Types.ts",
           "packages/effect-auth/src/Entity.ts",
           "packages/effect-auth/src/sql/Stores.ts",
           "packages/effect-auth/src/saml/Verifier.ts",
+          "packages/effect-auth/src/client/Wire.ts",
           "packages/effect-auth/src/password/ScryptDefaults.test.ts",
         ],
         rules: { "effect/prefer-option-over-null": "off" },
@@ -145,12 +147,7 @@ export default defineConfig({
         // answer "nothing" with `null` or `undefined` and report it as a
         // warning, a new site is
         // a defect, and a file leaves the list once its count reaches zero.
-        // The client, ladder and Svelte follow as whole surfaces.
         files: [
-          "packages/svelte/src/**",
-          "packages/effect-auth/src/client/**",
-          "packages/effect-auth/src/Ladder.ts",
-          "packages/effect-auth/src/Ladder.test.ts",
           "packages/effect-auth/src/AccessParity.test.ts",
           "packages/effect-auth/src/Admin.test.ts",
           "packages/effect-auth/src/ApiKey.ts",

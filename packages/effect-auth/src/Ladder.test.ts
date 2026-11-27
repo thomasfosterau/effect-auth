@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
@@ -56,10 +57,10 @@ describe("Ladder.make", () => {
 
   it("serves a second application's ladder unchanged (website's rungs)", () => {
     const Website = Ladder.make(["user", "commenter", "editor", "admin"]);
-    expect(Website.hasAtLeast({ role: "editor" }, "commenter")).toBe(true);
-    expect(Website.hasAtLeast({ role: "commenter" }, "editor")).toBe(false);
+    expect(Website.hasAtLeast(Option.some({ role: "editor" }), "commenter")).toBe(true);
+    expect(Website.hasAtLeast(Option.some({ role: "commenter" }), "editor")).toBe(false);
     // A rung of one ladder is not a rung of another.
-    expect(Website.hasAtLeast({ role: "moderator" }, "user")).toBe(false);
+    expect(Website.hasAtLeast(Option.some({ role: "moderator" }), "user")).toBe(false);
   });
 });
 
@@ -82,7 +83,7 @@ describe("hasAtLeast", () => {
   it("is true for every rung at or above the minimum, false below (all 4×4 pairs)", () => {
     Arr.forEach(Roles.rungs, (held) => {
       Arr.forEach(Roles.rungs, (min) => {
-        expect(Roles.hasAtLeast({ role: held }, min), `${held} ≥ ${min}`).toBe(
+        expect(Roles.hasAtLeast(Option.some({ role: held }), min), `${held} ≥ ${min}`).toBe(
           Roles.rank(held) >= Roles.rank(min),
         );
       });
@@ -91,29 +92,28 @@ describe("hasAtLeast", () => {
 
   it("is reflexive — every rung satisfies itself", () => {
     Arr.forEach(Roles.rungs, (role) => {
-      expect(Roles.hasAtLeast({ role }, role)).toBe(true);
+      expect(Roles.hasAtLeast(Option.some({ role }), role)).toBe(true);
     });
   });
 
   it("denies an anonymous viewer at every rung and every axis", () => {
     Arr.forEach([...Roles.rungs, ...R.values(Axes)], (min) => {
-      expect(Roles.hasAtLeast(null, min)).toBe(false);
-      expect(Roles.hasAtLeast(undefined, min)).toBe(false);
+      expect(Roles.hasAtLeast(Option.none(), min)).toBe(false);
     });
   });
 
   it("denies a role string that is not on the ladder, at every rung and every axis", () => {
     Arr.forEach([...Roles.rungs, ...R.values(Axes)], (min) => {
       Arr.forEach(NOT_RUNGS, (notARung) => {
-        expect(Roles.hasAtLeast({ role: notARung }, min)).toBe(false);
+        expect(Roles.hasAtLeast(Option.some({ role: notARung }), min)).toBe(false);
       });
     });
   });
 
   it("fails closed even against an off-ladder minimum from an untyped caller", () => {
     const offLadder = "also-nope";
-    expect(UntypedRoles.hasAtLeast({ role: "nope" }, offLadder)).toBe(false);
-    expect(UntypedRoles.hasAtLeast({ role: "admin" }, offLadder)).toBe(true);
+    expect(UntypedRoles.hasAtLeast(Option.some({ role: "nope" }), offLadder)).toBe(false);
+    expect(UntypedRoles.hasAtLeast(Option.some({ role: "admin" }), offLadder)).toBe(true);
     expect(UntypedRoles.atOrAbove(offLadder)).toEqual([]);
   });
 });
@@ -139,23 +139,23 @@ describe("axes", () => {
 
   it("the base rung satisfies none of them, and the top rung satisfies all", () => {
     Arr.forEach(R.values(Axes), (axis) => {
-      expect(Roles.hasAtLeast({ role: "admin" }, axis)).toBe(true);
-      expect(Roles.hasAtLeast({ role: "user" }, axis)).toBe(false);
+      expect(Roles.hasAtLeast(Option.some({ role: "admin" }), axis)).toBe(true);
+      expect(Roles.hasAtLeast(Option.some({ role: "user" }), axis)).toBe(false);
     });
   });
 
   it("stay separate questions: a contributor writes the corpus but cannot moderate", () => {
-    expect(Roles.hasAtLeast({ role: "contributor" }, Axes.corpusWrite)).toBe(true);
-    expect(Roles.hasAtLeast({ role: "contributor" }, Axes.moderate)).toBe(false);
-    expect(Roles.hasAtLeast({ role: "contributor" }, Axes.viewPrivate)).toBe(false);
+    expect(Roles.hasAtLeast(Option.some({ role: "contributor" }), Axes.corpusWrite)).toBe(true);
+    expect(Roles.hasAtLeast(Option.some({ role: "contributor" }), Axes.moderate)).toBe(false);
+    expect(Roles.hasAtLeast(Option.some({ role: "contributor" }), Axes.viewPrivate)).toBe(false);
   });
 
   it("moving an axis is a single-site change", () => {
     // The same call sites, against a ladder whose `moderate` axis moved down a
     // rung: nothing but the declaration differs.
     const Moved = Roles.axes({ moderate: "contributor" });
-    expect(Roles.hasAtLeast({ role: "contributor" }, Moved.moderate)).toBe(true);
-    expect(Roles.hasAtLeast({ role: "contributor" }, Axes.moderate)).toBe(false);
+    expect(Roles.hasAtLeast(Option.some({ role: "contributor" }), Moved.moderate)).toBe(true);
+    expect(Roles.hasAtLeast(Option.some({ role: "contributor" }), Axes.moderate)).toBe(false);
   });
 
   it("atOrAbove lists exactly the rungs that satisfy an axis", () => {
@@ -169,10 +169,13 @@ describe("axes", () => {
 // The kernel bridge
 // ---------------------------------------------------------------------------
 
-const principal = (role: string | undefined) =>
-  Entity.entity(Entity.ref("User", "u1"), role === undefined ? {} : { attributes: { role } });
+const principal = (role: Option.Option<string>) =>
+  Entity.entity(
+    Entity.ref("User", "u1"),
+    Option.match(role, { onNone: () => ({}), onSome: (held) => ({ attributes: { role: held } }) }),
+  );
 
-const decide = (policy: Policy.DeclarativePolicy, role: string | undefined) =>
+const decide = (policy: Policy.DeclarativePolicy, role: Option.Option<string>) =>
   Effect.runSync(
     Policy.decide(
       [policy],
@@ -190,15 +193,15 @@ describe("Policy.roleAtLeast", () => {
     Arr.forEach(R.values(Axes), (axis) => {
       const policy = Policy.roleAtLeast(Roles, axis);
       Arr.forEach([...Roles.rungs, ...NOT_RUNGS], (role) => {
-        expect(decide(policy, role).allowed, `${role} on ${axis.name}`).toBe(
-          Roles.hasAtLeast({ role }, axis),
+        expect(decide(policy, Option.some(role)).allowed, `${role} on ${axis.name}`).toBe(
+          Roles.hasAtLeast(Option.some({ role }), axis),
         );
       });
     });
   });
 
   it("denies a principal with no role attribute (the anonymous / unknown-entity case)", () => {
-    const decision = decide(Policy.roleAtLeast(Roles, Axes.corpusWrite), undefined);
+    const decision = decide(Policy.roleAtLeast(Roles, Axes.corpusWrite), Option.none());
     expect(decision.allowed).toBe(false);
     expect(decision.outcomes[0]?.result).toBe("error");
   });
@@ -211,15 +214,15 @@ describe("Policy.roleAtLeast", () => {
     const decoded = Schema.decodeSync(Schema.fromJsonString(Policy.DeclarativePolicy))(
       Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(policy),
     );
-    expect(decide(decoded, "moderator").allowed).toBe(true);
-    expect(decide(decoded, "contributor").allowed).toBe(false);
+    expect(decide(decoded, Option.some("moderator")).allowed).toBe(true);
+    expect(decide(decoded, Option.some("contributor")).allowed).toBe(false);
   });
 
   it("ANDs a caller condition onto the ladder condition", () => {
     const policy = Policy.roleAtLeast(Roles, "user", {
       when: { _tag: "Eq", left: { _tag: "Lit", value: 1 }, right: { _tag: "Lit", value: 2 } },
     });
-    expect(decide(policy, "admin").allowed).toBe(false);
+    expect(decide(policy, Option.some("admin")).allowed).toBe(false);
   });
 
   it("reads a differently-named role attribute when told to", () => {

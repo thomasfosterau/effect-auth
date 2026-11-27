@@ -3,13 +3,14 @@
   bundled form renders. Internal to the package.
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import type { FormFailure, ResolvedClasses } from "./internal.ts";
 
   interface Props {
     classes: ResolvedClasses;
-    failure: FormFailure | null;
+    failure: Option.Option<FormFailure>;
     succeeded?: boolean;
-    successMessage?: string | undefined;
+    successMessage?: string;
   }
 
   const {
@@ -20,8 +21,8 @@
   }: Props = $props();
 </script>
 
-{#if failure !== null}
-  <p class={classes.error} role="alert">{failure.message}</p>
+{#if Option.isSome(failure)}
+  <p class={classes.error} role="alert">{failure.value.message}</p>
 {/if}
 {#if succeeded && successMessage !== undefined}
   <p class={classes.status} role="status">{successMessage}</p>

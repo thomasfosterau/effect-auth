@@ -13,7 +13,7 @@ Read [README.md](README.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) fir
 ## Pitfalls
 
 - **Never depend on legation**, in any dependency field ([BOUNDARY.md](docs/BOUNDARY.md)). effect-jsonapi is fine.
-- **The core's root never reaches `http/`, `client/`, `sql/` or `saml/`**, nor their optional peers (effect-jsonapi, `@node-saml/node-saml`); `./ladder` imports nothing at all. `ModuleGraph.test.ts` enforces it. Code needing only `effect` is a core subpath, not a new package ([ADR-0022](docs/adr/0022-package-boundaries.md)).
+- **The core's root never reaches `http/`, `client/`, `sql/` or `saml/`**, nor their optional peers (effect-jsonapi, `@node-saml/node-saml`); `./ladder` imports only `effect/Option`. `ModuleGraph.test.ts` enforces both. Code needing only `effect` is a core subpath, not a new package ([ADR-0022](docs/adr/0022-package-boundaries.md)).
 - **Adapters depend on the core as `workspace:^`**, never `workspace:*` (an exact pin leaves an adapter on its own nested core).
 - **TypeScript is split 6/7.** `typescript` is a TS6 alias for JS-API consumers; never bump it to 7. `@typescript/native` (TS7), `@effect/tsgo` and `vite-plus` move together, or `vp install` fails.
 - **`@effect-diagnostics` directives** work only unprefixed (`// @effect-diagnostics-next-line multipleEffectProvide:off`); the `effect/<rule>` form is silently ignored.

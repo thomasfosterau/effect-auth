@@ -1,12 +1,15 @@
 /**
- * Vanilla auth client over the HTTP API: plain `fetch`, no Effect runtime, one
- * method per endpoint. It holds no session state and announces session changes
- * to `onSessionChange`; the session Atoms are in `./client/atoms`. It imports
- * only wire types from `http/`, which erase.
+ * Vanilla auth client over the HTTP API: plain `fetch` and Promises, one
+ * method per endpoint, with absence spelled `Option` (`effect/Option`, its one
+ * runtime import). It holds no session state and announces session changes to
+ * `onSessionChange`; the session Atoms are in `./client/atoms`. It imports only
+ * wire types from `http/`, which erase.
  *
  * @module client
  */
+import * as Option from "effect/Option";
 import type * as Http from "../http/index.ts";
+import type { ToOneRelationship } from "./Wire.ts";
 
 /** A non-2xx response from the auth server. */
 export class AuthClientError extends Error {
@@ -91,9 +94,9 @@ export interface AuthClientOptions {
    */
   readonly baseUrl: string;
   /** Custom `fetch` (tests, SSR, mounting the handler in-process). */
-  readonly fetch?: typeof globalThis.fetch | undefined;
+  readonly fetch?: typeof globalThis.fetch;
   /** Extra headers attached to every request. */
-  readonly headers?: Record<string, string> | undefined;
+  readonly headers?: Record<string, string>;
 }
 
 /** Internals exposed to plugins during {@link AuthClientPlugin.install}. */
@@ -162,18 +165,12 @@ const isJson = (response: Response): boolean => {
 
 const JSON_API = "application/vnd.api+json";
 
-interface ResourceLinkage {
-  readonly type: string;
-  readonly id: string;
-}
-
 interface WireResource<A> {
   readonly type: string;
   readonly id: string;
   readonly attributes: A;
   readonly relationships?: {
-    // `null` is an optional to-one relationship that links to nothing.
-    readonly [name: string]: { readonly data: ResourceLinkage | null } | undefined;
+    readonly [name: string]: ToOneRelationship;
   };
 }
 
@@ -275,7 +272,11 @@ const sessionView = (resource: WireResource<WireSession>): Http.SessionView => (
 
 /** The id a resource's to-one relationship `name` links to (`""` when absent). */
 const related = (resource: WireResource<unknown>, name: string): string =>
-  resource.relationships?.[name]?.data?.id ?? "";
+  Option.getOrElse(linked(resource, name), () => "");
+
+/** The id a to-one relationship links to; `None` when it is absent or links to nothing. */
+const linked = (resource: WireResource<unknown>, name: string): Option.Option<string> =>
+  Option.fromNullishOr(resource.relationships?.[name]?.data?.id);
 
 const organizationView = ({
   id,
@@ -310,10 +311,12 @@ const organizationOwned = <A>(
 
 /** A domain claim, its `attester` relationship (when it links anyone) as `attestedBy`. */
 const domainView = (resource: WireResource<WireDomain>): Http.OrganizationDomainView => {
-  const attestedBy = resource.relationships?.["attester"]?.data?.id;
   return {
     ...organizationOwned(resource),
-    ...(attestedBy !== undefined && { attestedBy }),
+    ...Option.match(linked(resource, "attester"), {
+      onNone: () => ({}),
+      onSome: (attestedBy) => ({ attestedBy }),
+    }),
   };
 };
 
@@ -354,11 +357,13 @@ const oauthClientView = ({
 };
 
 const ssoProviderView = (resource: WireResource<WireSsoProvider>): Http.SsoProviderView => {
-  const organizationId = resource.relationships?.["organization"]?.data?.id;
   return {
     id: resource.id,
     ...resource.attributes,
-    ...(organizationId !== undefined && { organizationId }),
+    ...Option.match(linked(resource, "organization"), {
+      onNone: () => ({}),
+      onSome: (organizationId) => ({ organizationId }),
+    }),
   };
 };
 
@@ -380,10 +385,12 @@ const identifierView = ({ id, attributes }: WireResource<WireIdentifier>): Http.
   return { id, type: kind, ...rest };
 };
 
-/** The {@link AuthResult} of a sign-in answer (`undefined` for a bodiless `204` / `202`). */
-const authResult = (document: SignInDocument | undefined): AuthResult => {
-  const needsEmailVerification = document?.meta?.needsEmailVerification ?? false;
-  const data = document?.data;
+/** The {@link AuthResult} of a sign-in answer (`None` for a bodiless `204` / `202`). */
+const authResult = (answer: Option.Option<SignInDocument>): AuthResult => {
+  if (Option.isNone(answer)) return { needsEmailVerification: false };
+  const document = answer.value;
+  const needsEmailVerification = document.meta?.needsEmailVerification ?? false;
+  const data = document.data;
   if (data === undefined) return { needsEmailVerification };
   if (data.type === "second-factor-challenges") {
     return {
@@ -391,25 +398,27 @@ const authResult = (document: SignInDocument | undefined): AuthResult => {
       secondFactor: { token: data.id, expiresAt: data.attributes.expiresAt },
     };
   }
-  const user = document?.included?.find((resource) => resource.type === "users");
+  const user = document.included?.find((resource) => resource.type === "users");
   return { ...(user !== undefined && { user: userView(user) }), needsEmailVerification };
 };
 
 /** The message of an error body: a JSON:API error document's first `detail`, or `{ message }`. */
-const errorMessage = (body: unknown): string | undefined => {
-  if (typeof body !== "object" || body === null) return undefined;
+const errorMessage = (body: unknown): Option.Option<string> => {
+  if (typeof body !== "object" || body === null) return Option.none();
   if ("errors" in body && Array.isArray(body.errors)) {
     const first: unknown = body.errors[0];
     return typeof first === "object" &&
       first !== null &&
       "detail" in first &&
       typeof first.detail === "string"
-      ? first.detail
-      : undefined;
+      ? Option.some(first.detail)
+      : Option.none();
   }
-  if ("message" in body && typeof body.message === "string") return body.message;
+  if ("message" in body && typeof body.message === "string") return Option.some(body.message);
   // An OAuth error object (RFC 6749 §5.2), as the RFC tier answers.
-  return "error" in body && typeof body.error === "string" ? body.error : undefined;
+  return "error" in body && typeof body.error === "string"
+    ? Option.some(body.error)
+    : Option.none();
 };
 
 /** The auth client: typed methods over the contract, plus session-change notification. */
@@ -440,14 +449,14 @@ export interface AuthClient {
   readonly signInAnonymous: () => Promise<AuthResult>;
   /** Username + password sign-in. 404 when unconfigured. */
   readonly signInUsername: (payload: Http.UsernameSignInPayload) => Promise<AuthResult>;
-  /** Resolves `null` when not authenticated (401). */
-  readonly getSession: () => Promise<Http.SessionWithUserView | null>;
+  /** The session and its user; `None` when not authenticated (401). */
+  readonly getSession: () => Promise<Option.Option<Http.SessionWithUserView>>;
   readonly sendVerificationEmail: (payload: { email: string }) => Promise<Http.StatusResponse>;
   readonly verifyEmail: (payload: { token: string }) => Promise<AuthResult>;
   readonly passwordResetRequest: (payload: {
     email: string;
     /** A captcha token, for a server running `CaptchaPlugin` with the `"sendCode"` endpoint. */
-    captchaToken?: string | undefined;
+    readonly captchaToken?: string;
   }) => Promise<Http.StatusResponse>;
   readonly passwordResetConfirm: (payload: {
     token: string;
@@ -500,7 +509,7 @@ export interface AuthClient {
   readonly magicLink: {
     readonly send: (payload: {
       email: string;
-      captchaToken?: string | undefined;
+      readonly captchaToken?: string;
     }) => Promise<Http.StatusResponse>;
     readonly verify: (payload: { token: string }) => Promise<AuthResult>;
   };
@@ -510,7 +519,7 @@ export interface AuthClient {
     readonly send: (payload: {
       email: string;
       purpose: Http.EmailOtpPurpose;
-      captchaToken?: string | undefined;
+      readonly captchaToken?: string;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { email: string; otp: string }) => Promise<AuthResult>;
   };
@@ -523,7 +532,7 @@ export interface AuthClient {
     readonly send: (payload: {
       phoneNumber: string;
       purpose: Http.PhoneOtpPurpose;
-      captchaToken?: string | undefined;
+      readonly captchaToken?: string;
     }) => Promise<Http.StatusResponse>;
     readonly signIn: (payload: { phoneNumber: string; otp: string }) => Promise<AuthResult>;
   };
@@ -846,18 +855,21 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const doFetch: typeof globalThis.fetch =
     options.fetch ?? ((...args) => globalThis.fetch(...args));
 
-  const send = async <T>(
+  /** One request; `None` for a `204` or a body that is not JSON. */
+  const exchange = async <T>(
     method: string,
     path: string,
     body: unknown,
-    mediaType: string | undefined,
-  ): Promise<T> => {
+    mediaType: Option.Option<string>,
+  ): Promise<Option.Option<T>> => {
     const response = await doFetch(`${baseUrl}${path}`, {
       method,
       credentials: "include",
       headers: {
-        ...(mediaType !== undefined && { accept: mediaType }),
-        ...(body !== undefined && { "content-type": mediaType ?? "application/json" }),
+        ...Option.match(mediaType, { onNone: () => ({}), onSome: (accept) => ({ accept }) }),
+        ...(body !== undefined && {
+          "content-type": Option.getOrElse(mediaType, () => "application/json"),
+        }),
         ...options.headers,
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -867,39 +879,54 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       if (isJson(response)) {
         // A body that fails to parse leaves the status text as the message.
         const parsed: unknown = await response.json().catch(() => null);
-        message = errorMessage(parsed) ?? message;
+        message = Option.getOrElse(errorMessage(parsed), () => message);
       }
       throw new AuthClientError(response.status, message);
     }
-    if (response.status === 204 || !isJson(response)) {
-      // SAFETY: endpoints that answer 204 or a non-JSON body are requested
-      // with `T = void`, so `undefined` is their success value.
-      return undefined as T;
-    }
+    if (response.status === 204 || !isJson(response)) return Option.none();
     // SAFETY: each call site names as `T` the success type the HTTP contract
     // declares for that endpoint, which is what the server encodes.
-    return (await response.json()) as T;
+    return Option.some((await response.json()) as T);
   };
 
+  const send = <T>(
+    method: string,
+    path: string,
+    body: unknown,
+    mediaType: Option.Option<string>,
+  ): Promise<T> =>
+    exchange<T>(method, path, body, mediaType).then(
+      // SAFETY: endpoints that answer 204 or a non-JSON body are requested
+      // with `T = void`, so `undefined` is their success value.
+      (answer) => Option.getOrUndefined(answer) as T,
+    );
+
   const request = <T>(method: string, path: string, body?: unknown): Promise<T> =>
-    send<T>(method, path, body, undefined);
+    send<T>(method, path, body, Option.none());
 
   /** A request to a JSON:API resource group: `application/vnd.api+json` both ways. */
   const jsonApi = <T>(method: string, path: string, body?: unknown): Promise<T> =>
-    send<T>(method, path, body, JSON_API);
+    send<T>(method, path, body, Option.some(JSON_API));
+
+  /**
+   * A sign-in request, whose answer may be a bodiless `204` / `202`: `None`
+   * then, else the document.
+   */
+  const signInRequest = (method: string, path: string, body: unknown): Promise<AuthResult> =>
+    exchange<SignInDocument>(method, path, body, Option.some(JSON_API)).then(authResult);
 
   // --- Session observers -----------------------------------------------------
 
   const sessionListeners = new Set<SessionChangeListener>();
 
-  const getSession = (): Promise<Http.SessionWithUserView | null> =>
+  const getSession = (): Promise<Option.Option<Http.SessionWithUserView>> =>
     jsonApi<DataDocument<WireSession>>("GET", "/sessions/current?include=user").then(
-      (document): Http.SessionWithUserView => {
+      (document) => {
         const session = sessionView(document.data);
-        return { session, user: includedUser(document, session.userId) };
+        return Option.some({ session, user: includedUser(document, session.userId) });
       },
       (error) => {
-        if (error instanceof AuthClientError && error.status === 401) return null;
+        if (error instanceof AuthClientError && error.status === 401) return Option.none();
         throw error;
       },
     );
@@ -924,12 +951,12 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   /** Sign in with `credential` (`POST /sessions`), notifying the session observers. */
   const signInWith = (credential: Http.SignInCredential, rememberMe?: boolean) =>
     mutating(() =>
-      jsonApi<SignInDocument>("POST", "/sessions", {
+      signInRequest("POST", "/sessions", {
         data: {
           type: "sessions",
           attributes: { credential, ...(rememberMe !== undefined && { rememberMe }) },
         },
-      }).then(authResult),
+      }),
     );
 
   /** Send a one-time code or a magic link (`POST /otp-challenges`). */
@@ -943,7 +970,7 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   /** `PATCH /organizations/:id` with the attributes to change. */
   const updateOrganization = (
     organizationId: string,
-    attributes: Http.UpdateOrganizationPayload & { readonly defaultRole?: string | undefined },
+    attributes: Http.UpdateOrganizationPayload & { readonly defaultRole?: string },
   ): Promise<Http.OrganizationView> =>
     jsonApi<DataDocument<WireOrganization>>(
       "PATCH",
@@ -955,8 +982,8 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
   const updateMember = (
     memberId: string,
     attributes: {
-      readonly role?: string | undefined;
-      readonly status?: Http.MemberView["status"] | undefined;
+      readonly role?: string;
+      readonly status?: Http.MemberView["status"];
     },
   ): Promise<Http.MemberView> =>
     jsonApi<DataDocument<WireMember>>(
@@ -1028,14 +1055,14 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
     code: string,
   ): Promise<AuthResult> =>
     mutating(() =>
-      jsonApi<SignInDocument>("POST", "/second-factor-challenges/verifications", {
+      signInRequest("POST", "/second-factor-challenges/verifications", {
         data: {
           type: "second-factor-verifications",
           attributes: { method, code },
           // The challenge token travels in the body, never in the URL.
           relationships: { challenge: { data: { type: "second-factor-challenges", id: token } } },
         },
-      }).then(authResult),
+      }),
     );
 
   /**
@@ -1081,9 +1108,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
 
     signUp: (payload) =>
       mutating(() =>
-        jsonApi<SignInDocument>("POST", "/users", {
+        signInRequest("POST", "/users", {
           data: { type: "users", attributes: payload },
-        }).then(authResult),
+        }),
       ),
     signIn: ({ email, password, captchaToken, rememberMe }) =>
       signInWith(
@@ -1117,9 +1144,9 @@ export const createAuthClient = (options: AuthClientOptions): AuthClient => {
       }).then(() => ({ status: true })),
     verifyEmail: ({ token }) =>
       mutating(() =>
-        jsonApi<SignInDocument | undefined>("POST", "/email-verifications/redemptions", {
+        signInRequest("POST", "/email-verifications/redemptions", {
           data: { type: "email-verification-redemptions", attributes: { token } },
-        }).then(authResult),
+        }),
       ),
     passwordResetRequest: ({ email, captchaToken }) =>
       jsonApi<void>("POST", "/password-resets", {

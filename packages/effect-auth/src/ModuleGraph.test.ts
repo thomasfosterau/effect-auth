@@ -124,16 +124,16 @@ const valueImportsOf = async (file: string): Promise<string[]> => {
 };
 
 describe("the client subpath", () => {
-  // The browser bundle holds only the client: its `http/` imports are type-only
-  // and erase, so its runtime graph is the client module alone, with no Effect
-  // runtime in it.
-  it("imports the HTTP tier for types only", async () => {
-    expect(await valueImportsOf(path.resolve(import.meta.dirname, "client", "Client.ts"))).toEqual(
-      [],
-    );
+  // The browser bundle holds the client and `effect/Option`, its spelling of
+  // absence: its `http/` imports are type-only and erase, so nothing else of
+  // the Effect runtime and nothing server-side is in its graph.
+  it("imports effect/Option, and the HTTP tier for types only", async () => {
+    expect(await valueImportsOf(path.resolve(import.meta.dirname, "client", "Client.ts"))).toEqual([
+      "effect/Option",
+    ]);
   });
 
-  // `./client/atoms` is its own entry, so `./client` never loads `effect`.
+  // `./client/atoms` is its own entry, so `./client` never loads the reactivity runtime.
   it("re-exports nothing but the client", async () => {
     const index = await readFile(path.resolve(import.meta.dirname, "client", "index.ts"), "utf8");
     expect(extractSpecifiers(index.replace(/\/\*[\s\S]*?\*\//g, ""))).toEqual(["./Client.ts"]);
@@ -151,6 +151,7 @@ describe("the client/atoms subpath", () => {
     expect(imports.toSorted()).toEqual([
       "./Client.ts",
       "effect/Effect",
+      "effect/Equal",
       "effect/Option",
       "effect/Predicate",
       "effect/reactivity",
@@ -160,15 +161,16 @@ describe("the client/atoms subpath", () => {
 
 describe("the ladder subpath", () => {
   // `@thomasfosterau/effect-auth/ladder` is imported by browser bundles for UX
-  // gates, so it must not pull `effect` — or anything else — in with it.
-  it("imports nothing at all", async () => {
+  // gates, so it loads `effect/Option` (its spelling of anonymous) and nothing
+  // else.
+  it("imports only effect/Option", async () => {
     const ladder = path.resolve(import.meta.dirname, "Ladder.ts");
     // Comments stripped first: the module's JSDoc `@example` imports it by
     // its own subpath, which is documentation, not an edge.
     const code = (await readFile(ladder, "utf8"))
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\/\/.*$/gm, "");
-    expect(extractSpecifiers(code)).toEqual([]);
+    expect(extractSpecifiers(code)).toEqual(["effect/Option"]);
   });
 });
 

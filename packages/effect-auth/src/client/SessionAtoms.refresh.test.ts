@@ -46,12 +46,12 @@ class FakeBroadcastChannel extends EventTarget {
     MutableHashSet.add(ch, this);
   }
 
-  postMessage(data: { readonly data: Http.SessionWithUserView | null }): void {
+  postMessage(data: { readonly data?: Http.SessionWithUserView }): void {
     this.deliver(data);
   }
 
   /** Deliver `data` to every other channel on this name, as a peer tab's post would. */
-  deliver(data: { readonly data: Http.SessionWithUserView | null }): void {
+  deliver(data: { readonly data?: Http.SessionWithUserView }): void {
     const peers = MutableHashMap.get(FakeBroadcastChannel._channels, this.name);
     Arr.forEach(Option.match(peers, { onNone: () => [], onSome: Arr.fromIterable }), (peer) => {
       if (peer !== this) peer.dispatchEvent(new MessageEvent("message", { data }));
@@ -173,28 +173,29 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     const registryA = AtomRegistry.make();
     const registryB = AtomRegistry.make();
 
-    const eventsB: Array<string | null> = [];
+    const eventsB: Array<Option.Option<string>> = [];
     const unmountA = registryA.mount(tabA.result);
     const unsubB = registryB.subscribe(tabB.data, (data) => {
-      eventsB.push(data?.user.email ?? null);
+      eventsB.push(Option.flatMapNullishOr(data, (found) => found.user.email));
     });
     await clientA.invalidateSession();
     await clientB.invalidateSession();
 
     // Tab A signs up → broadcasts the new session to tab B.
     await clientA.signUp({ email: EMAIL, password: PW });
-    expect(registryA.get(tabA.data)?.user.email).toBe(EMAIL);
-    expect(registryB.get(tabB.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registryA.get(tabA.data))?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registryB.get(tabB.data))?.user.email).toBe(EMAIL);
     expect(registryB.get(tabB.state).isPending).toBe(false);
-    expect(eventsB).toContain(EMAIL);
+    expect(eventsB).toContainEqual(Option.some(EMAIL));
 
     // A refetch in tab B keeps the mirrored session on show while it waits.
-    let pendingData: string | null | undefined;
+    let pendingData = Option.none<string>();
     const watch = registryB.subscribe(tabB.state, (state) => {
-      if (state.isPending) pendingData = state.data?.user.email ?? null;
+      if (state.isPending)
+        pendingData = Option.flatMapNullishOr(state.data, (found) => found.user.email);
     });
     await clientB.invalidateSession();
-    expect(pendingData).toBe(EMAIL);
+    expect(pendingData).toEqual(Option.some(EMAIL));
     watch();
 
     unmountA();
@@ -219,17 +220,17 @@ describe("cross-tab sync (BroadcastChannel)", () => {
       },
     });
     const atoms = makeSessionAtoms(client, { refresh: { crossTab: "no-token" } });
-    const posted: Array<Http.SessionWithUserView | null> = [];
+    const posted: Array<Option.Option<Http.SessionWithUserView>> = [];
     const post = vi
       .spyOn(FakeBroadcastChannel.prototype, "postMessage")
-      .mockImplementation((message) => void posted.push(message.data));
+      .mockImplementation((message) => void posted.push(Option.fromUndefinedOr(message.data)));
     const registry = AtomRegistry.make();
     const unmount = registry.mount(atoms.result);
 
     await client.signUp({ email: EMAIL, password: PW });
     const [token] = tokens;
     expect(token).toBeDefined();
-    const session = Arr.findFirst(posted, (message) => message !== null);
+    const session = Arr.findFirst(Arr.getSomes(posted), () => true);
     assert(Option.isSome(session), "the sign-in was broadcast");
     expect(session.value.session.id).toBe(sha256Hex(token ?? ""));
     expect(toJson(posted)).not.toContain(token);
@@ -272,10 +273,10 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     peer.deliver({ data: { session, user } });
 
     expect(reads).toBe(before);
-    expect(registry.get(atoms.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registry.get(atoms.data))?.user.email).toBe(EMAIL);
     expect(echoes).toEqual([]);
 
-    peer.deliver({ data: null });
+    peer.deliver({});
     expect(registry.get(atoms.isSignedIn)).toBe(false);
     expect(reads).toBe(before);
 
@@ -322,7 +323,11 @@ describe("cross-tab sync (BroadcastChannel)", () => {
     const registry = AtomRegistry.make();
     const unmount = registry.mount(atoms.result);
     await client.invalidateSession();
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: false, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: false,
+      error: Option.none(),
+    });
     unmount();
     registry.dispose();
   });

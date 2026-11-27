@@ -1,4 +1,5 @@
 import { assert, describe, it, expect, vi } from "vite-plus/test";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { AuthClientError, createAuthClient } from "./Client.ts";
@@ -47,7 +48,11 @@ describe("session atoms", () => {
     expect(reads).toBe(0);
 
     const registry = AtomRegistry.make();
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: true, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: true,
+      error: Option.none(),
+    });
     expect(registry.get(atoms.isSignedIn)).toBe(false);
     expect(reads).toBe(1);
     registry.dispose();
@@ -57,24 +62,32 @@ describe("session atoms", () => {
     const client = counted(() => {});
     const atoms = makeSessionAtoms(client);
     const registry = AtomRegistry.make();
-    const states: Array<{ email: string | undefined; isPending: boolean }> = [];
+    const states: Array<{ email: Option.Option<string>; isPending: boolean }> = [];
     const unsubscribe = registry.subscribe(
       atoms.state,
-      (state) => states.push({ email: state.data?.user.email, isPending: state.isPending }),
+      (state) =>
+        states.push({
+          email: Option.flatMapNullishOr(state.data, (found) => found.user.email),
+          isPending: state.isPending,
+        }),
       { immediate: true },
     );
 
     await client.invalidateSession();
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: false, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: false,
+      error: Option.none(),
+    });
 
     await client.signUp({ email: EMAIL, password: PW });
-    expect(registry.get(atoms.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registry.get(atoms.data))?.user.email).toBe(EMAIL);
     expect(registry.get(atoms.isSignedIn)).toBe(true);
 
     await client.signOut();
-    expect(registry.get(atoms.data)).toBeNull();
-    expect(states.at(-1)).toEqual({ email: undefined, isPending: false });
-    expect(states).toContainEqual({ email: EMAIL, isPending: false });
+    expect(registry.get(atoms.data)).toEqual(Option.none());
+    expect(states.at(-1)).toEqual({ email: Option.none(), isPending: false });
+    expect(states).toContainEqual({ email: Option.some(EMAIL), isPending: false });
     unsubscribe();
     registry.dispose();
   });
@@ -89,7 +102,7 @@ describe("session atoms", () => {
     let builds = 0;
     const greeting = Atom.make((get) => {
       builds++;
-      const user = get(atoms.data)?.user;
+      const user = Option.getOrUndefined(get(atoms.data))?.user;
       return user === undefined ? "Hello, guest" : `Hello, ${user.email}`;
     });
     const seen: string[] = [];
@@ -141,21 +154,22 @@ describe("session atoms", () => {
     const unmount = registry.mount(atoms.result);
 
     await client.signUp({ email: EMAIL, password: PW });
-    expect(registry.get(atoms.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registry.get(atoms.data))?.user.email).toBe(EMAIL);
 
     injectError = true;
     await client.invalidateSession();
     const after = registry.get(atoms.state);
-    expect(after.data?.user.email).toBe(EMAIL);
-    assert.instanceOf(after.error, AuthClientError);
-    expect(after.error.status).toBe(503);
+    expect(Option.getOrUndefined(after.data)?.user.email).toBe(EMAIL);
+    const failure = Option.getOrUndefined(after.error);
+    assert.instanceOf(failure, AuthClientError);
+    expect(failure.status).toBe(503);
     expect(after.isPending).toBe(false);
     expect(registry.get(atoms.isSignedIn)).toBe(true);
 
     // The next good read clears the error.
     injectError = false;
     await client.invalidateSession();
-    expect(registry.get(atoms.error)).toBeNull();
+    expect(registry.get(atoms.error)).toEqual(Option.none());
     unmount();
     registry.dispose();
   });
@@ -169,7 +183,7 @@ describe("session atoms", () => {
     const registry = AtomRegistry.make();
     const unmount = registry.mount(atoms.result);
     await client.invalidateSession();
-    const error = registry.get(atoms.error);
+    const error = Option.getOrUndefined(registry.get(atoms.error));
     assert.instanceOf(error, AuthClientError);
     expect(error.status).toBe(0);
     expect(error.message).toBe("network down");
@@ -210,12 +224,20 @@ describe("session atoms", () => {
     const first = client.invalidateSession();
     const second = client.invalidateSession();
     await Promise.all([first, second]);
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: false, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: false,
+      error: Option.none(),
+    });
 
     // The stale answer arrives after the newer one: it must not land.
     releaseFirst();
     await nextTask();
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: false, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: false,
+      error: Option.none(),
+    });
     unmount();
     registry.dispose();
   });
@@ -235,13 +257,13 @@ describe("session atoms", () => {
     // The first observer starts the lazy read.
     const unmount = registry.mount(atoms.result);
     await client.invalidateSession();
-    expect(registry.get(atoms.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registry.get(atoms.data))?.user.email).toBe(EMAIL);
     const afterObserve = reads;
 
     // Observed, a sign-out refetches.
     await client.signOut();
     expect(reads).toBe(afterObserve + 1);
-    expect(registry.get(atoms.data)).toBeNull();
+    expect(registry.get(atoms.data)).toEqual(Option.none());
 
     // Unobserved again: the next call is not refetched…
     unmount();
@@ -251,10 +273,14 @@ describe("session atoms", () => {
 
     // …and a new observer starts from the last read, without a request.
     const remount = registry.mount(atoms.result);
-    expect(registry.get(atoms.state)).toEqual({ data: null, isPending: false, error: null });
+    expect(registry.get(atoms.state)).toEqual({
+      data: Option.none(),
+      isPending: false,
+      error: Option.none(),
+    });
     expect(reads).toBe(afterObserve + 1);
     await client.invalidateSession();
-    expect(registry.get(atoms.data)?.user.email).toBe(EMAIL);
+    expect(Option.getOrUndefined(registry.get(atoms.data))?.user.email).toBe(EMAIL);
     remount();
     registry.dispose();
   });
@@ -288,21 +314,27 @@ describe("the session list atom", () => {
     const atoms = makeSessionAtoms(client);
     const registry = AtomRegistry.make();
     const unsubscribe = registry.subscribe(atoms.sessionsState, () => {}, { immediate: true });
-    expect(registry.get(atoms.sessionsState)).toEqual({ data: null, isPending: true, error: null });
+    expect(registry.get(atoms.sessionsState)).toEqual({
+      data: Option.none(),
+      isPending: true,
+      error: Option.none(),
+    });
 
     await client.invalidateSession();
     await vi.waitFor(() =>
       expect(registry.get(atoms.sessionsState)).toEqual({
-        data: [],
+        data: Option.some([]),
         isPending: false,
-        error: null,
+        error: Option.none(),
       }),
     );
     expect(lists).toBe(0);
 
     // A sign-up changes the session id, which reaches the list through the graph.
     await client.signUp({ email: EMAIL, password: PW });
-    await vi.waitFor(() => expect(registry.get(atoms.sessionsState).data?.length).toBe(1));
+    await vi.waitFor(() =>
+      expect(Option.getOrUndefined(registry.get(atoms.sessionsState).data)?.length).toBe(1),
+    );
     expect(lists).toBe(1);
 
     // A refetch of the same session does not refetch the list.
@@ -316,7 +348,7 @@ describe("the session list atom", () => {
     expect(lists).toBe(2);
 
     await client.signOut();
-    await vi.waitFor(() => expect(registry.get(atoms.sessionsState).data).toEqual([]));
+    await vi.waitFor(() => expect(registry.get(atoms.sessionsState).data).toEqual(Option.some([])));
     expect(lists).toBe(2);
     unsubscribe();
     registry.dispose();
@@ -337,7 +369,7 @@ describe("the session list atom", () => {
     const unmount = registry.mount(atoms.sessionsState);
     await client.signUp({ email: EMAIL, password: PW });
     await vi.waitFor(() => expect(registry.get(atoms.sessionsState).isPending).toBe(false));
-    const { error } = registry.get(atoms.sessionsState);
+    const error = Option.getOrUndefined(registry.get(atoms.sessionsState).error);
     assert.instanceOf(error, AuthClientError);
     expect(error.status).toBe(500);
     unmount();

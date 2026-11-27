@@ -9,6 +9,7 @@
   challenge goes to `onSecondFactor`.
 -->
 <script lang="ts">
+  import * as Option from "effect/Option";
   import { resolveAuthClient } from "../context.ts";
   import Field from "./Field.svelte";
   import FormMessages from "./FormMessages.svelte";
@@ -28,7 +29,7 @@
     labels: labelOverrides = undefined,
   }: SignInFormProps = $props();
 
-  const client = resolveAuthClient(() => clientProp);
+  const client = resolveAuthClient(() => Option.fromUndefinedOr(clientProp));
   const uid = $props.id();
   const submission = createSubmission();
 
@@ -46,7 +47,7 @@
         isUsername
           ? client.signInUsername({ username: identifier, password })
           : client.signIn({ email: identifier, password }),
-      { fallback: labels.error, onSuccess: routeSignInResult(onSuccess, onSecondFactor), onError },
+      labels.error, routeSignInResult(onSuccess, onSecondFactor), onError,
     );
   };
 </script>
