@@ -440,7 +440,7 @@ export const make = <Id, User extends Viewer, Rung extends string>(
  * const requireContributor = guards.requireRoleAtLeast("contributor")
  *
  * // The translation pipeline may write pages, and nothing else.
- * const AuthorizerLive = Auth.Authorizer.layer({
+ * const AuthorizerLive = Auth.Authorizer.Authorizer.layer({
  *   policies: [
  *     Auth.System.grant("translation-pipeline", {
  *       id: "translation-pipeline:write-pages",
@@ -457,7 +457,7 @@ export const make = <Id, User extends Viewer, Rung extends string>(
  *       ? guards.principal(yield* requireContributor).ref
  *       : yield* Auth.Guard.requireSystem({ action: "page:write", resource })
  *     // ...the write itself...
- *     yield* Auth.recordWrite({ principal: actor, action: "page:write", resource })
+ *     yield* Auth.Hooks.recordWrite({ principal: actor, action: "page:write", resource })
  *     return Auth.Entity.formatRef(actor)
  *   })
  *
@@ -475,7 +475,7 @@ export const make = <Id, User extends Viewer, Rung extends string>(
  *     writePage("p-1").pipe(Auth.System.provide("billing-cron"), Effect.provide(anonymous)),
  *   )
  *   assert.ok(Result.isFailure(refused))
- * }).pipe(Effect.provide(Layer.merge(AuthorizerLive, Auth.Hooks.Default)))
+ * }).pipe(Effect.provide(Layer.merge(AuthorizerLive, Auth.Hooks.Hooks.Default)))
  *
  * await Effect.runPromise(program)
  * ```

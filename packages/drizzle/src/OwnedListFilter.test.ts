@@ -192,7 +192,7 @@ const databaseFollowers = () =>
               .select({ ownerId: follows.ownerId })
               .from(follows)
               .where(eq(follows.followerId, followerId)),
-          catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+          catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
         }),
       ).pipe(Effect.map((rows) => rows.some((row) => row.ownerId === ownerId))),
     followingQuery: (followerId) =>

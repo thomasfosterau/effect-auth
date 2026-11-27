@@ -34,7 +34,7 @@ import { tables as defaultTables } from "./PgSchema.ts";
 /** What a counter read projects, under the store's own field names. */
 type RateLimitRow = DrizzleSelected<RateLimitColumns>;
 
-const toEntry = (row: RateLimitRow): Auth.RateLimitEntry => ({
+const toEntry = (row: RateLimitRow): Auth.RateLimit.RateLimitEntry => ({
   key: row.key,
   count: row.count,
   resetAt: row.resetAt.getTime(),
@@ -84,7 +84,7 @@ const returnedCount = Schema.decodeUnknownOption(
 /** Build a `RateLimitStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   tables: RateLimitTableInput = defaultTables,
-): Effect.Effect<typeof Auth.RateLimitStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.RateLimit.RateLimitStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const schema = resolveRateLimitTable(tables);
@@ -149,14 +149,14 @@ export const make = (
         query("rateLimit.delete", (db) =>
           db.delete(table).where(eq(column.key, key)).execute(),
         ).pipe(Effect.asVoid),
-    } satisfies typeof Auth.RateLimitStore.Service;
+    } satisfies typeof Auth.RateLimit.RateLimitStore.Service;
   });
 
 /** `RateLimitStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   tables: RateLimitTableInput = defaultTables,
-): Layer.Layer<Auth.RateLimitStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.RateLimitStore, make(tables));
+): Layer.Layer<Auth.RateLimit.RateLimitStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.RateLimit.RateLimitStore, make(tables));
 
 /**
  * Delete the rate-limit rows whose window and block have both passed, in one
@@ -187,7 +187,7 @@ export const layer = (
 export const purgeExpired = (
   tables: RateLimitTableInput = defaultTables,
   options?: PurgeExpiredOptions,
-): Effect.Effect<void, Auth.AuthError, DrizzleDatabase> =>
+): Effect.Effect<void, Auth.Errors.AuthError, DrizzleDatabase> =>
   Effect.gen(function* () {
     const limit = options?.limit;
     yield* checkLimit(limit);
@@ -214,11 +214,11 @@ export const purgeExpired = (
   });
 
 /** Refuse a purge `limit` that is not a positive integer; omitted is fine. */
-const checkLimit = (limit?: number): Effect.Effect<void, Auth.AuthError> =>
+const checkLimit = (limit?: number): Effect.Effect<void, Auth.Errors.AuthError> =>
   limit === undefined || (Number.isSafeInteger(limit) && limit > 0)
     ? Effect.void
     : Effect.fail(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message: `purgeExpired limit must be a positive integer, got ${String(limit)}`,
         }),
       );

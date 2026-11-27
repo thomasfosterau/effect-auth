@@ -12,10 +12,9 @@
  * import {
  *   EmailSender,
  *   emailCallbacks,
- *   IdentifierStore,
- *   memoryIdentifierStore,
  *   type EmailMessage,
- * } from "@thomasfosterau/effect-auth"
+ * } from "@thomasfosterau/effect-auth/Delivery"
+ * import { IdentifierStore, memoryIdentifierStore } from "@thomasfosterau/effect-auth/Identifier"
  *
  * // An in-memory adapter: every message is put on an outbox the program reads.
  * const outbox = Effect.runSync(Queue.unbounded<EmailMessage>())
@@ -315,7 +314,7 @@ export class EmailSender extends Context.Service<
    * import assert from "node:assert/strict"
    * import { Effect, Layer } from "effect"
    * import { EmailService, type EmailMessage } from "@thomasfosterau/effect-connect"
-   * import { EmailSender } from "@thomasfosterau/effect-auth"
+   * import { EmailSender } from "@thomasfosterau/effect-auth/Delivery"
    *
    * const sent: Array<EmailMessage> = []
    * const Email = EmailSender.layerConnect({ from: { email: "noreply@example.com" } }).pipe(

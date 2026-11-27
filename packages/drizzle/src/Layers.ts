@@ -38,7 +38,11 @@ import * as UserStore from "./UserStore.ts";
  */
 export const layer = (
   schema: SchemaInput = defaultTables,
-): Layer.Layer<Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore, never, DrizzleDatabase> =>
+): Layer.Layer<
+  Auth.SessionStore.SessionStore | Auth.UserStore.UserStore | Auth.Identifier.IdentifierStore,
+  never,
+  DrizzleDatabase
+> =>
   Layer.mergeAll(
     SessionStore.layer(schema),
     UserStore.layer(schema),

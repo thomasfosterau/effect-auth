@@ -24,8 +24,8 @@ export const auth = betterAuth({/* your existing configuration */});
 
 export const AuthLayer = Layer.mergeAll(
   Session.BetterAuthSessions.layer, // request → session, for the SvelteKit `handle`
-  Session.sessionServiceLayer, // Auth.SessionService
-  Users.usersLayer(), // Auth.UserService, UserStore, IdentifierStore, AccountDeletion
+  Session.sessionServiceLayer, // Auth.SessionService.SessionService
+  Users.usersLayer(), // Auth.User.UserService, UserStore, IdentifierStore, AccountDeletion
   Credentials.BetterAuthCredentials.layer, // sign-up, sign-in, sign-out
 ).pipe(Layer.provideMerge(BetterAuth.BetterAuthInstance.layer(auth)));
 ```

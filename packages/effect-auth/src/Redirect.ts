@@ -32,7 +32,7 @@ const PROBE_ORIGIN = "https://redirect.invalid";
  * @example
  * ```ts
  * import { strictEqual } from "node:assert";
- * import { safeRedirect } from "@thomasfosterau/effect-auth";
+ * import { safeRedirect } from "@thomasfosterau/effect-auth/Redirect";
  *
  * strictEqual(safeRedirect("/dashboard?tab=1", "/"), "/dashboard?tab=1");
  * strictEqual(safeRedirect("https://evil.example", "/"), "/");

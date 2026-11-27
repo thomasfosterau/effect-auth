@@ -296,7 +296,7 @@ const env = ConfigProvider.layer(
     env: { JWT_ISSUER: "https://issuer.test", JWT_ENCRYPT_PRIVATE_KEY_SECRET: "s3cret" },
   }),
 );
-const jwt = await Effect.runPromise(Auth.jwtServiceConfig.pipe(Effect.provide(env)));
+const jwt = await Effect.runPromise(Auth.Jwt.jwtServiceConfig.pipe(Effect.provide(env)));
 check("jwtServiceConfig reads the environment", jwt.issuer === "https://issuer.test");
 check(
   "jwtServiceConfig redacts the secret",
@@ -307,14 +307,14 @@ check(
 const alice = Auth.Entity.ref("User", "alice");
 const bob = Auth.Entity.ref("User", "bob");
 const resolver = Layer.succeed(
-  Auth.EntityResolver,
-  Auth.memoryEntityResolver([
+  Auth.Authorizer.EntityResolver,
+  Auth.Authorizer.memoryEntityResolver([
     Auth.Entity.entity(alice, { parents: [Auth.Entity.ref("Role", "admin")] }),
   ]),
 );
 const View = Schema.Struct({
   id: Schema.String,
-  email: Auth.protectedField(Schema.String, {
+  email: Auth.Protected.protectedField(Schema.String, {
     policies: Auth.Policy.role("admin", {
       action: Auth.Policy.eq(Auth.Entity.ref("Action", "user:read-email")),
     }),
@@ -322,7 +322,7 @@ const View = Schema.Struct({
   }),
 });
 const as = (principal, effect) =>
-  effect.pipe(Auth.CurrentPrincipal.provide(principal), Effect.provide(resolver));
+  effect.pipe(Auth.Authorizer.CurrentPrincipal.provide(principal), Effect.provide(resolver));
 const encode = (principal, value) =>
   Effect.runPromise(as(principal, Schema.encodeEffect(View)(value)));
 const decode = (principal, input) =>
@@ -409,7 +409,7 @@ const main = async () => {
 
   // The identifier store's list read: eq + orderBy(asc), run through the store.
   const store = await Effect.runPromise(
-    Drizzle.IdentifierStore.make().pipe(Effect.provide(Drizzle.databaseLayer(db))),
+    Drizzle.IdentifierStore.make().pipe(Effect.provide(Drizzle.Database.databaseLayer(db))),
   );
   const listed = await Effect.runPromise(store.listByUser("user-1"));
   if (listed.length !== 0) throw new Error("store read returned rows from an empty database");
@@ -419,7 +419,7 @@ const main = async () => {
   });
 
   // The batched request read: two lookups, one WHERE ... IN (...) statement.
-  const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+  const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
   const batched = await Effect.runPromise(
     Effect.all(
       [
@@ -469,11 +469,11 @@ type Refuses<TTarget, TValue> = [TValue] extends [TTarget] ? false : true;
 type Holds<T extends true> = T;
 
 // databaseLayer takes a real handle of each dialect, and nothing else.
-export const pgLayer = Drizzle.databaseLayer(pg);
-export const sqliteLayer = Drizzle.databaseLayer(sqlite);
-export const mysqlLayer = Drizzle.databaseLayer(mysql);
+export const pgLayer = Drizzle.Database.databaseLayer(pg);
+export const sqliteLayer = Drizzle.Database.databaseLayer(sqlite);
+export const mysqlLayer = Drizzle.Database.databaseLayer(mysql);
 // A plain object is not a drizzle handle (the last overload's parameter).
-export type NotAHandle = Holds<Refuses<Parameters<typeof Drizzle.databaseLayer>[0], {}>>;
+export type NotAHandle = Holds<Refuses<Parameters<typeof Drizzle.Database.databaseLayer>[0], {}>>;
 
 // The packed tables are ordinary tables to the consumer's own drizzle.
 export const projected = pg
@@ -488,9 +488,9 @@ export const rows: Promise<Array<Drizzle.Pg.IdentifierRow>> = pg
 // defineSchema's column check still bites: an instant column is accepted
 // for a Date field, a text column is not.
 type SessionsTable = typeof Drizzle.Pg.sessionsTable;
-export const instant: Drizzle.ColumnKey<SessionsTable, Date> = "expiresAt";
+export const instant: Drizzle.Columns.ColumnKey<SessionsTable, Date> = "expiresAt";
 // A text column cannot hold a Date field.
-export type NotAnInstant = Holds<Refuses<Drizzle.ColumnKey<SessionsTable, Date>, "userId">>;
+export type NotAnInstant = Holds<Refuses<Drizzle.Columns.ColumnKey<SessionsTable, Date>, "userId">>;
 `;
 
 /**

@@ -35,6 +35,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./Argon2": {
+      "types": "./dist/Argon2.d.ts",
+      "import": "./dist/Argon2.js"
+    },
+    "./Common": {
+      "types": "./dist/Common.d.ts",
+      "import": "./dist/Common.js"
     }
   },
   "publishConfig": {

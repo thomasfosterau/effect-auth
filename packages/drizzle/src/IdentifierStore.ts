@@ -35,7 +35,7 @@ import { tables as defaultTables } from "./PgSchema.ts";
 /** What an identifier read projects, under the store's own field names. */
 type IdentifierRow = DrizzleSelected<IdentifierColumns>;
 
-const toIdentifier = (row: IdentifierRow): Auth.Identifier => ({
+const toIdentifier = (row: IdentifierRow): Auth.Identifier.Identifier => ({
   id: row.id,
   userId: row.userId,
   type: row.type,
@@ -52,14 +52,14 @@ const toIdentifier = (row: IdentifierRow): Auth.Identifier => ({
 /** Build an `IdentifierStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   schema: SchemaInput = defaultTables,
-): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.Identifier.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const identifiers: IdentifierSchema = resolveSchema(schema).identifiers;
     const column = identifiers.columns;
     const table = identifiers.table;
 
-    const insert = (identifier: Auth.Identifier, label: string) =>
+    const insert = (identifier: Auth.Identifier.Identifier, label: string) =>
       query(label, (db) =>
         db
           .insert(table)
@@ -100,14 +100,14 @@ export const make = (
 
       // The `(type, value)` unique index is the claim mechanism: a losing
       // racer's INSERT is rejected by the database and surfaces here as an
-      // `AuthError`, which `Auth.claimIdentifier` re-reads into an
+      // `AuthError`, which `Auth.Identifier.claimIdentifier` re-reads into an
       // `IdentifierTakenError`.
       create: (identifier) => insert(identifier, "identifier.create"),
 
       // Claim, then release: the INSERT goes first so the unique index refuses a
       // taken value while `from` is still in place.
       replace: (from, to) => {
-        const invalid = Auth.replaceInputError(from, to);
+        const invalid = Auth.Identifier.replaceInputError(from, to);
         if (Option.isSome(invalid)) return Effect.fail(invalid.value);
         return Effect.gen(function* () {
           const held = yield* query("identifier.replace.read", (db) =>
@@ -163,14 +163,14 @@ export const make = (
         query("identifier.deleteByUser", (db) =>
           db.delete(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
-    } satisfies typeof Auth.IdentifierStore.Service;
+    } satisfies typeof Auth.Identifier.IdentifierStore.Service;
   });
 
 /** `IdentifierStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   schema: SchemaInput = defaultTables,
-): Layer.Layer<Auth.IdentifierStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.IdentifierStore, make(schema));
+): Layer.Layer<Auth.Identifier.IdentifierStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.Identifier.IdentifierStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Requests / Resolvers
@@ -182,9 +182,9 @@ export const layer = (
  * Issue it with `Requests.getIdentifierByValue(type, value)`.
  */
 export class GetIdentifierByValue extends Request.TaggedClass("GetIdentifierByValue")<
-  { readonly type: Auth.IdentifierType; readonly value: string },
-  Option.Option<Auth.Identifier>,
-  Auth.AuthError
+  { readonly type: Auth.Identifier.IdentifierType; readonly value: string },
+  Option.Option<Auth.Identifier.Identifier>,
+  Auth.Errors.AuthError
 > {}
 
 /**
@@ -194,8 +194,8 @@ export class GetIdentifierByValue extends Request.TaggedClass("GetIdentifierByVa
  */
 export class ListIdentifiersByUser extends Request.TaggedClass("ListIdentifiersByUser")<
   { readonly userId: string },
-  ReadonlyArray<Auth.Identifier>,
-  Auth.AuthError
+  ReadonlyArray<Auth.Identifier.Identifier>,
+  Auth.Errors.AuthError
 > {}
 
 /**
@@ -211,7 +211,7 @@ const withIdentifierTable = <A>(
   );
 
 /** `${type} ${value}` — the composite key, flattened for `Map` lookups. */
-const pairKey = (type: Auth.IdentifierType, value: string): string => `${type} ${value}`;
+const pairKey = (type: Auth.Identifier.IdentifierType, value: string): string => `${type} ${value}`;
 
 /**
  * A resolver that collapses every {@link GetIdentifierByValue} in a batch into

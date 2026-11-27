@@ -3,6 +3,7 @@
  * the PHC strings. Only a `Kdf` with Argon2id (`NodeCrypto.layerKdf`, Node.js
  * 24.7+ or Bun 1.4+) derives it; on Workers use effect-auth-argon2.
  */
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -116,6 +117,18 @@ const overCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits): string |
  * whose costs exceed the ceiling: such a hasher would write hashes its own
  * `verify` refuses.
  */
+/**
+ * An Argon2id hasher configured so it could not verify its own hashes: a cost
+ * or limit that is not a positive integer, or costs over the verify ceiling.
+ * Thrown when the hasher is built.
+ */
+export class Argon2ConfigError extends Schema.TaggedError<
+  Argon2ConfigError,
+  { readonly brand: unique symbol }
+>()("Argon2ConfigError", {
+  message: Schema.String,
+}) {}
+
 const requireUsableConfig = (costs: Argon2Profile, limits: Argon2VerifyLimits): void => {
   const invalid = Arr.findFirst(
     [
@@ -130,11 +143,13 @@ const requireUsableConfig = (costs: Argon2Profile, limits: Argon2VerifyLimits): 
   );
   if (Option.isSome(invalid)) {
     const [name, value] = invalid.value;
-    throw new RangeError(`Argon2 ${name} must be a positive integer, got ${value}`);
+    throw new Argon2ConfigError({
+      message: `Argon2 ${name} must be a positive integer, got ${value}`,
+    });
   }
   const over = overCeiling(costs, limits);
   if (over !== undefined) {
-    throw new RangeError(`Argon2 ${over}: its hashes would not verify`);
+    throw new Argon2ConfigError({ message: `Argon2 ${over}: its hashes would not verify` });
   }
 };
 
@@ -205,7 +220,7 @@ const kdfFailure = (action: string) => (error: CryptoError.CryptoError) =>
  * `verify` refuses.
  *
  * `passwords` must hash with `Kdf.argon2id` at the costs in `options`; use
- * {@link argon2idHasherLayer}, which builds it. Throws a `RangeError` when a
+ * {@link argon2idHasherLayer}, which builds it. Throws an {@link Argon2ConfigError} when a
  * cost or limit is not a positive integer, or a cost is over the ceiling.
  */
 export const argon2idHasher = (

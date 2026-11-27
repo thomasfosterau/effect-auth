@@ -26,7 +26,7 @@ const MAX_PASSWORD_BYTES = 1024;
 const encoder = new TextEncoder();
 
 const hashingError = (message: string, cause?: unknown) =>
-  new Auth.HashingError({ message, ...(cause !== undefined && { cause }) });
+  new Auth.Errors.HashingError({ message, ...(cause !== undefined && { cause }) });
 
 /**
  * BetterAuth's `salt:key` scrypt hash (hex, through `better-auth/crypto`),

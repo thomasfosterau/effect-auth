@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import { normalizeDomain, normalizeEmail } from "./utils.ts";
+import { normalizeDomain, normalizeEmail } from "./Normalize.ts";
 
 describe("normalizeEmail", () => {
   it("trims and lower-cases an ASCII address", () => {

@@ -34,9 +34,9 @@ Most store methods are ordinary CRUD and tolerate a read-then-write implementati
 - **`Auth.OAuth.OAuthAccountStore`'s `(provider, providerId)` uniqueness and its writes** (`src/oauth/OAuthAccount.ts`). Enforce the pair unique with a real unique index, and make `create` a plain `INSERT` that fails with `AuthError` when the pair is already linked, never an upsert: `OAuthService` re-reads the pair after a refused `create` and reports `OAuthAccountConflictError`, as `claimIdentifier` does for identifiers, so two concurrent first sign-ins with one provider account cannot both win, and a link cannot silently move to another user. `update` is keyed on `id`, refreshes only the tokens and profile fields, never changes `userId` and never creates a link (`UPDATE ... WHERE id = ? RETURNING *`, `None` when no link has that id). `linkToUser` is the one write that changes `userId`: it updates an existing link only, and only one that is unlinked (empty `userId`) or already that user's (`UPDATE ... WHERE provider = ? AND provider_id = ? AND user_id IN ('', ?)`); a link another user holds is refused with `AuthError` and left as it is. `Testing.oauthAccountStoreConformance` has a duplicate-link case, an update case and a linkToUser case.
 - **`SessionStore.update` never creates a session** (`src/SessionStore.ts`). It is an `UPDATE ... WHERE id = ?`, never an upsert or a bare `map.set`: a session signed out or revoked (`deleteByUserId`) between the caller's read and its write must stay gone. `Testing.sessionStoreConformance` checks it.
 - **The `EmailOtpStore` / `PhoneOtpStore` failure budget** (`getFailures`, `recordFailure`, `clearFailures`). Every wrong code is counted against its (address, purpose) pair, and the count delays further sends once it grows (`backoff` in `EmailOtpConfig` / `PhoneOtpConfig`). Keep it apart from the code's record: `upsert` (a resend), `delete` and the code's expiry must leave it, or each resend hands an attacker a fresh set of guesses, which is the brute force the budget exists to stop. `clearFailures`, which the service calls after a successful verification, removes it; a sweep may drop it only once its latest wrong code is older than your `backoff.maxDelay` (`./sql`'s `purgeExpired` waits 25 hours by default), when the delay has fully decayed. `recordFailure` should be one statement (`packages/effect-auth/src/sql` uses `INSERT ... ON CONFLICT (email, purpose) DO UPDATE SET failures = failures + 1 ... RETURNING`), so concurrent wrong codes are all counted.
-- **`IdentifierStore.getByValue` matches exactly** (`src/Identifier.ts`). Compare `value` byte for byte, never under a case-, accent- or width-insensitive collation: the services hand it values they have already normalized. MySQL's default `utf8mb4_0900_ai_ci` finds `bob@example.com` for `bob@exämple.com`, which would point a reset or magic link for a look-alike address at another account; declare the column `utf8mb4_bin` (`packages/drizzle` does, and exports `MySql.binaryVarchar`). The core services read every identifier through `Auth.lookupIdentifier`, which treats a returned record whose `type` or `value` differs from the one asked for as a miss and logs a warning, so a loose store fails closed, but a sign-up on it then fails on the unique index instead of reporting the address as taken. `identifierStoreConformance` (`@thomasfosterau/effect-auth/testing`) checks it.
+- **`IdentifierStore.getByValue` matches exactly** (`src/Identifier.ts`). Compare `value` byte for byte, never under a case-, accent- or width-insensitive collation: the services hand it values they have already normalized. MySQL's default `utf8mb4_0900_ai_ci` finds `bob@example.com` for `bob@exämple.com`, which would point a reset or magic link for a look-alike address at another account; declare the column `utf8mb4_bin` (`packages/drizzle` does, and exports `MySql.binaryVarchar`). The core services read every identifier through `Auth.Identifier.lookupIdentifier`, which treats a returned record whose `type` or `value` differs from the one asked for as a miss and logs a warning, so a loose store fails closed, but a sign-up on it then fails on the unique index instead of reporting the address as taken. `identifierStoreConformance` (`@thomasfosterau/effect-auth/testing`) checks it.
 - **`IdentifierStore.create` refusals** (`src/Identifier.ts`). A store that cannot hold an identifier by its own shape (one email per user, emails only) fails `create` with `IdentifierRefusedError`, not `AuthError`. SCIM answers it with `409 uniqueness`, so an IdP sees a request it can reconcile rather than a server failure; the other flows report it as an `AuthError`, since the store cannot serve them at all.
-- **`IdentifierStore.replace`** (`src/Identifier.ts`), which email change confirms through. It is a required member of the contract, so every custom `IdentifierStore` implements it. It must never leave the user holding neither identifier: write the new one before you release the old one, in one transaction if your database has them (`packages/effect-auth/src/sql` uses `sql.withTransaction`), or as one statement when both values live in one row (`packages/drizzle`'s single-table store runs one `UPDATE ... WHERE id = ? AND email = <old>`). Rely on the same unique constraint as `create` to refuse a value another user holds, before anything is released; `replaceIdentifier` re-reads the pair and reports that as `IdentifierTakenError`. Return `None`, writing nothing, when `from` no longer matches a record by `id`, `userId`, `type` and `value`. Make the release a compare-and-swap: delete `from` only where all four still match (`DELETE ... RETURNING`, or the affected-row count where your driver reports one), and when it deletes nothing, take the claim back and return `None`. Then of two concurrent replaces of the same `from` with different values, one succeeds and the other resolves to `None`; `packages/effect-auth/src/sql` does this. Three stores leave a gap here. On D1 (`packages/alchemy-cloudflare`), which has no transactions, taking the claim back is a statement of its own, so a failure before it leaves the user holding both new values. `IdentifierStoreKV` and `packages/drizzle`'s default store check `from` before they write and release it unguarded, so both replaces can succeed and the user holds both new values. Start with `Auth.replaceInputError(from, to)` so a `to` for another user, another type, with `from`'s own id or with the same value is refused like every other store refuses it.
+- **`IdentifierStore.replace`** (`src/Identifier.ts`), which email change confirms through. It is a required member of the contract, so every custom `IdentifierStore` implements it. It must never leave the user holding neither identifier: write the new one before you release the old one, in one transaction if your database has them (`packages/effect-auth/src/sql` uses `sql.withTransaction`), or as one statement when both values live in one row (`packages/drizzle`'s single-table store runs one `UPDATE ... WHERE id = ? AND email = <old>`). Rely on the same unique constraint as `create` to refuse a value another user holds, before anything is released; `replaceIdentifier` re-reads the pair and reports that as `IdentifierTakenError`. Return `None`, writing nothing, when `from` no longer matches a record by `id`, `userId`, `type` and `value`. Make the release a compare-and-swap: delete `from` only where all four still match (`DELETE ... RETURNING`, or the affected-row count where your driver reports one), and when it deletes nothing, take the claim back and return `None`. Then of two concurrent replaces of the same `from` with different values, one succeeds and the other resolves to `None`; `packages/effect-auth/src/sql` does this. Three stores leave a gap here. On D1 (`packages/alchemy-cloudflare`), which has no transactions, taking the claim back is a statement of its own, so a failure before it leaves the user holding both new values. `IdentifierStoreKV` and `packages/drizzle`'s default store check `from` before they write and release it unguarded, so both replaces can succeed and the user holds both new values. Start with `Auth.Identifier.replaceInputError(from, to)` so a `to` for another user, another type, with `from`'s own id or with the same value is refused like every other store refuses it.
 
 A second tier is **strongly recommended** atomic (packages/effect-auth/src/sql and packages/alchemy-cloudflare both treat these as single `INSERT ... ON CONFLICT ... DO UPDATE` / `UPDATE ... RETURNING` statements, never a separate SELECT then write): `RateLimitStore.set`/`increment`, `Auth.MultiFactor.MultiFactorStore.upsert` (enrolment and regeneration only; the spends are the must-be-atomic methods above), and the `Email`/`PhoneOtpStore` `upsert`. A race here drops a rate-limit tick or loses one of two concurrent writes, so a read-modify-write implementation is a legitimate starting point, but reach for a real atomic statement once your driver supports one. The `KeyValueStore`-backed defaults in `KeyValueStores.ts` document taking the read-modify-write shortcut here deliberately, for exactly this reason.
 
@@ -58,8 +58,8 @@ declare const db: {
 
 const infra =
   (label: string) =>
-  (cause: unknown): Auth.AuthError =>
-    new Auth.AuthError({ message: `${label} failed`, cause });
+  (cause: unknown): Auth.Errors.AuthError =>
+    new Auth.Errors.AuthError({ message: `${label} failed`, cause });
 
 // ---------------------------------------------------------------------------
 // SessionStore — session.id is always the SHA-256 hash of the bearer token.
@@ -74,7 +74,7 @@ interface SessionRow {
   attributes: string;
 }
 
-const rowToSession = (row: SessionRow): Auth.Session => ({
+const rowToSession = (row: SessionRow): Auth.Types.Session => ({
   id: row.id,
   userId: row.user_id,
   expiresAt: new Date(row.expires_at),
@@ -83,7 +83,7 @@ const rowToSession = (row: SessionRow): Auth.Session => ({
   attributes: JSON.parse(row.attributes),
 });
 
-const sessionStore: typeof Auth.SessionStore.Service = {
+const sessionStore: typeof Auth.SessionStore.SessionStore.Service = {
   create: (session) =>
     Effect.tryPromise({
       try: () =>
@@ -175,7 +175,7 @@ interface UserRow {
   attributes: string;
 }
 
-const rowToUser = (row: UserRow): Auth.User => ({
+const rowToUser = (row: UserRow): Auth.Types.User => ({
   id: row.id,
   ...(row.name !== null ? { name: row.name } : {}),
   ...(row.image !== null ? { image: row.image } : {}),
@@ -184,7 +184,7 @@ const rowToUser = (row: UserRow): Auth.User => ({
   attributes: JSON.parse(row.attributes),
 });
 
-const userStore: typeof Auth.UserStore.Service = {
+const userStore: typeof Auth.UserStore.UserStore.Service = {
   get: (userId) =>
     Effect.tryPromise({
       try: () => db.query<UserRow>("SELECT * FROM users WHERE id = ?", [userId]),
@@ -208,17 +208,17 @@ interface IdentifierRow {
   created_at: number;
 }
 
-const rowToIdentifier = (row: IdentifierRow): Auth.Identifier => ({
+const rowToIdentifier = (row: IdentifierRow): Auth.Identifier.Identifier => ({
   id: row.id,
   userId: row.user_id,
-  type: row.type as Auth.IdentifierType,
+  type: row.type as Auth.Identifier.IdentifierType,
   value: row.value,
   verified: row.verified !== 0,
   ...(row.verified_at !== null ? { verifiedAt: new Date(row.verified_at) } : {}),
   createdAt: new Date(row.created_at),
 });
 
-const identifierStore: typeof Auth.IdentifierStore.Service = {
+const identifierStore: typeof Auth.Identifier.IdentifierStore.Service = {
   getByValue: (type, value) =>
     Effect.tryPromise({
       try: () =>
@@ -262,7 +262,7 @@ const identifierStore: typeof Auth.IdentifierStore.Service = {
     }).pipe(Effect.as(identifier)),
 
   replace: (from, to) => {
-    const invalid = Auth.replaceInputError(from, to);
+    const invalid = Auth.Identifier.replaceInputError(from, to);
     if (invalid !== null) return Effect.fail(invalid);
     // Claim the new value first: the UNIQUE(type, value) index refuses one
     // another user holds while `from` is still in place. Then release `from`
@@ -327,19 +327,19 @@ const identifierStore: typeof Auth.IdentifierStore.Service = {
 // ---------------------------------------------------------------------------
 
 const storesLayer = Layer.mergeAll(
-  Layer.succeed(Auth.SessionStore)(sessionStore),
-  Layer.succeed(Auth.UserStore)(userStore),
-  Layer.succeed(Auth.IdentifierStore)(identifierStore),
+  Layer.succeed(Auth.SessionStore.SessionStore)(sessionStore),
+  Layer.succeed(Auth.UserStore.UserStore)(userStore),
+  Layer.succeed(Auth.Identifier.IdentifierStore)(identifierStore),
 );
 ```
 
-Provide `storesLayer` underneath `Auth.SessionService.layer(config)` and whichever sign-in feature's own store (`Auth.Email.EmailPasswordStore`, `Auth.PhoneOtpStore` + `Auth.PhoneOtpUserStore`, …) the same way — one `Layer.succeed(Auth.XStore)(impl)` per contract, merged together.
+Provide `storesLayer` underneath `Auth.SessionService.SessionService.layer(config)` and whichever sign-in feature's own store (`Auth.Email.EmailPasswordStore`, `Auth.PhoneOtp.PhoneOtpStore` + `Auth.PhoneOtp.PhoneOtpUserStore`, …) the same way — one `Layer.succeed(Auth.XStore)(impl)` per contract, merged together.
 
 ## 4. What "implement only what you use" means in practice
 
 A store contract's methods correspond 1:1 to what the feature that owns it needs — there's no unused surface to stub out. If your app never enables WebAuthn, you never implement `ChallengeStore`/`CredentialStore`; if you don't mount the OIDC provider, `OidcClientStore`/`OidcCodeStore`/`OidcTokenStore`/ `OidcConsentStore` don't exist for you. A handful of methods are themselves optional on the interface (`OAuthAccountStore.hasPassword`, `OAuthUserStore.updateUser`, `EmailPasswordStore.newUserId`, `OrganizationStore.listMembersByOrganizationPage`) — each is documented at the call site with what's skipped when it's absent. A store whose ids are not random v4 UUIDs should implement `newUserId` so the anti-enumeration stand-in's id has the same shape: with `antiEnumeration` on, sign-up answers an address another user holds with a stand-in user whose id comes from `newUserId`, or is a random UUID without it.
 
-Every store that creates users (`EmailPasswordStore`, `OAuthUserStore`, `MagicLinkUserStore`, `EmailOtpUserStore`, `PhoneOtpUserStore`, `AdminUserStore`, `ScimUserStore`) resolves its `createUser` (`create` on `ScimUserStore`) to `Auth.CreateUserResult`, `{ user, created }`. Report `created: true` only for a user this call inserted. A writer that finds or creates on the address reports `created: false` when it returns a user who already existed; the flow then fails with the address in use and writes nothing to that user (no password, no linked account, no verified address). When the user already exists, the writer must not modify that row either: core sees `created` only after the write, so an `INSERT … ON CONFLICT DO UPDATE` has already copied the caller's fields onto someone else's account. Use a plain `INSERT` and let the unique index on the address fail (the writer fails with `AuthError`; core then reports the address taken when it finds it held), or `INSERT … ON CONFLICT DO NOTHING` followed by a select of the existing row, reported as `created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never `ON CONFLICT DO UPDATE`. The input's optional `identifier` carries the address the user is created with, for a store that keeps it on the user row; a store with an identifiers table of its own can ignore it.
+Every store that creates users (`EmailPasswordStore`, `OAuthUserStore`, `MagicLinkUserStore`, `EmailOtpUserStore`, `PhoneOtpUserStore`, `AdminUserStore`, `ScimUserStore`) resolves its `createUser` (`create` on `ScimUserStore`) to `Auth.UserStore.CreateUserResult`, `{ user, created }`. Report `created: true` only for a user this call inserted. A writer that finds or creates on the address reports `created: false` when it returns a user who already existed; the flow then fails with the address in use and writes nothing to that user (no password, no linked account, no verified address). When the user already exists, the writer must not modify that row either: core sees `created` only after the write, so an `INSERT … ON CONFLICT DO UPDATE` has already copied the caller's fields onto someone else's account. Use a plain `INSERT` and let the unique index on the address fail (the writer fails with `AuthError`; core then reports the address taken when it finds it held), or `INSERT … ON CONFLICT DO NOTHING` followed by a select of the existing row, reported as `created: false`. If that select finds no row (for example under a REPEATABLE READ snapshot that predates the conflicting insert), fail with `AuthError` rather than return an invented user. Never `ON CONFLICT DO UPDATE`. The input's optional `identifier` carries the address the user is created with, for a store that keeps it on the user row; a store with an identifiers table of its own can ignore it.
 
 ## 5. Every store contract in core
 
@@ -347,13 +347,13 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 
 **Session & identity (core spine)**
 
-| Contract             | Namespace                 | What it holds                                                                              | Powers                                                                                                        |
-| -------------------- | ------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `SessionStore`       | `Auth.SessionStore`       | Sessions keyed by the SHA-256 hash of the bearer token                                     | `SessionService` — every sign-in flow                                                                         |
-| `UserStore`          | `Auth.UserStore`          | Read a user by id                                                                          | Read path used across the library                                                                             |
-| `UserServiceStore`   | `Auth.UserServiceStore`   | Get/update/delete the user record (name, image, attributes); `delete` removes the row only | `UserService` — profile updates; the last step of account deletion                                            |
-| `IdentifierStore`    | `Auth.IdentifierStore`    | Email/username/phone claims, globally unique per `(type, value)`                           | Identifier epic — EmailPassword, Username, PhoneOtp, MagicLink, EmailOtp, OAuth linking, SSO, Admin, and more |
-| `TrustedDeviceStore` | `Auth.TrustedDeviceStore` | Trusted-device cookie tokens, keyed by their hash                                          | `TrustedDeviceService` — "remember this device" 2FA skip                                                      |
+| Contract             | Namespace                               | What it holds                                                                              | Powers                                                                                                        |
+| -------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `SessionStore`       | `Auth.SessionStore.SessionStore`        | Sessions keyed by the SHA-256 hash of the bearer token                                     | `SessionService` — every sign-in flow                                                                         |
+| `UserStore`          | `Auth.UserStore.UserStore`              | Read a user by id                                                                          | Read path used across the library                                                                             |
+| `UserServiceStore`   | `Auth.User.UserServiceStore`            | Get/update/delete the user record (name, image, attributes); `delete` removes the row only | `UserService` — profile updates; the last step of account deletion                                            |
+| `IdentifierStore`    | `Auth.Identifier.IdentifierStore`       | Email/username/phone claims, globally unique per `(type, value)`                           | Identifier epic — EmailPassword, Username, PhoneOtp, MagicLink, EmailOtp, OAuth linking, SSO, Admin, and more |
+| `TrustedDeviceStore` | `Auth.TrustedDevice.TrustedDeviceStore` | Trusted-device cookie tokens, keyed by their hash                                          | `TrustedDeviceService` — "remember this device" 2FA skip                                                      |
 
 **Password & recovery**
 
@@ -366,15 +366,15 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 
 **Passwordless sign-in**
 
-| Contract             | Namespace                      | What it holds                                     | Powers                                                 |
-| -------------------- | ------------------------------ | ------------------------------------------------- | ------------------------------------------------------ |
-| `MagicLinkStore`     | `Auth.MagicLinkStore`          | Magic-link tokens, by token and by email          | `MagicLinkService`                                     |
-| `MagicLinkUserStore` | `Auth.MagicLinkUserStore`      | Create a user on first magic-link sign-in         | `MagicLinkService`                                     |
-| `EmailOtpStore`      | `Auth.Email.EmailOtpStore`     | One active email OTP per `(email, purpose)`       | `EmailOtpService`                                      |
-| `EmailOtpUserStore`  | `Auth.Email.EmailOtpUserStore` | Create a user on first email-OTP sign-in          | `EmailOtpService`                                      |
-| `PhoneOtpStore`      | `Auth.PhoneOtpStore`           | One active phone OTP per `(phoneNumber, purpose)` | `PhoneOtpService`                                      |
-| `PhoneOtpUserStore`  | `Auth.PhoneOtpUserStore`       | Create a user on first phone-OTP sign-in          | `PhoneOtpService`                                      |
-| `OneTimeTokenStore`  | `Auth.OneTimeTokenStore`       | Generic one-time tokens                           | `OneTimeTokenService` / `redeemOneTimeTokenForSession` |
+| Contract             | Namespace                             | What it holds                                     | Powers                                                 |
+| -------------------- | ------------------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
+| `MagicLinkStore`     | `Auth.MagicLink.MagicLinkStore`       | Magic-link tokens, by token and by email          | `MagicLinkService`                                     |
+| `MagicLinkUserStore` | `Auth.MagicLink.MagicLinkUserStore`   | Create a user on first magic-link sign-in         | `MagicLinkService`                                     |
+| `EmailOtpStore`      | `Auth.Email.EmailOtpStore`            | One active email OTP per `(email, purpose)`       | `EmailOtpService`                                      |
+| `EmailOtpUserStore`  | `Auth.Email.EmailOtpUserStore`        | Create a user on first email-OTP sign-in          | `EmailOtpService`                                      |
+| `PhoneOtpStore`      | `Auth.PhoneOtp.PhoneOtpStore`         | One active phone OTP per `(phoneNumber, purpose)` | `PhoneOtpService`                                      |
+| `PhoneOtpUserStore`  | `Auth.PhoneOtp.PhoneOtpUserStore`     | Create a user on first phone-OTP sign-in          | `PhoneOtpService`                                      |
+| `OneTimeTokenStore`  | `Auth.OneTimeToken.OneTimeTokenStore` | Generic one-time tokens                           | `OneTimeTokenService` / `redeemOneTimeTokenForSession` |
 
 **Second factor**
 
@@ -388,42 +388,42 @@ Grouped by cluster, in the same order the source is organized. "Namespace" is ho
 
 **OAuth & SSO**
 
-| Contract                 | Namespace                      | What it holds                                               | Powers                                                      |
-| ------------------------ | ------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------- |
-| `OAuthStateStore`        | `Auth.OAuth.OAuthStateStore`   | Single-use CSRF state for the OAuth redirect round trip     | `OAuthService`, `SsoService` (OIDC)                         |
-| `OAuthAccountStore`      | `Auth.OAuth.OAuthAccountStore` | Linked provider accounts                                    | `OAuthService` — social login, linking/unlinking            |
-| `OAuthUserStore`         | `Auth.OAuth.OAuthUserStore`    | Create/get/optionally update a user from a provider profile | `OAuthService`                                              |
-| `GoogleOneTapNonceStore` | `Auth.GoogleOneTapNonceStore`  | One Tap replay-protection nonces                            | `GoogleOneTapService`                                       |
-| `SsoProviderStore`       | `Auth.SsoProviderStore`        | Registered OIDC/SAML SSO connections                        | `SsoService` — enterprise SSO                               |
-| `SamlReplayStore`        | `Auth.SamlReplayStore`         | One-time consume of AuthnRequest/assertion ids              | SAML SP replay protection (`packages/effect-auth/src/saml`) |
+| Contract                 | Namespace                                  | What it holds                                               | Powers                                                      |
+| ------------------------ | ------------------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------- |
+| `OAuthStateStore`        | `Auth.OAuth.OAuthStateStore`               | Single-use CSRF state for the OAuth redirect round trip     | `OAuthService`, `SsoService` (OIDC)                         |
+| `OAuthAccountStore`      | `Auth.OAuth.OAuthAccountStore`             | Linked provider accounts                                    | `OAuthService` — social login, linking/unlinking            |
+| `OAuthUserStore`         | `Auth.OAuth.OAuthUserStore`                | Create/get/optionally update a user from a provider profile | `OAuthService`                                              |
+| `GoogleOneTapNonceStore` | `Auth.GoogleOneTap.GoogleOneTapNonceStore` | One Tap replay-protection nonces                            | `GoogleOneTapService`                                       |
+| `SsoProviderStore`       | `Auth.Sso.SsoProviderStore`                | Registered OIDC/SAML SSO connections                        | `SsoService` — enterprise SSO                               |
+| `SamlReplayStore`        | `Auth.Saml.SamlReplayStore`                | One-time consume of AuthnRequest/assertion ids              | SAML SP replay protection (`packages/effect-auth/src/saml`) |
 
 **OIDC provider**
 
-| Contract           | Namespace               | What it holds                                                                                 | Powers                |
-| ------------------ | ----------------------- | --------------------------------------------------------------------------------------------- | --------------------- |
-| `OidcClientStore`  | `Auth.OidcClientStore`  | Registered OIDC clients — static and dynamically registered (RFC 7591)                        | `OidcProviderService` |
-| `OidcCodeStore`    | `Auth.OidcCodeStore`    | Authorization codes and pending-consent artifacts                                             | `OidcProviderService` |
-| `OidcTokenStore`   | `Auth.OidcTokenStore`   | Issued access/refresh tokens and rotation records, per-user, per-family and per-client revoke | `OidcProviderService` |
-| `OidcConsentStore` | `Auth.OidcConsentStore` | Recorded user consent per client                                                              | `OidcProviderService` |
+| Contract           | Namespace                            | What it holds                                                                                 | Powers                |
+| ------------------ | ------------------------------------ | --------------------------------------------------------------------------------------------- | --------------------- |
+| `OidcClientStore`  | `Auth.OidcProvider.OidcClientStore`  | Registered OIDC clients — static and dynamically registered (RFC 7591)                        | `OidcProviderService` |
+| `OidcCodeStore`    | `Auth.OidcProvider.OidcCodeStore`    | Authorization codes and pending-consent artifacts                                             | `OidcProviderService` |
+| `OidcTokenStore`   | `Auth.OidcProvider.OidcTokenStore`   | Issued access/refresh tokens and rotation records, per-user, per-family and per-client revoke | `OidcProviderService` |
+| `OidcConsentStore` | `Auth.OidcProvider.OidcConsentStore` | Recorded user consent per client                                                              | `OidcProviderService` |
 
 **API keys, devices, admin, orgs**
 
-| Contract                   | Namespace                       | What it holds                                                         | Powers                                             |
-| -------------------------- | ------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------- |
-| `ApiKeyStore`              | `Auth.ApiKeyStore`              | Hashed API keys                                                       | `ApiKeyService`                                    |
-| `JwtKeyStore`              | `Auth.JwtKeyStore`              | JWT signing key pairs                                                 | `JwtService` / JWKS                                |
-| `DeviceAuthorizationStore` | `Auth.DeviceAuthorizationStore` | RFC 8628 `device_code`/`user_code` records                            | `DeviceAuthorizationService`                       |
-| `AnonymousUserStore`       | `Auth.AnonymousUserStore`       | Create/delete guest users                                             | `AnonymousService`                                 |
-| `AdminUserStore`           | `Auth.AdminUserStore`           | List/create users, admin password reset                               | `AdminService`                                     |
-| `OrganizationStore`        | `Auth.OrganizationStore`        | Organizations, members, invitations, teams, custom roles              | `OrganizationService`                              |
-| `OrganizationDomainStore`  | `Auth.OrganizationDomainStore`  | Email-domain claims (one per org and domain, one verified per domain) | `OrganizationService` — domains + JIT provisioning |
-| `AccountManagementStore`   | `Auth.AccountManagementStore`   | Pending email-change/delete-account tokens                            | `AccountManagementService`                         |
+| Contract                   | Namespace                                           | What it holds                                                         | Powers                                             |
+| -------------------------- | --------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------- |
+| `ApiKeyStore`              | `Auth.ApiKey.ApiKeyStore`                           | Hashed API keys                                                       | `ApiKeyService`                                    |
+| `JwtKeyStore`              | `Auth.Jwt.JwtKeyStore`                              | JWT signing key pairs                                                 | `JwtService` / JWKS                                |
+| `DeviceAuthorizationStore` | `Auth.DeviceAuthorization.DeviceAuthorizationStore` | RFC 8628 `device_code`/`user_code` records                            | `DeviceAuthorizationService`                       |
+| `AnonymousUserStore`       | `Auth.Anonymous.AnonymousUserStore`                 | Create/delete guest users                                             | `AnonymousService`                                 |
+| `AdminUserStore`           | `Auth.Admin.AdminUserStore`                         | List/create users, admin password reset                               | `AdminService`                                     |
+| `OrganizationStore`        | `Auth.Organization.OrganizationStore`               | Organizations, members, invitations, teams, custom roles              | `OrganizationService`                              |
+| `OrganizationDomainStore`  | `Auth.Organization.OrganizationDomainStore`         | Email-domain claims (one per org and domain, one verified per domain) | `OrganizationService` — domains + JIT provisioning |
+| `AccountManagementStore`   | `Auth.AccountManagement.AccountManagementStore`     | Pending email-change/delete-account tokens                            | `AccountManagementService`                         |
 
 **Rate limiting, lockout, authorization**
 
 | Contract              | Namespace                          | What it holds                                                       | Powers                                                                                 |
 | --------------------- | ---------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `RateLimitStore`      | `Auth.RateLimitStore`              | Rate-limit counters                                                 | `RateLimiter`                                                                          |
+| `RateLimitStore`      | `Auth.RateLimit.RateLimitStore`    | Rate-limit counters                                                 | `RateLimiter`                                                                          |
 | `AccountLockoutStore` | `Auth.Plugins.AccountLockoutStore` | Atomic lockout counters (see §2)                                    | `AccountLockoutPlugin`                                                                 |
 | `PolicyStore`         | `Auth.PolicyStore.PolicyStore`     | Versioned policy documents, templates, and template-linked policies | Policies-as-data — the M3 authorization framework, organization dynamic access control |
 
@@ -450,7 +450,7 @@ import { Effect } from "effect";
 import * as Testing from "@thomasfosterau/effect-auth/testing";
 
 // Your stores' tables reference users: write the row before a case uses its id.
-const seedUser = (user: Auth.User) => insertUserRow(user);
+const seedUser = (user: Auth.Types.User) => insertUserRow(user);
 
 for (const suite of [
   Testing.sessionStoreConformance({ seedUser }),

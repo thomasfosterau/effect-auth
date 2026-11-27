@@ -14,7 +14,7 @@
  * export const users = pgTable(
  *   "users",
  *   { id: text("id").primaryKey(), role: text("role").notNull().default("user") },
- *   (table) => [check("users_role_valid", Drizzle.ladderCheck(table.role, Roles))],
+ *   (table) => [check("users_role_valid", Drizzle.LadderCheck.ladderCheck(table.role, Roles))],
  * )
  * ```
  *

@@ -15,7 +15,7 @@
  *
  * program.pipe(
  *   Effect.provide(
- *     Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db))),
+ *     Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(db))),
  *   ),
  * );
  * ```
@@ -84,7 +84,7 @@ export const layer = (
  */
 export const getSession = (
   id: string,
-): Effect.Effect<Option.Option<Auth.Session>, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.Types.Session>, Auth.Errors.AuthError, AuthRequests> =>
   Effect.request<SessionStore.GetSession, never, AuthRequests>(
     new SessionStore.GetSession({ id }),
     Effect.map(AuthRequests, (requests) => requests.session),
@@ -96,7 +96,7 @@ export const getSession = (
  */
 export const getUser = (
   id: string,
-): Effect.Effect<Option.Option<Auth.User>, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.Types.User>, Auth.Errors.AuthError, AuthRequests> =>
   Effect.request<UserStore.GetUser, never, AuthRequests>(
     new UserStore.GetUser({ id }),
     Effect.map(AuthRequests, (requests) => requests.user),
@@ -107,9 +107,9 @@ export const getUser = (
  * concurrent pair lookup. `None` on a miss.
  */
 export const getIdentifierByValue = (
-  type: Auth.IdentifierType,
+  type: Auth.Identifier.IdentifierType,
   value: string,
-): Effect.Effect<Option.Option<Auth.Identifier>, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<Option.Option<Auth.Identifier.Identifier>, Auth.Errors.AuthError, AuthRequests> =>
   Effect.request<IdentifierStore.GetIdentifierByValue, never, AuthRequests>(
     new IdentifierStore.GetIdentifierByValue({ type, value }),
     Effect.map(AuthRequests, (requests) => requests.identifierByValue),
@@ -121,7 +121,7 @@ export const getIdentifierByValue = (
  */
 export const listIdentifiersByUser = (
   userId: string,
-): Effect.Effect<ReadonlyArray<Auth.Identifier>, Auth.AuthError, AuthRequests> =>
+): Effect.Effect<ReadonlyArray<Auth.Identifier.Identifier>, Auth.Errors.AuthError, AuthRequests> =>
   Effect.request<IdentifierStore.ListIdentifiersByUser, never, AuthRequests>(
     new IdentifierStore.ListIdentifiersByUser({ userId }),
     Effect.map(AuthRequests, (requests) => requests.identifiersByUser),

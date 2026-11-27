@@ -12,7 +12,10 @@ import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
-import { HashingError, Password } from "@thomasfosterau/effect-auth";
+import { HashingError } from "@thomasfosterau/effect-auth/Errors";
+import { Password } from "@thomasfosterau/effect-auth";
+import { Argon2ConfigError } from "@thomasfosterau/effect-auth/Password";
+import * as PlatformCrypto from "@thomasfosterau/effect-auth/PlatformCrypto";
 import {
   ARGON2ID,
   HASH_LENGTH,
@@ -35,12 +38,6 @@ type PasswordHasherService = typeof Password.PasswordHasher.Service;
 
 /** The three Argon2 variants `verify` accepts in a stored PHC string. */
 const variants: ReadonlyArray<string> = ["argon2d", "argon2i", "argon2id"];
-
-/**
- * Salt bytes from the platform Web Crypto API — available on Node ≥ 20, Bun,
- * Deno and Workers alike, which `node:crypto.randomBytes` is not.
- */
-const randomSalt = (): Uint8Array => globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
 
 const invalidHash = (detail: string): Effect.Effect<never, HashingError> =>
   Effect.fail(new HashingError({ message: `Invalid Argon2 hash: ${detail}` }));
@@ -235,7 +232,9 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
   );
   if (Option.isSome(invalid)) {
     const [name, value] = invalid.value;
-    throw new RangeError(`Argon2 ${name} must be a positive integer, got ${value}`);
+    throw new Argon2ConfigError({
+      message: `Argon2 ${name} must be a positive integer, got ${value}`,
+    });
   }
   const checks = [
     ["memoryCost", costs.memoryCost, "maxMemoryKiB", limits.maxMemoryKiB],
@@ -245,9 +244,9 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
   const over = Arr.findFirst(checks, ([, value, , max]) => value > max);
   if (Option.isNone(over)) return;
   const [cost, value, limit, max] = over.value;
-  throw new RangeError(
-    `Argon2 ${cost}=${value} is over ${limit}=${max}: its hashes would not verify`,
-  );
+  throw new Argon2ConfigError({
+    message: `Argon2 ${cost}=${value} is over ${limit}=${max}: its hashes would not verify`,
+  });
 };
 
 /**
@@ -260,7 +259,7 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
  * `verify` refuses, with a `HashingError` and before running the KDF, a
  * stored hash whose costs exceed the verify ceiling (`maxMemoryKiB` 131072,
  * `maxIterations` 10, `maxParallelism` 8 unless configured). Throws a
- * `RangeError` when a limit is not a positive integer, or when the configured
+ * {@link Argon2ConfigError} when a limit is not a positive integer, or when the configured
  * costs exceed the ceiling, since their hashes would not verify.
  *
  * `needsRehash` is true for a stored hash `verify` refuses, and for one weaker
@@ -272,7 +271,8 @@ const requireWithinCeiling = (costs: Argon2Profile, limits: Argon2VerifyLimits):
  *
  * @example
  * ```ts
- * import { argon2Hasher, argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
+ * import { argon2Hasher, argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
+ * import { serverProfile } from "@thomasfosterau/effect-auth-argon2/Common";
  *
  * const hasher = argon2Hasher();               // OWASP low-memory defaults
  * const layer = argon2HasherLayer(serverProfile); // 64 MiB, t = 3 on Node
@@ -282,6 +282,7 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
   const costs = resolveOptions(options);
   const limits = resolveVerifyLimits(options);
   requireWithinCeiling(costs, limits);
+  const random = options?.random ?? PlatformCrypto.instance;
 
   return {
     algorithm: ARGON2ID,
@@ -296,8 +297,9 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
     })(function* (password: string) {
       yield* requireHashablePassword(password);
 
+      const salt = yield* random.randomBytes(SALT_LENGTH);
       const phc = yield* Effect.mapError(
-        Effect.suspend(() => Effect.fromResult(hashArgon2id(password, randomSalt(), costs))),
+        Effect.suspend(() => Effect.fromResult(hashArgon2id(password, salt, costs))),
         (cause) => new HashingError({ message: "Failed to hash password with Argon2id", cause }),
       );
 
@@ -335,7 +337,7 @@ export const argon2Hasher = (options?: Argon2Options): PasswordHasherService => 
  * A `Layer` providing {@link Password.PasswordHasher} backed by the WASM
  * Argon2id hasher. Use in place of `PasswordHasher.layer()` to make Argon2id
  * the default hasher for new passwords. Like {@link argon2Hasher}, it throws
- * a `RangeError` when the configured costs exceed the verify ceiling.
+ * an {@link Argon2ConfigError} when the configured costs exceed the verify ceiling.
  */
 export const argon2HasherLayer = (options?: Argon2Options): Layer.Layer<Password.PasswordHasher> =>
   Layer.succeed(PasswordHasher, argon2Hasher(options));

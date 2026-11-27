@@ -37,6 +37,82 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./ApiKeyStore": {
+      "types": "./dist/ApiKeyStore.d.ts",
+      "import": "./dist/ApiKeyStore.js"
+    },
+    "./Columns": {
+      "types": "./dist/Columns.d.ts",
+      "import": "./dist/Columns.js"
+    },
+    "./Database": {
+      "types": "./dist/Database.d.ts",
+      "import": "./dist/Database.js"
+    },
+    "./EmailPasswordStore": {
+      "types": "./dist/EmailPasswordStore.d.ts",
+      "import": "./dist/EmailPasswordStore.js"
+    },
+    "./IdentifierStore": {
+      "types": "./dist/IdentifierStore.d.ts",
+      "import": "./dist/IdentifierStore.js"
+    },
+    "./LadderCheck": {
+      "types": "./dist/LadderCheck.d.ts",
+      "import": "./dist/LadderCheck.js"
+    },
+    "./Layers": {
+      "types": "./dist/Layers.d.ts",
+      "import": "./dist/Layers.js"
+    },
+    "./MySql": {
+      "types": "./dist/MySqlSchema.d.ts",
+      "import": "./dist/MySqlSchema.js"
+    },
+    "./OwnedListFilter": {
+      "types": "./dist/OwnedListFilter.d.ts",
+      "import": "./dist/OwnedListFilter.js"
+    },
+    "./Pg": {
+      "types": "./dist/PgSchema.d.ts",
+      "import": "./dist/PgSchema.js"
+    },
+    "./RateLimitStore": {
+      "types": "./dist/RateLimitStore.d.ts",
+      "import": "./dist/RateLimitStore.js"
+    },
+    "./Requests": {
+      "types": "./dist/Requests.d.ts",
+      "import": "./dist/Requests.js"
+    },
+    "./Schema": {
+      "types": "./dist/Schema.d.ts",
+      "import": "./dist/Schema.js"
+    },
+    "./SessionStore": {
+      "types": "./dist/SessionStore.d.ts",
+      "import": "./dist/SessionStore.js"
+    },
+    "./SingleTableIdentifierStore": {
+      "types": "./dist/SingleTableIdentifierStore.d.ts",
+      "import": "./dist/SingleTableIdentifierStore.js"
+    },
+    "./Sqlite": {
+      "types": "./dist/SqliteSchema.d.ts",
+      "import": "./dist/SqliteSchema.js"
+    },
+    "./TokenStore": {
+      "types": "./dist/TokenStore.d.ts",
+      "import": "./dist/TokenStore.js"
+    },
+    "./UserServiceStore": {
+      "types": "./dist/UserServiceStore.d.ts",
+      "import": "./dist/UserServiceStore.js"
+    },
+    "./UserStore": {
+      "types": "./dist/UserStore.d.ts",
+      "import": "./dist/UserStore.js"
     }
   },
   "publishConfig": {

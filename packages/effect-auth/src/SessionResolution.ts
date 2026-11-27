@@ -473,7 +473,8 @@ export interface ResolveFailOpenOptions<E, R> extends ResolveOptions<E, R> {
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
  * import * as Option from "effect/Option"
- * import { SessionCookies, SessionResolution, type SessionWithUser } from "@thomasfosterau/effect-auth"
+ * import { SessionCookies, SessionResolution } from "@thomasfosterau/effect-auth"
+ * import { type SessionWithUser } from "@thomasfosterau/effect-auth/Types"
  *
  * const now = new Date()
  * const signedIn: SessionWithUser = {

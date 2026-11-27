@@ -18,6 +18,7 @@ import { SqlClient, SqlError, Statement } from "effect/sql";
 import * as Auth from "../index.ts";
 import { decodeBigintColumns } from "./Int8.ts";
 import { definedKeys } from "../DefinedKeys.ts";
+import * as PlatformCrypto from "../PlatformCrypto.ts";
 
 // ---------------------------------------------------------------------------
 // Codecs
@@ -27,7 +28,7 @@ const toBase64 = Schema.encodeSync(Schema.Uint8ArrayFromBase64);
 /** Decodes a column this module wrote with {@link toBase64}; throws on a corrupt value. */
 const fromBase64 = Schema.decodeSync(Schema.Uint8ArrayFromBase64);
 
-const AttributesJson = Schema.fromJsonString(Auth.Attributes);
+const AttributesJson = Schema.fromJsonString(Auth.Types.Attributes);
 const StringListJson = Schema.fromJsonString(Schema.Array(Schema.String));
 const PermissionsJson = Schema.fromJsonString(
   Schema.Record(Schema.String, Schema.Array(Schema.String)),
@@ -43,11 +44,11 @@ const decodePermissions = Schema.decodeSync(PermissionsJson);
 const decodeAttributes = (
   text: string | null,
   label: string,
-): Effect.Effect<Auth.Attributes, Auth.AuthError> =>
+): Effect.Effect<Auth.Types.Attributes, Auth.Errors.AuthError> =>
   Effect.try({
     try: () => (text == null ? {} : decodeAttributesJson(text)),
     catch: (cause) =>
-      new Auth.AuthError({ message: `${label}: attributes JSON parse failed`, cause }),
+      new Auth.Errors.AuthError({ message: `${label}: attributes JSON parse failed`, cause }),
   });
 
 const dateToMs = (date: Date): number => date.getTime();
@@ -58,24 +59,26 @@ const decodeMillis = Schema.decodeUnknownEffect(Schema.DateFromMillis);
  * `Schema.DateFromMillis`: a value outside the `Date` range fails as an
  * `AuthError` instead of becoming an Invalid Date.
  */
-const msToDate = (ms: number, label: string): Effect.Effect<Date, Auth.AuthError> =>
+const msToDate = (ms: number, label: string): Effect.Effect<Date, Auth.Errors.AuthError> =>
   decodeMillis(ms).pipe(
     Effect.mapError(
-      (cause) => new Auth.AuthError({ message: `${label}: stored instant did not decode`, cause }),
+      (cause) =>
+        new Auth.Errors.AuthError({ message: `${label}: stored instant did not decode`, cause }),
     ),
   );
 
 /** A stored enumeration column back to its literal; anything else fails as an `AuthError`. */
 const decodeColumn =
   <A>(schema: Schema.Decoder<A>) =>
-  (value: string, label: string): Effect.Effect<A, Auth.AuthError> =>
+  (value: string, label: string): Effect.Effect<A, Auth.Errors.AuthError> =>
     Schema.decodeEffect(schema)(value).pipe(
       Effect.mapError(
-        (cause) => new Auth.AuthError({ message: `${label}: stored value did not decode`, cause }),
+        (cause) =>
+          new Auth.Errors.AuthError({ message: `${label}: stored value did not decode`, cause }),
       ),
     );
 
-const decodeIdentifierType = decodeColumn(Auth.Identifier.fields.type);
+const decodeIdentifierType = decodeColumn(Auth.Identifier.Identifier.fields.type);
 const decodeEmailOtpPurpose = decodeColumn<Auth.Email.EmailOtpPurpose>(
   Schema.Literals(["sign-in", "email-verification", "forget-password"]),
 );
@@ -86,8 +89,8 @@ const decodeEmailOtpPurpose = decodeColumn<Auth.Email.EmailOtpPurpose>(
  */
 const toAuthError =
   (label: string) =>
-  (cause: unknown): Auth.AuthError =>
-    new Auth.AuthError({ message: `sql ${label} failed`, cause });
+  (cause: unknown): Auth.Errors.AuthError =>
+    new Auth.Errors.AuthError({ message: `sql ${label} failed`, cause });
 
 const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
   statement.pipe(Effect.asVoid, Effect.mapError(toAuthError(label)));
@@ -101,7 +104,7 @@ const asVoid = <A, E>(label: string, statement: Effect.Effect<A, E>) =>
 const allRows = <A extends object>(
   label: string,
   statement: Effect.Effect<ReadonlyArray<A>, SqlError.SqlError>,
-): Effect.Effect<ReadonlyArray<A>, Auth.AuthError> =>
+): Effect.Effect<ReadonlyArray<A>, Auth.Errors.AuthError> =>
   statement.pipe(
     Effect.mapError(toAuthError(label)),
     Effect.flatMap((rows) =>
@@ -126,14 +129,17 @@ const decodeRow =
  */
 const makeTx =
   (sql: SqlClient.SqlClient) =>
-  <A>(label: string, effect: Effect.Effect<A, Auth.AuthError>): Effect.Effect<A, Auth.AuthError> =>
+  <A>(
+    label: string,
+    effect: Effect.Effect<A, Auth.Errors.AuthError>,
+  ): Effect.Effect<A, Auth.Errors.AuthError> =>
     sql
       .withTransaction(effect)
       .pipe(
-        Effect.mapError((e): Auth.AuthError =>
-          e instanceof Auth.AuthError
+        Effect.mapError((e): Auth.Errors.AuthError =>
+          e instanceof Auth.Errors.AuthError
             ? e
-            : new Auth.AuthError({ message: `sql ${label} failed`, cause: e }),
+            : new Auth.Errors.AuthError({ message: `sql ${label} failed`, cause: e }),
         ),
       );
 
@@ -156,7 +162,7 @@ interface UserRow {
 const rowToUser = (
   row: Omit<UserRow, "password_hash">,
   label: string,
-): Effect.Effect<Auth.User, Auth.AuthError> =>
+): Effect.Effect<Auth.Types.User, Auth.Errors.AuthError> =>
   Effect.all(
     {
       attributes: decodeAttributes(row.attributes, label),
@@ -186,14 +192,17 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     getById(userId, label).pipe(
       Effect.flatMap(
         Option.match({
-          onNone: (): Effect.Effect<Auth.User, Auth.AuthError | Auth.UserNotFoundError> =>
-            Effect.fail(new Auth.UserNotFoundError({ message: "User not found", userId })),
+          onNone: (): Effect.Effect<
+            Auth.Types.User,
+            Auth.Errors.AuthError | Auth.Errors.UserNotFoundError
+          > =>
+            Effect.fail(new Auth.Errors.UserNotFoundError({ message: "User not found", userId })),
           onSome: (row) => rowToUser(row, label),
         }),
       ),
     );
 
-  const insert = (user: Auth.User, label: string) =>
+  const insert = (user: Auth.Types.User, label: string) =>
     asVoid(
       label,
       sql`INSERT INTO auth_users (id, name, image, password_hash, attributes, created_at, updated_at)
@@ -204,14 +213,14 @@ const userQueries = (sql: SqlClient.SqlClient) => {
     input: {
       readonly name?: string;
       readonly image?: string;
-      readonly attributes?: Auth.Attributes;
+      readonly attributes?: Auth.Types.Attributes;
     },
     label: string,
-  ): Effect.Effect<Auth.CreateUserResult, Auth.AuthError> =>
+  ): Effect.Effect<Auth.UserStore.CreateUserResult, Auth.Errors.AuthError> =>
     Effect.gen(function* () {
       const now = yield* DateTime.nowAsDate;
-      const user: Auth.User = {
-        id: globalThis.crypto.randomUUID(),
+      const user: Auth.Types.User = {
+        id: yield* PlatformCrypto.instance.uuidV4(),
         createdAt: now,
         updatedAt: now,
         attributes: input.attributes ?? {},
@@ -258,7 +267,7 @@ interface SessionRow {
 const rowToSession = (
   row: SessionRow,
   label: string,
-): Effect.Effect<Auth.Session, Auth.AuthError> =>
+): Effect.Effect<Auth.Types.Session, Auth.Errors.AuthError> =>
   Effect.all(
     {
       attributes: decodeAttributes(row.attributes, label),
@@ -278,9 +287,9 @@ const rowToSession = (
     })),
   );
 
-/** `Auth.SessionStore` over the `auth_sessions` table; requires `SqlClient`. */
+/** `Auth.SessionStore.SessionStore` over the `auth_sessions` table; requires `SqlClient`. */
 export const makeSessionStore: Effect.Effect<
-  typeof Auth.SessionStore.Service,
+  typeof Auth.SessionStore.SessionStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -323,19 +332,19 @@ export const makeSessionStore: Effect.Effect<
           }),
         ),
       ),
-  } satisfies typeof Auth.SessionStore.Service;
+  } satisfies typeof Auth.SessionStore.SessionStore.Service;
 });
 
-/** `Auth.UserStore` over the `auth_users` table; requires `SqlClient`. */
+/** `Auth.UserStore.UserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeUserStore: Effect.Effect<
-  typeof Auth.UserStore.Service,
+  typeof Auth.UserStore.UserStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     get: (userId) => users.findById(userId, "user.get"),
-  } satisfies typeof Auth.UserStore.Service;
+  } satisfies typeof Auth.UserStore.UserStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -343,13 +352,13 @@ export const makeUserStore: Effect.Effect<
 // ---------------------------------------------------------------------------
 
 /**
- * `Auth.UserServiceStore` over the `auth_users` table; requires `SqlClient`.
+ * `Auth.User.UserServiceStore` over the `auth_users` table; requires `SqlClient`.
  * `delete` removes the user's `auth_user_roles` rows with the user row, in
  * one transaction: the roles are this subpath's own data about the user, and
  * no core store owns them.
  */
 export const makeUserServiceStore: Effect.Effect<
-  typeof Auth.UserServiceStore.Service,
+  typeof Auth.User.UserServiceStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -370,7 +379,7 @@ export const makeUserServiceStore: Effect.Effect<
           asVoid("userService.delete", sql`DELETE FROM auth_users WHERE id = ${userId}`),
         ),
       ),
-  } satisfies typeof Auth.UserServiceStore.Service;
+  } satisfies typeof Auth.User.UserServiceStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -431,7 +440,7 @@ interface RolePermissionRow {
 }
 
 /**
- * An {@link Auth.EntityResolver} projecting `auth_user_roles` into the entity
+ * An {@link Auth.Authorizer.EntityResolver} projecting `auth_user_roles` into the entity
  * graph: `User::"<userId>"` with a `Role::"<role>"` parent per assigned role,
  * which is what `principal in Role::"admin"` decides over.
  *
@@ -443,14 +452,14 @@ interface RolePermissionRow {
  * an application resolver.
  */
 export const makeRbacEntityResolver: Effect.Effect<
-  typeof Auth.EntityResolver.Service,
+  typeof Auth.Authorizer.EntityResolver.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const rolesFor = (userId: string) =>
     sql<RoleRow>`SELECT role FROM auth_user_roles WHERE user_id = ${userId}`.pipe(
       Effect.map((rows) => rows.map((row) => row.role)),
-      Effect.orDie,
+      Effect.mapError(toAuthError("rbacEntityResolver.resolve")),
     );
   return {
     resolve: Effect.fn("Sql.rbacEntityResolver.resolve")(function* (
@@ -466,7 +475,7 @@ export const makeRbacEntityResolver: Effect.Effect<
         { concurrency: 1 },
       );
     }),
-  } satisfies typeof Auth.EntityResolver.Service;
+  } satisfies typeof Auth.Authorizer.EntityResolver.Service;
 });
 
 /**
@@ -475,16 +484,16 @@ export const makeRbacEntityResolver: Effect.Effect<
  * hand-written `Auth.Rbac` configuration produce byte-identical policies.
  *
  * Policies are read once, where they are needed: pass the result to
- * `Auth.Authorizer.layer({ policies })` at startup, or re-read it behind a
+ * `Auth.Authorizer.Authorizer.layer({ policies })` at startup, or re-read it behind a
  * `PolicyStore` if tenant edits must apply without a restart.
  */
 export const readRbacPolicies: Effect.Effect<
   ReadonlyArray<Auth.Policy.DeclarativePolicy>,
-  never,
+  Auth.Errors.AuthError,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.use((sql) =>
   sql<RolePermissionRow>`SELECT role, resource, action FROM auth_role_permissions`.pipe(
-    Effect.orDie,
+    Effect.mapError(toAuthError("readRbacPolicies")),
     Effect.map((rows) => {
       const rolePermissions = R.map(
         Arr.groupBy(rows, (row) => row.role),
@@ -506,14 +515,14 @@ interface RateLimitRow {
   readonly blocked_until: number | null;
 }
 
-const rowToRateLimit = (row: RateLimitRow): Auth.RateLimitEntry =>
+const rowToRateLimit = (row: RateLimitRow): Auth.RateLimit.RateLimitEntry =>
   row.blocked_until == null
     ? { key: row.key, count: row.count, resetAt: row.reset_at }
     : { key: row.key, count: row.count, resetAt: row.reset_at, blockedUntil: row.blocked_until };
 
-/** `Auth.RateLimitStore` over the `auth_rate_limits` table; requires `SqlClient`. */
+/** `Auth.RateLimit.RateLimitStore` over the `auth_rate_limits` table; requires `SqlClient`. */
 export const makeRateLimitStore: Effect.Effect<
-  typeof Auth.RateLimitStore.Service,
+  typeof Auth.RateLimit.RateLimitStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -559,7 +568,7 @@ export const makeRateLimitStore: Effect.Effect<
       }),
     delete: (key) =>
       asVoid("rateLimit.delete", sql`DELETE FROM auth_rate_limits WHERE key = ${key}`),
-  } satisfies typeof Auth.RateLimitStore.Service;
+  } satisfies typeof Auth.RateLimit.RateLimitStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -640,7 +649,7 @@ interface ChallengeRow {
 /** A row whose ceremony is not one the core knows reads as missing. */
 const rowToChallenge = (
   row: ChallengeRow,
-): Effect.Effect<Option.Option<Auth.MultiFactor.WebAuthnChallenge>, Auth.AuthError> => {
+): Effect.Effect<Option.Option<Auth.MultiFactor.WebAuthnChallenge>, Auth.Errors.AuthError> => {
   const { ceremony } = row;
   if (!Auth.MultiFactor.isWebAuthnCeremony(ceremony)) return Effect.succeedNone;
   return Effect.try({
@@ -652,7 +661,7 @@ const rowToChallenge = (
           : { challenge, ceremony, expiresAt: row.expires_at, userId: row.user_id },
       );
     },
-    catch: (cause) => new Auth.AuthError({ message: "challenge decode failed", cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: "challenge decode failed", cause }),
   });
 };
 
@@ -729,7 +738,7 @@ interface CredentialRow {
 
 const rowToCredential = (
   row: CredentialRow,
-): Effect.Effect<Auth.MultiFactor.WebAuthnCredential, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.WebAuthnCredential, Auth.Errors.AuthError> =>
   Effect.try({
     try: () => ({
       id: row.id,
@@ -746,7 +755,7 @@ const rowToCredential = (
         aaguid: row.aaguid ?? undefined,
       }),
     }),
-    catch: (cause) => new Auth.AuthError({ message: "credential decode failed", cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: "credential decode failed", cause }),
   });
 
 const optionalFlag = (flag: boolean | undefined): number | null =>
@@ -1032,7 +1041,7 @@ export const makeOAuthAccountStore: Effect.Effect<
                 Effect.flatMap((held) =>
                   Option.isSome(held)
                     ? Effect.fail(
-                        new Auth.AuthError({
+                        new Auth.Errors.AuthError({
                           message: "oauthAccount.linkToUser: the link belongs to another user",
                         }),
                       )
@@ -1087,7 +1096,9 @@ export const makeOAuthUserStore: Effect.Effect<
           .requireById(userId, "oauthUser.updateUser")
           .pipe(
             Effect.catchTag("UserNotFoundError", (e) =>
-              Effect.fail(new Auth.AuthError({ message: "User not found after update", cause: e })),
+              Effect.fail(
+                new Auth.Errors.AuthError({ message: "User not found after update", cause: e }),
+              ),
             ),
           );
       }),
@@ -1159,16 +1170,16 @@ interface MagicLinkRow {
   readonly expires_at: number;
 }
 
-const rowToMagicLink = (row: MagicLinkRow): Auth.MagicLinkToken => ({
+const rowToMagicLink = (row: MagicLinkRow): Auth.MagicLink.MagicLinkToken => ({
   token: row.token,
   email: row.email,
   createdAt: row.created_at,
   expiresAt: row.expires_at,
 });
 
-/** `Auth.MagicLinkStore` over the `auth_magic_links` table; requires `SqlClient`. */
+/** `Auth.MagicLink.MagicLinkStore` over the `auth_magic_links` table; requires `SqlClient`. */
 export const makeMagicLinkStore: Effect.Effect<
-  typeof Auth.MagicLinkStore.Service,
+  typeof Auth.MagicLink.MagicLinkStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -1199,19 +1210,19 @@ export const makeMagicLinkStore: Effect.Effect<
       asVoid("magicLink.delete", sql`DELETE FROM auth_magic_links WHERE token = ${token}`),
     deleteByEmail: (email) =>
       asVoid("magicLink.deleteByEmail", sql`DELETE FROM auth_magic_links WHERE email = ${email}`),
-  } satisfies typeof Auth.MagicLinkStore.Service;
+  } satisfies typeof Auth.MagicLink.MagicLinkStore.Service;
 });
 
-/** `Auth.MagicLinkUserStore` over the `auth_users` table; requires `SqlClient`. */
+/** `Auth.MagicLink.MagicLinkUserStore` over the `auth_users` table; requires `SqlClient`. */
 export const makeMagicLinkUserStore: Effect.Effect<
-  typeof Auth.MagicLinkUserStore.Service,
+  typeof Auth.MagicLink.MagicLinkUserStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const users = userQueries(sql);
   return {
     createUser: (input) => users.create(input, "magicLinkUser.createUser"),
-  } satisfies typeof Auth.MagicLinkUserStore.Service;
+  } satisfies typeof Auth.MagicLink.MagicLinkUserStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -1230,7 +1241,7 @@ interface EmailOtpRow {
 const rowToEmailOtp = (
   row: EmailOtpRow,
   label: string,
-): Effect.Effect<Auth.Email.EmailOtpRecord, Auth.AuthError> =>
+): Effect.Effect<Auth.Email.EmailOtpRecord, Auth.Errors.AuthError> =>
   Effect.map(decodeEmailOtpPurpose(row.purpose, label), (purpose) => ({
     email: row.email,
     purpose,
@@ -1245,7 +1256,7 @@ interface EmailOtpFailuresRow {
   readonly last_failure_at: number;
 }
 
-const rowToOtpFailures = (row: EmailOtpFailuresRow): Auth.OtpFailures => ({
+const rowToOtpFailures = (row: EmailOtpFailuresRow): Auth.Types.OtpFailures => ({
   count: row.failures,
   lastFailureAt: row.last_failure_at,
 });
@@ -1333,7 +1344,7 @@ export const makeEmailOtpStore: Effect.Effect<
             RETURNING failures, last_failure_at`,
         );
         if (Option.isNone(row)) {
-          return yield* new Auth.AuthError({ message: "OTP failure count not returned" });
+          return yield* new Auth.Errors.AuthError({ message: "OTP failure count not returned" });
         }
         return rowToOtpFailures(row.value);
       }),
@@ -1424,8 +1435,11 @@ export interface PurgeExpiredResult {
  * {@link purgeExpiredWith} is the same purge with a cap on the rows each table
  * loses per run, and the two retentions.
  */
-export const purgeExpired: Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> =
-  Effect.suspend(() => purgeExpiredWith());
+export const purgeExpired: Effect.Effect<
+  PurgeExpiredResult,
+  Auth.Errors.AuthError,
+  SqlClient.SqlClient
+> = Effect.suspend(() => purgeExpiredWith());
 
 /** Options for {@link purgeExpiredWith}. */
 export interface PurgeExpiredOptions {
@@ -1456,12 +1470,12 @@ const retentionMillis = (
   name: string,
   fallback: Duration.Duration,
   input?: Duration.Input,
-): Effect.Effect<number, Auth.AuthError> => {
+): Effect.Effect<number, Auth.Errors.AuthError> => {
   const millis = Duration.toMillis(input ?? fallback);
   return Number.isFinite(millis) && millis >= 0
     ? Effect.succeed(millis)
     : Effect.fail(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message: `purgeExpired ${name} must be a finite, non-negative duration`,
         }),
       );
@@ -1489,11 +1503,11 @@ const retentionMillis = (
  */
 export const purgeExpiredWith = (
   options?: PurgeExpiredOptions,
-): Effect.Effect<PurgeExpiredResult, Auth.AuthError, SqlClient.SqlClient> => {
+): Effect.Effect<PurgeExpiredResult, Auth.Errors.AuthError, SqlClient.SqlClient> => {
   const limit = options?.limit;
   if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0)) {
     return Effect.fail(
-      new Auth.AuthError({
+      new Auth.Errors.AuthError({
         message: `purgeExpired limit must be a positive integer, got ${String(limit)}`,
       }),
     );
@@ -1542,7 +1556,7 @@ const purgeTable = (
     readonly expired: Statement.Fragment;
     readonly limit: Option.Option<number>;
   },
-): Effect.Effect<number, Auth.AuthError> => {
+): Effect.Effect<number, Auth.Errors.AuthError> => {
   const table = sql.literal(options.table);
   const key = sql.literal(options.key);
   const statement = Option.match(options.limit, {
@@ -1593,7 +1607,7 @@ const purgeTables = (
     readonly otpFailuresBefore: number;
     readonly lockoutAttemptsBefore: number;
   },
-): Effect.Effect<PurgeExpiredResult, Auth.AuthError> => {
+): Effect.Effect<PurgeExpiredResult, Auth.Errors.AuthError> => {
   const { now, limit } = options;
   // A lockout row from before attempt times were recorded starts its idle
   // clock here, so it is judged like any other from the next purge on.
@@ -1714,7 +1728,7 @@ interface MultiFactorRow {
 
 const rowToMultiFactor = (
   row: MultiFactorRow,
-): Effect.Effect<Auth.MultiFactor.MultiFactorRecord, Auth.AuthError> =>
+): Effect.Effect<Auth.MultiFactor.MultiFactorRecord, Auth.Errors.AuthError> =>
   Effect.try({
     try: () => ({
       userId: row.user_id,
@@ -1724,7 +1738,7 @@ const rowToMultiFactor = (
       createdAt: row.created_at,
       ...definedKeys({ lastUsedCounter: row.last_used_counter ?? undefined }),
     }),
-    catch: (cause) => new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: "multiFactor decode failed", cause }),
   });
 
 /** How many times `useBackupCode` re-reads after losing its compare-and-set to a concurrent change. */
@@ -1771,7 +1785,7 @@ export const makeMultiFactorStore: Effect.Effect<
     // the list is still the one read. A concurrent change (another code
     // spent) moves it, and the read is retried while the code is still there.
     useBackupCode: (userId, codeHash) => {
-      const attempt = (left: number): Effect.Effect<boolean, Auth.AuthError> =>
+      const attempt = (left: number): Effect.Effect<boolean, Auth.Errors.AuthError> =>
         firstRow(
           "multiFactor.useBackupCode",
           sql<{ backup_codes: string }>`SELECT backup_codes FROM auth_multi_factor
@@ -1785,7 +1799,7 @@ export const makeMultiFactorStore: Effect.Effect<
                   codes: decodeStringList(row.backup_codes),
                 }),
                 catch: (cause) =>
-                  new Auth.AuthError({ message: "multiFactor decode failed", cause }),
+                  new Auth.Errors.AuthError({ message: "multiFactor decode failed", cause }),
               }),
             ),
           ),
@@ -1807,7 +1821,9 @@ export const makeMultiFactorStore: Effect.Effect<
                   : left > 0
                     ? attempt(left - 1)
                     : Effect.fail(
-                        new Auth.AuthError({ message: "multiFactor.useBackupCode contended" }),
+                        new Auth.Errors.AuthError({
+                          message: "multiFactor.useBackupCode contended",
+                        }),
                       ),
               ),
             );
@@ -1867,7 +1883,7 @@ export const makePendingMultiFactorStore: Effect.Effect<
           Option.match({
             onNone: () =>
               Effect.fail(
-                new Auth.AuthError({ message: "Pending multi-factor challenge not found" }),
+                new Auth.Errors.AuthError({ message: "Pending multi-factor challenge not found" }),
               ),
             onSome: (row) => Effect.succeed(row.attempts),
           }),
@@ -1928,7 +1944,7 @@ interface IdentifierRow {
 const rowToIdentifier = (
   row: IdentifierRow,
   label: string,
-): Effect.Effect<Auth.Identifier, Auth.AuthError> =>
+): Effect.Effect<Auth.Identifier.Identifier, Auth.Errors.AuthError> =>
   Effect.all(
     {
       verifiedAt:
@@ -1951,15 +1967,15 @@ const rowToIdentifier = (
     })),
   );
 
-/** `Auth.IdentifierStore` over the `auth_identifiers` table; requires `SqlClient`. */
+/** `Auth.Identifier.IdentifierStore` over the `auth_identifiers` table; requires `SqlClient`. */
 export const makeIdentifierStore: Effect.Effect<
-  typeof Auth.IdentifierStore.Service,
+  typeof Auth.Identifier.IdentifierStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
   const withTx = makeTx(sql);
 
-  const insert = (identifier: Auth.Identifier, label: string) =>
+  const insert = (identifier: Auth.Identifier.Identifier, label: string) =>
     asVoid(
       label,
       sql`INSERT INTO auth_identifiers (id, user_id, type, value, verified, verified_at, created_at)
@@ -2000,7 +2016,7 @@ export const makeIdentifierStore: Effect.Effect<
     // a failure between them leaves both rows, never neither, and the removal
     // of a stale claim is a statement of its own.
     replace: (from, to) => {
-      const invalid = Auth.replaceInputError(from, to);
+      const invalid = Auth.Identifier.replaceInputError(from, to);
       if (Option.isSome(invalid)) return Effect.fail(invalid.value);
       return withTx(
         "identifier.replace",
@@ -2043,7 +2059,7 @@ export const makeIdentifierStore: Effect.Effect<
         "identifier.deleteByUser",
         sql`DELETE FROM auth_identifiers WHERE user_id = ${userId}`,
       ),
-  } satisfies typeof Auth.IdentifierStore.Service;
+  } satisfies typeof Auth.Identifier.IdentifierStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -2100,7 +2116,7 @@ export const makeAccountLockoutStore: Effect.Effect<
         );
         const row = rows[0];
         if (row === undefined) {
-          return yield* new Auth.AuthError({
+          return yield* new Auth.Errors.AuthError({
             message: "accountLockout.registerAttempt returned no row",
           });
         }
@@ -2150,7 +2166,7 @@ interface ApiKeyRow {
   readonly updated_at: number;
 }
 
-const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError> =>
+const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey.ApiKey, Auth.Errors.AuthError> =>
   Effect.try({
     try: () => ({
       id: row.id,
@@ -2181,12 +2197,12 @@ const rowToApiKey = (row: ApiKeyRow): Effect.Effect<Auth.ApiKey, Auth.AuthError>
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),
-    catch: (cause) => new Auth.AuthError({ message: "api key decode failed", cause }),
+    catch: (cause) => new Auth.Errors.AuthError({ message: "api key decode failed", cause }),
   });
 
-/** `Auth.ApiKeyStore` over the `auth_api_keys` table; requires `SqlClient`. */
+/** `Auth.ApiKey.ApiKeyStore` over the `auth_api_keys` table; requires `SqlClient`. */
 export const makeApiKeyStore: Effect.Effect<
-  typeof Auth.ApiKeyStore.Service,
+  typeof Auth.ApiKey.ApiKeyStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -2270,7 +2286,7 @@ export const makeApiKeyStore: Effect.Effect<
       ),
     deleteByUserId: (userId) =>
       asVoid("apiKey.deleteByUserId", sql`DELETE FROM auth_api_keys WHERE user_id = ${userId}`),
-  } satisfies typeof Auth.ApiKeyStore.Service;
+  } satisfies typeof Auth.ApiKey.ApiKeyStore.Service;
 });
 
 // ---------------------------------------------------------------------------
@@ -2285,9 +2301,9 @@ interface ListedUserRow extends Omit<UserRow, "password_hash"> {
 /** `value` as a `LIKE` pattern matching it as a literal substring (escape `\\`). */
 const likeSubstring = (value: string): string => `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 
-/** `Auth.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
+/** `Auth.Admin.AdminUserStore` over the `auth_users` and `auth_identifiers` tables; requires `SqlClient`. */
 export const makeAdminUserStore: Effect.Effect<
-  typeof Auth.AdminUserStore.Service,
+  typeof Auth.Admin.AdminUserStore.Service,
   never,
   SqlClient.SqlClient
 > = SqlClient.SqlClient.useSync((sql) => {
@@ -2331,29 +2347,33 @@ export const makeAdminUserStore: Effect.Effect<
             concurrency: 1,
           }),
           total: Option.match(counted, { onNone: () => 0, onSome: (row) => row.total }),
-        } satisfies Auth.ListUsersResult;
+        } satisfies Auth.Admin.ListUsersResult;
       }),
     createUser: (input) => users.create(input, "adminUser.createUser"),
     setPasswordHash: (userId, hash) =>
       users.setPasswordHash(userId, hash, "adminUser.setPasswordHash"),
-  } satisfies typeof Auth.AdminUserStore.Service;
+  } satisfies typeof Auth.Admin.AdminUserStore.Service;
 });
 
 // ---------------------------------------------------------------------------
 // Layers
 // ---------------------------------------------------------------------------
 
-/** Provides `Auth.SessionStore` from {@link makeSessionStore}; requires `SqlClient`. */
-export const SessionStoreLayer: Layer.Layer<Auth.SessionStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.SessionStore, makeSessionStore);
-/** Provides `Auth.UserStore` from {@link makeUserStore}; requires `SqlClient`. */
-export const UserStoreLayer: Layer.Layer<Auth.UserStore, never, SqlClient.SqlClient> = Layer.effect(
-  Auth.UserStore,
-  makeUserStore,
-);
-/** Provides `Auth.UserServiceStore` from {@link makeUserServiceStore}; requires `SqlClient`. */
-export const UserServiceStoreLayer: Layer.Layer<Auth.UserServiceStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.UserServiceStore, makeUserServiceStore);
+/** Provides `Auth.SessionStore.SessionStore` from {@link makeSessionStore}; requires `SqlClient`. */
+export const SessionStoreLayer: Layer.Layer<
+  Auth.SessionStore.SessionStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.SessionStore.SessionStore, makeSessionStore);
+/** Provides `Auth.UserStore.UserStore` from {@link makeUserStore}; requires `SqlClient`. */
+export const UserStoreLayer: Layer.Layer<Auth.UserStore.UserStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.UserStore.UserStore, makeUserStore);
+/** Provides `Auth.User.UserServiceStore` from {@link makeUserServiceStore}; requires `SqlClient`. */
+export const UserServiceStoreLayer: Layer.Layer<
+  Auth.User.UserServiceStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.User.UserServiceStore, makeUserServiceStore);
 /** Provides `Auth.Email.EmailPasswordStore` from {@link makeEmailPasswordStore}; requires `SqlClient`. */
 export const EmailPasswordStoreLayer: Layer.Layer<
   Auth.Email.EmailPasswordStore,
@@ -2367,17 +2387,23 @@ export const PasswordResetUserStoreLayer: Layer.Layer<
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetUserStore, makePasswordResetUserStore);
 /**
- * Layer providing {@link Auth.EntityResolver} from `auth_user_roles`.
+ * Layer providing {@link Auth.Authorizer.EntityResolver} from `auth_user_roles`.
  *
  * Deliberately outside {@link layer}: `EntityResolver` is a single slot an
  * application usually fills with a composed resolver (its own entities, the
  * organization bridge, this one), not a storage interface to bundle.
  */
-export const RbacEntityResolverLayer: Layer.Layer<Auth.EntityResolver, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.EntityResolver, makeRbacEntityResolver);
-/** Provides `Auth.RateLimitStore` from {@link makeRateLimitStore}; requires `SqlClient`. */
-export const RateLimitStoreLayer: Layer.Layer<Auth.RateLimitStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.RateLimitStore, makeRateLimitStore);
+export const RbacEntityResolverLayer: Layer.Layer<
+  Auth.Authorizer.EntityResolver,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.Authorizer.EntityResolver, makeRbacEntityResolver);
+/** Provides `Auth.RateLimit.RateLimitStore` from {@link makeRateLimitStore}; requires `SqlClient`. */
+export const RateLimitStoreLayer: Layer.Layer<
+  Auth.RateLimit.RateLimitStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.RateLimit.RateLimitStore, makeRateLimitStore);
 /** Provides `Auth.Email.EmailVerificationStore` from {@link makeEmailVerificationStore}; requires `SqlClient`. */
 export const EmailVerificationStoreLayer: Layer.Layer<
   Auth.Email.EmailVerificationStore,
@@ -2420,15 +2446,18 @@ export const PasswordResetStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Password.PasswordResetStore, makePasswordResetStore);
-/** Provides `Auth.MagicLinkStore` from {@link makeMagicLinkStore}; requires `SqlClient`. */
-export const MagicLinkStoreLayer: Layer.Layer<Auth.MagicLinkStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.MagicLinkStore, makeMagicLinkStore);
-/** Provides `Auth.MagicLinkUserStore` from {@link makeMagicLinkUserStore}; requires `SqlClient`. */
-export const MagicLinkUserStoreLayer: Layer.Layer<
-  Auth.MagicLinkUserStore,
+/** Provides `Auth.MagicLink.MagicLinkStore` from {@link makeMagicLinkStore}; requires `SqlClient`. */
+export const MagicLinkStoreLayer: Layer.Layer<
+  Auth.MagicLink.MagicLinkStore,
   never,
   SqlClient.SqlClient
-> = Layer.effect(Auth.MagicLinkUserStore, makeMagicLinkUserStore);
+> = Layer.effect(Auth.MagicLink.MagicLinkStore, makeMagicLinkStore);
+/** Provides `Auth.MagicLink.MagicLinkUserStore` from {@link makeMagicLinkUserStore}; requires `SqlClient`. */
+export const MagicLinkUserStoreLayer: Layer.Layer<
+  Auth.MagicLink.MagicLinkUserStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.MagicLink.MagicLinkUserStore, makeMagicLinkUserStore);
 /** Provides `Auth.Email.EmailOtpStore` from {@link makeEmailOtpStore}; requires `SqlClient`. */
 export const EmailOtpStoreLayer: Layer.Layer<Auth.Email.EmailOtpStore, never, SqlClient.SqlClient> =
   Layer.effect(Auth.Email.EmailOtpStore, makeEmailOtpStore);
@@ -2450,21 +2479,27 @@ export const PendingMultiFactorStoreLayer: Layer.Layer<
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.MultiFactor.PendingMultiFactorStore, makePendingMultiFactorStore);
-/** Provides `Auth.IdentifierStore` from {@link makeIdentifierStore}; requires `SqlClient`. */
-export const IdentifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.IdentifierStore, makeIdentifierStore);
+/** Provides `Auth.Identifier.IdentifierStore` from {@link makeIdentifierStore}; requires `SqlClient`. */
+export const IdentifierStoreLayer: Layer.Layer<
+  Auth.Identifier.IdentifierStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.Identifier.IdentifierStore, makeIdentifierStore);
 /** Provides `Auth.Plugins.AccountLockoutStore` from {@link makeAccountLockoutStore}; requires `SqlClient`. */
 export const AccountLockoutStoreLayer: Layer.Layer<
   Auth.Plugins.AccountLockoutStore,
   never,
   SqlClient.SqlClient
 > = Layer.effect(Auth.Plugins.AccountLockoutStore, makeAccountLockoutStore);
-/** Provides `Auth.ApiKeyStore` from {@link makeApiKeyStore}; requires `SqlClient`. */
-export const ApiKeyStoreLayer: Layer.Layer<Auth.ApiKeyStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.ApiKeyStore, makeApiKeyStore);
-/** Provides `Auth.AdminUserStore` from {@link makeAdminUserStore}; requires `SqlClient`. */
-export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlClient.SqlClient> =
-  Layer.effect(Auth.AdminUserStore, makeAdminUserStore);
+/** Provides `Auth.ApiKey.ApiKeyStore` from {@link makeApiKeyStore}; requires `SqlClient`. */
+export const ApiKeyStoreLayer: Layer.Layer<Auth.ApiKey.ApiKeyStore, never, SqlClient.SqlClient> =
+  Layer.effect(Auth.ApiKey.ApiKeyStore, makeApiKeyStore);
+/** Provides `Auth.Admin.AdminUserStore` from {@link makeAdminUserStore}; requires `SqlClient`. */
+export const AdminUserStoreLayer: Layer.Layer<
+  Auth.Admin.AdminUserStore,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(Auth.Admin.AdminUserStore, makeAdminUserStore);
 
 /**
  * A single layer that provides every SQL-backed effect-auth store on top of
@@ -2485,12 +2520,12 @@ export const AdminUserStoreLayer: Layer.Layer<Auth.AdminUserStore, never, SqlCli
  * `EntityResolver` is one slot an application composes rather than a store.
  */
 export const layer: Layer.Layer<
-  | Auth.SessionStore
-  | Auth.UserStore
-  | Auth.UserServiceStore
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.User.UserServiceStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
-  | Auth.RateLimitStore
+  | Auth.RateLimit.RateLimitStore
   | Auth.Email.EmailVerificationStore
   | Auth.MultiFactor.ChallengeStore
   | Auth.MultiFactor.CredentialStore
@@ -2498,16 +2533,16 @@ export const layer: Layer.Layer<
   | Auth.OAuth.OAuthAccountStore
   | Auth.OAuth.OAuthUserStore
   | Auth.Password.PasswordResetStore
-  | Auth.MagicLinkStore
-  | Auth.MagicLinkUserStore
+  | Auth.MagicLink.MagicLinkStore
+  | Auth.MagicLink.MagicLinkUserStore
   | Auth.Email.EmailOtpStore
   | Auth.Email.EmailOtpUserStore
   | Auth.MultiFactor.MultiFactorStore
   | Auth.MultiFactor.PendingMultiFactorStore
-  | Auth.IdentifierStore
+  | Auth.Identifier.IdentifierStore
   | Auth.Plugins.AccountLockoutStore
-  | Auth.ApiKeyStore
-  | Auth.AdminUserStore,
+  | Auth.ApiKey.ApiKeyStore
+  | Auth.Admin.AdminUserStore,
   never,
   SqlClient.SqlClient
 > = Layer.mergeAll(

@@ -108,7 +108,11 @@ const wireRow = (
 
 const run = <A, E>(
   proxy: Proxy,
-  program: Effect.Effect<A, E, Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore>,
+  program: Effect.Effect<
+    A,
+    E,
+    Auth.SessionStore.SessionStore | Auth.UserStore.UserStore | Auth.Identifier.IdentifierStore
+  >,
 ): Promise<A> =>
   Effect.runPromise(
     program.pipe(Effect.provide(layer(tables).pipe(Layer.provide(databaseLayer(proxy.db))))),
@@ -130,7 +134,7 @@ describe("MySQL / statements", () => {
     await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         return yield* store.create({
           id: "session-1",
           userId: "user-1",
@@ -176,7 +180,7 @@ describe("MySQL / statements", () => {
     const session = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         return yield* store.get("session-1");
       }),
     );
@@ -216,7 +220,7 @@ describe("MySQL / statements", () => {
     const verified = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.setVerified("identifier-1", at(9000));
       }),
     );
@@ -244,7 +248,7 @@ describe("MySQL / statements", () => {
     const proxy = makeProxy();
     // The guarded read finds the identifier being replaced.
     proxy.respondWith([["identifier-1"]]);
-    const from: Auth.Identifier = {
+    const from: Auth.Identifier.Identifier = {
       id: "identifier-1",
       userId: "user-1",
       type: "email",
@@ -252,7 +256,7 @@ describe("MySQL / statements", () => {
       verified: true,
       createdAt: at(0),
     };
-    const to: Auth.Identifier = {
+    const to: Auth.Identifier.Identifier = {
       ...from,
       id: "identifier-2",
       value: "ada-new@example.com",
@@ -263,7 +267,7 @@ describe("MySQL / statements", () => {
     const replaced = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.replace(from, to);
       }),
     );
@@ -290,7 +294,7 @@ describe("MySQL / statements", () => {
     const missing = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.getByValue("email", "nobody@example.com");
       }),
     );
@@ -311,7 +315,7 @@ describe("MySQL / statements", () => {
     const unverified = await run(
       proxyWithRow,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.getByValue("email", "ada@example.com");
       }),
     );
@@ -341,9 +345,14 @@ describe("MySQL / statements", () => {
     const resolved = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
-        const users = yield* Auth.UserStore;
-        return yield* Auth.resolveUserByIdentifier(store, users.get, "email", "bob@exämple.com");
+        const store = yield* Auth.Identifier.IdentifierStore;
+        const users = yield* Auth.UserStore.UserStore;
+        return yield* Auth.Identifier.resolveUserByIdentifier(
+          store,
+          users.get,
+          "email",
+          "bob@exämple.com",
+        );
       }),
     );
 
@@ -360,8 +369,8 @@ describe("MySQL / statements", () => {
     const found = await run(
       exact,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
-        return yield* Auth.lookupIdentifier(store, "email", "bob@example.com");
+        const store = yield* Auth.Identifier.IdentifierStore;
+        return yield* Auth.Identifier.lookupIdentifier(store, "email", "bob@example.com");
       }),
     );
     expect(Option.getOrUndefined(found)?.userId).toBe("user-bob");

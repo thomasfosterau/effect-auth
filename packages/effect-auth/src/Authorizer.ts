@@ -7,6 +7,7 @@
  * @module authorizer
  */
 import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as Layer from "effect/Layer";
@@ -296,8 +297,16 @@ export interface AuthorizerConfig<E = unknown> {
   readonly useStore?: boolean;
 }
 
-/** Raised by `Authorizer.layer` when policies do not validate against the model. */
-export class PolicyValidationError extends Errors.AuthError {}
+/**
+ * Fails `Authorizer.layer` when its policies do not validate against the
+ * model: a configuration error, raised while the layer is built.
+ */
+export class PolicyValidationError extends Schema.TaggedError<
+  PolicyValidationError,
+  { readonly brand: unique symbol }
+>()("PolicyValidationError", {
+  message: Schema.String,
+}) {}
 
 /**
  * The authorization service: decides, checks and enforces requests against the configured policies (plus a `PolicyStore`'s, when one is in context).
@@ -341,7 +350,7 @@ export class Authorizer extends Context.Service<
 
 const make = <E = unknown>(
   config: AuthorizerConfig<E>,
-): Effect.Effect<typeof Authorizer.Service, Errors.AuthError> =>
+): Effect.Effect<typeof Authorizer.Service, PolicyValidationError> =>
   Effect.gen(function* () {
     const resolver = yield* Effect.serviceOption(EntityResolver);
     const store = yield* Effect.serviceOption(PolicyStore.PolicyStore);

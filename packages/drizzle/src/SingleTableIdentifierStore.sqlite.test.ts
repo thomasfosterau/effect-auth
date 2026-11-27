@@ -114,13 +114,13 @@ afterEach(() => {
 
 const runWith = <A, E>(
   mapping: Parameters<typeof layer>[0],
-  build: () => Effect.Effect<A, E, Auth.IdentifierStore>,
+  build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
     build().pipe(Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(db))))),
   );
 
-const run = <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+const run = <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
   runWith(usersMapping, build);
 
 const harness = {
@@ -146,7 +146,7 @@ identifierStoreContract("single-table SQLite", harness);
 singleTableContract("single-table SQLite", harness);
 
 notNullContract("single-table SQLite", {
-  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     runWith(strictMapping, build),
   seedUsers: async () => {
     db.insert(strictUsers)
@@ -169,7 +169,7 @@ notNullContract("single-table SQLite", {
 });
 
 verifiedAtContract("single-table SQLite", {
-  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     runWith(verifiedMapping, build),
   seedUsers: async () => {
     db.insert(verifiedUsers)

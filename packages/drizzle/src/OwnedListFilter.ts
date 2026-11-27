@@ -13,7 +13,7 @@
  *
  * const listPosts = Effect.gen(function* () {
  *   const scope = yield* owned.readScope
- *   const where = Drizzle.ownedListFilter({
+ *   const where = Drizzle.OwnedListFilter.ownedListFilter({
  *     owner: posts.ownerId,
  *     visibility: posts.visibility,
  *     draft: posts.draft,
@@ -24,14 +24,14 @@
  * })
  *
  * // The follower seam, over the application's own follow table:
- * const followers = Drizzle.isFollowerLayer({
+ * const followers = Drizzle.OwnedListFilter.isFollowerLayer({
  *   isFollower: (followerId, ownerId) => … ,
  *   followingQuery: (followerId) =>
  *     db.select({ id: follows.ownerId }).from(follows).where(eq(follows.followerId, followerId)),
  * })
  *
  * // The member seam, over the application's own membership table:
- * const members = Drizzle.isMemberLayer({
+ * const members = Drizzle.OwnedListFilter.isMemberLayer({
  *   isMember: (accountId, groupId) => … ,
  *   groupsQuery: (accountId) =>
  *     db.select({ id: memberships.groupId }).from(memberships).where(eq(memberships.accountId, accountId)),

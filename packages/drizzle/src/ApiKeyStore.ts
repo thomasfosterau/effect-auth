@@ -34,7 +34,7 @@ const toDate = (millis: number | undefined): Date | null =>
 const toMillis = (date: Date | null): number | null => (date === null ? null : date.getTime());
 
 /** The optional fields of a row, `NULL`s dropped. */
-const optionalFields = (row: ApiKeyRow): Partial<Auth.ApiKey> =>
+const optionalFields = (row: ApiKeyRow): Partial<Auth.ApiKey.ApiKey> =>
   R.filter(
     {
       name: row.name,
@@ -51,12 +51,12 @@ const optionalFields = (row: ApiKeyRow): Partial<Auth.ApiKey> =>
     (value) => value !== null,
   );
 
-const rateLimitOf = (row: ApiKeyRow): Pick<Auth.ApiKey, "rateLimit"> =>
+const rateLimitOf = (row: ApiKeyRow): Pick<Auth.ApiKey.ApiKey, "rateLimit"> =>
   row.rateLimitMaxRequests === null || row.rateLimitWindowMs === null
     ? {}
     : { rateLimit: { maxRequests: row.rateLimitMaxRequests, windowMs: row.rateLimitWindowMs } };
 
-const toApiKey = (row: ApiKeyRow): Auth.ApiKey => ({
+const toApiKey = (row: ApiKeyRow): Auth.ApiKey.ApiKey => ({
   id: row.id,
   start: row.start,
   keyHash: row.keyHash,
@@ -70,7 +70,7 @@ const toApiKey = (row: ApiKeyRow): Auth.ApiKey => ({
 });
 
 /** Every column but the primary key, from a key. */
-const mutableValues = (apiKey: Auth.ApiKey) => ({
+const mutableValues = (apiKey: Auth.ApiKey.ApiKey) => ({
   userId: apiKey.userId,
   name: apiKey.name ?? null,
   prefix: apiKey.prefix ?? null,
@@ -94,7 +94,7 @@ const mutableValues = (apiKey: Auth.ApiKey) => ({
 /** Build an `ApiKeyStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   tables: ApiKeyTableInput = defaultTables,
-): Effect.Effect<typeof Auth.ApiKeyStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.ApiKey.ApiKeyStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const schema = resolveApiKeyTable(tables);
@@ -172,7 +172,7 @@ export const make = (
           );
           return matched > 0
             ? yield* one("apiKey.recordUse.read", eq(column.id, id))
-            : Option.none<Auth.ApiKey>();
+            : Option.none<Auth.ApiKey.ApiKey>();
         }),
 
       delete: (id) =>
@@ -189,11 +189,11 @@ export const make = (
         query("apiKey.deleteByUserId", (db) =>
           db.delete(table).where(eq(column.userId, userId)).execute(),
         ).pipe(Effect.asVoid),
-    } satisfies typeof Auth.ApiKeyStore.Service;
+    } satisfies typeof Auth.ApiKey.ApiKeyStore.Service;
   });
 
 /** `ApiKeyStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   tables: ApiKeyTableInput = defaultTables,
-): Layer.Layer<Auth.ApiKeyStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.ApiKeyStore, make(tables));
+): Layer.Layer<Auth.ApiKey.ApiKeyStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.ApiKey.ApiKeyStore, make(tables));

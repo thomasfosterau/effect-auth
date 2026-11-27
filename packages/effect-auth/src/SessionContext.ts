@@ -9,7 +9,8 @@
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { SessionContext, type SessionWithUser } from "@thomasfosterau/effect-auth"
+ * import { SessionContext } from "@thomasfosterau/effect-auth"
+ * import { type SessionWithUser } from "@thomasfosterau/effect-auth/Types"
  *
  * // `resolved` came from the app's own edge — `event.locals`, a service
  * // binding, a test fixture. No `HttpServerRequest` is involved.
@@ -211,7 +212,8 @@ export const anonymousLayer: Layer.Layer<MaybeCurrentSession> = Layer.succeed(
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { SessionContext, type SessionWithUser } from "@thomasfosterau/effect-auth"
+ * import { SessionContext } from "@thomasfosterau/effect-auth"
+ * import { type SessionWithUser } from "@thomasfosterau/effect-auth/Types"
  *
  * // SvelteKit: `event.locals.session` is `SessionWithUser | null`, set by the
  * // app's `handle` hook. The fixture below stands in for that hook's output.

@@ -10,11 +10,8 @@ import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import {
-  SessionResolution,
-  type SessionCookies,
-  type SessionWithUser,
-} from "@thomasfosterau/effect-auth";
+import { SessionResolution, type SessionCookies } from "@thomasfosterau/effect-auth";
+import { type SessionWithUser } from "@thomasfosterau/effect-auth/Types";
 
 /**
  * The part of SvelteKit's `RequestEvent` the hook reads and writes.
@@ -192,7 +189,7 @@ const withLookupCookies = (response: Response, setCookie: ReadonlyArray<string>)
  * import { strictEqual } from "node:assert";
  * import { Effect } from "effect";
  * import * as Option from "effect/Option";
- * import { handle } from "@thomasfosterau/effect-auth-sveltekit";
+ * import { handle } from "@thomasfosterau/effect-auth-sveltekit/Handle";
  *
  * const hook = handle({
  *   lookup: () => Effect.succeed(Option.none()),

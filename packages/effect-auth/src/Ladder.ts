@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
  * An ordered role ladder, least to most privileged: a rank function, the one
  * "at least this rung" comparison and named capability axes. An unknown rung
  * and anonymous satisfy nothing. The module imports only `effect/Option`, so a
- * browser loads `./ladder` without the rest of the Effect runtime. The example
+ * browser loads `./Ladder` without the rest of the Effect runtime. The example
  * is on {@link make}.
  *
  * @since 0.1.0
@@ -104,7 +104,7 @@ export const minOf = <Rung extends string>(min: Rung | Axis<Rung>): Rung =>
  * ```ts
  * import assert from "node:assert/strict"
  * import * as Option from "effect/Option"
- * import * as Ladder from "@thomasfosterau/effect-auth/ladder"
+ * import * as Ladder from "@thomasfosterau/effect-auth/Ladder"
  *
  * export const Roles = Ladder.make(["user", "contributor", "moderator", "admin"])
  * export type Role = Ladder.RungOf<typeof Roles>

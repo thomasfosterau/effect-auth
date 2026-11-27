@@ -13,14 +13,11 @@
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, CurrentUser, layer as authLayer } from "@thomasfosterau/effect-auth/http"
- * import {
- *   Hooks,
- *   SessionService,
- *   SessionStore,
- *   UserStore,
- *   type Session,
- *   type User,
- * } from "@thomasfosterau/effect-auth"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { SessionStore } from "@thomasfosterau/effect-auth/SessionStore"
+ * import { UserStore } from "@thomasfosterau/effect-auth/UserStore"
+ * import { type Session, type User } from "@thomasfosterau/effect-auth/Types"
  *
  * const ProfileSchema = Schema.Struct({ id: Schema.String })
  *
@@ -431,14 +428,11 @@ type SchemeHandlerArgs<Scheme extends keyof AuthMiddleware["Service"]> = Paramet
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { AuthMiddleware, CurrentUser, layer } from "@thomasfosterau/effect-auth/http"
- * import {
- *   Hooks,
- *   SessionService,
- *   SessionStore,
- *   UserStore,
- *   type Session,
- *   type User,
- * } from "@thomasfosterau/effect-auth"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { SessionStore } from "@thomasfosterau/effect-auth/SessionStore"
+ * import { UserStore } from "@thomasfosterau/effect-auth/UserStore"
+ * import { type Session, type User } from "@thomasfosterau/effect-auth/Types"
  *
  * // In-memory stores for the session service. A real app backs these with its database.
  * const sessions = new Map<string, Session>()
@@ -616,15 +610,12 @@ export const layer = (config?: CookieConfig): Layer.Layer<AuthMiddleware> => {
  * import { Etag, HttpPlatform, HttpRouter } from "effect/http"
  * import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
  * import { OptionalAuthMiddleware, optionalLayer } from "@thomasfosterau/effect-auth/http"
- * import {
- *   Hooks,
- *   MaybeCurrentSession,
- *   SessionService,
- *   SessionStore,
- *   UserStore,
- *   type Session,
- *   type User,
- * } from "@thomasfosterau/effect-auth"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { MaybeCurrentSession } from "@thomasfosterau/effect-auth/SessionContext"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { SessionStore } from "@thomasfosterau/effect-auth/SessionStore"
+ * import { UserStore } from "@thomasfosterau/effect-auth/UserStore"
+ * import { type Session, type User } from "@thomasfosterau/effect-auth/Types"
  *
  * // In-memory stores for the session service. A real app backs these with its database.
  * const sessions = new Map<string, Session>()

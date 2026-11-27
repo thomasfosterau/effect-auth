@@ -16,7 +16,7 @@ import type { RateLimitStore } from "../RateLimit.ts";
 import { buildRecipientSendGate } from "../RecipientSendLimit.ts";
 import type { RecipientSendLimit } from "../Types.ts";
 import { SessionService } from "../SessionService.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 import { randomBase64UrlToken } from "../RandomToken.ts";
 import { TrustedDeviceStore } from "../TrustedDeviceStore.ts";
 import { definedKeys } from "../DefinedKeys.ts";

@@ -45,7 +45,7 @@ const SESSION_FIELD_COLUMNS: ReadonlyArray<string> = [
  * A column value as JSON: a `Date` becomes epoch milliseconds (how the core
  * reads `banExpires`), `undefined` is dropped, anything not JSON is dropped.
  */
-const toJson = (value: ColumnValue): Auth.Json | undefined => {
+const toJson = (value: ColumnValue): Auth.Types.Json | undefined => {
   if (value === undefined) return undefined;
   if (value === null || P.isString(value) || P.isBoolean(value)) return value;
   if (P.isNumber(value)) return Number.isFinite(value) ? value : undefined;
@@ -64,7 +64,7 @@ const toJsonResult = (value: ColumnValue) => {
 const toAttributes = (
   row: Readonly<Record<string, ColumnValue>>,
   skip: ReadonlyArray<string>,
-): Auth.Attributes =>
+): Auth.Types.Attributes =>
   R.filterMap(row, (value, key) => {
     if (skip.includes(key)) return Result.failVoid;
     return toJsonResult(value);
@@ -80,7 +80,7 @@ const optionalString = (value: ColumnValue): string | undefined =>
  * @since 0.1.0
  * @category conversions
  */
-export const toUser = (user: BetterAuthUser): Auth.User => {
+export const toUser = (user: BetterAuthUser): Auth.Types.User => {
   const name = optionalString(user.name);
   const image = optionalString(user.image);
   return {
@@ -100,7 +100,7 @@ export const toUser = (user: BetterAuthUser): Auth.User => {
  * @since 0.1.0
  * @category conversions
  */
-export const toSession = (session: BetterAuthSession): Auth.Session => ({
+export const toSession = (session: BetterAuthSession): Auth.Types.Session => ({
   id: session.id,
   userId: session.userId,
   expiresAt: session.expiresAt,
@@ -117,12 +117,12 @@ export const toSession = (session: BetterAuthSession): Auth.Session => ({
  * @since 0.1.0
  * @category conversions
  */
-export const identifiersOf = (user: BetterAuthUser): ReadonlyArray<Auth.Identifier> => {
+export const identifiersOf = (user: BetterAuthUser): ReadonlyArray<Auth.Identifier.Identifier> => {
   const derive = (
-    type: Auth.IdentifierType,
+    type: Auth.Identifier.IdentifierType,
     value: ColumnValue,
     verified: ColumnValue,
-  ): ReadonlyArray<Auth.Identifier> =>
+  ): ReadonlyArray<Auth.Identifier.Identifier> =>
     P.isString(value) && value !== ""
       ? [
           {
@@ -149,7 +149,7 @@ export const identifiersOf = (user: BetterAuthUser): ReadonlyArray<Auth.Identifi
  * @since 0.1.0
  * @category conversions
  */
-export const identifierId = (userId: string, type: Auth.IdentifierType): string =>
+export const identifierId = (userId: string, type: Auth.Identifier.IdentifierType): string =>
   `${userId}:${type}`;
 
 /**
@@ -160,7 +160,7 @@ export const identifierId = (userId: string, type: Auth.IdentifierType): string 
  */
 export const parseIdentifierId = (
   id: string,
-): { readonly userId: string; readonly type: Auth.IdentifierType } | undefined => {
+): { readonly userId: string; readonly type: Auth.Identifier.IdentifierType } | undefined => {
   const at = id.lastIndexOf(":");
   if (at <= 0) return undefined;
   const type = id.slice(at + 1);
@@ -176,7 +176,7 @@ export const parseIdentifierId = (
  * @since 0.1.0
  * @category conversions
  */
-export const rolesOf = (user: Auth.User): ReadonlyArray<string> => {
+export const rolesOf = (user: Auth.Types.User): ReadonlyArray<string> => {
   const role = user.attributes["role"];
   return P.isString(role)
     ? Arr.filter(
@@ -193,17 +193,21 @@ export const rolesOf = (user: Auth.User): ReadonlyArray<string> => {
  *
  * @internal
  */
-export const requireGoodStanding = (user: Auth.User): Effect.Effect<void, Auth.UserBannedError> =>
+export const requireGoodStanding = (
+  user: Auth.Types.User,
+): Effect.Effect<void, Auth.Errors.UserBannedError> =>
   Effect.gen(function* () {
     if (user.attributes["scimDeactivated"] === true) {
-      return yield* new Auth.UserBannedError({ message: "Your account has been deactivated" });
+      return yield* new Auth.Errors.UserBannedError({
+        message: "Your account has been deactivated",
+      });
     }
     if (user.attributes["banned"] !== true) return yield* Effect.void;
     const banExpires = user.attributes["banExpires"];
     if (P.isNumber(banExpires) && banExpires <= (yield* Clock.currentTimeMillis)) {
       return yield* Effect.void;
     }
-    return yield* new Auth.UserBannedError({ message: "Your account has been suspended" });
+    return yield* new Auth.Errors.UserBannedError({ message: "Your account has been suspended" });
   });
 
 /**
@@ -213,10 +217,10 @@ export const requireGoodStanding = (user: Auth.User): Effect.Effect<void, Auth.U
  * @category errors
  */
 export type CredentialError =
-  | Auth.AuthError
-  | Auth.InvalidCredentialsError
-  | Auth.EmailInUseError
-  | Auth.EmailNotVerifiedError;
+  | Auth.Errors.AuthError
+  | Auth.Errors.InvalidCredentialsError
+  | Auth.Errors.EmailInUseError
+  | Auth.Errors.EmailNotVerifiedError;
 
 interface ApiErrorLike {
   readonly statusCode: number;
@@ -236,27 +240,30 @@ const isApiError = (error: unknown): error is ApiErrorLike =>
  */
 export const fromApiError = (error: unknown, email?: string): CredentialError => {
   if (!isApiError(error)) {
-    return new Auth.AuthError({ message: "BetterAuth call failed", cause: error });
+    return new Auth.Errors.AuthError({ message: "BetterAuth call failed", cause: error });
   }
   const code = P.isString(error.body?.code) ? error.body.code : "";
   if (error.statusCode === 401 && code === "INVALID_EMAIL_OR_PASSWORD") {
-    return new Auth.InvalidCredentialsError({ message: "Invalid email or password" });
+    return new Auth.Errors.InvalidCredentialsError({ message: "Invalid email or password" });
   }
   if (error.statusCode === 401 && code === "INVALID_USERNAME_OR_PASSWORD") {
-    return new Auth.InvalidCredentialsError({ message: "Invalid username or password" });
+    return new Auth.Errors.InvalidCredentialsError({ message: "Invalid username or password" });
   }
   if (error.statusCode === 422 && code.startsWith("USER_ALREADY_EXISTS")) {
-    return new Auth.EmailInUseError({
+    return new Auth.Errors.EmailInUseError({
       message: "This email is already in use",
       ...(email !== undefined && { email }),
     });
   }
   if (error.statusCode === 403 && code === "EMAIL_NOT_VERIFIED") {
-    return new Auth.EmailNotVerifiedError({ message: "Email not verified", email: email ?? "" });
+    return new Auth.Errors.EmailNotVerifiedError({
+      message: "Email not verified",
+      email: email ?? "",
+    });
   }
   const message =
     error.statusCode === 429
       ? "BetterAuth rate limit exceeded"
       : `BetterAuth answered ${error.statusCode}${code === "" ? "" : ` ${code}`}`;
-  return new Auth.AuthError({ message, cause: error });
+  return new Auth.Errors.AuthError({ message, cause: error });
 };

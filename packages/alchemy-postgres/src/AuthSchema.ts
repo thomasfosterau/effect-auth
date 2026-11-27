@@ -188,8 +188,8 @@ const propsOrEmpty = (props?: AuthSchemaProps): AuthSchemaProps => props ?? {};
  * Alchemy.Stack("app", {
  *   providers: Layer.mergeAll(
  *     Cloudflare.providers(),
- *     AuthPostgres.AuthSchemaProvider({
- *       database: AuthPostgres.database(Redacted.make(process.env.DATABASE_URL)),
+ *     AuthPostgres.AuthSchema.AuthSchemaProvider({
+ *       database: AuthPostgres.Postgres.database(Redacted.make(process.env.DATABASE_URL)),
  *     }),
  *   ),
  *   state: Cloudflare.state(),

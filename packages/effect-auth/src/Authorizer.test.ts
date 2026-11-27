@@ -273,11 +273,7 @@ describe("Authorizer", () => {
       Authorizer.CurrentPrincipal.provide(alice),
     );
     const error = await Effect.runPromise(Effect.provide(program, layer).pipe(Effect.flip));
-    // `PolicyValidationError` subclasses `Errors.AuthError` without
-    // re-tagging, so `_tag` stays "AuthError" (uniform for the `AuthError`
-    // error channel); the specific type is distinguished by `instanceof`.
-    expect(error).toBeInstanceOf(Authorizer.PolicyValidationError);
-    expect(error._tag).toBe("AuthError");
+    expect(error._tag).toBe("PolicyValidationError");
     expect(error.message).toContain("Robot");
   });
 

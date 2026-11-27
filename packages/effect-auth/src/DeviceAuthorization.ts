@@ -250,7 +250,7 @@ const decodeDeviceGrant = Schema.decodeUnknownOption(
  * ```ts
  * import assert from "node:assert/strict"
  * import * as Option from "effect/Option"
- * import { deviceGrantOf } from "@thomasfosterau/effect-auth"
+ * import { deviceGrantOf } from "@thomasfosterau/effect-auth/DeviceAuthorization"
  *
  * const session = {
  *   id: "digest",

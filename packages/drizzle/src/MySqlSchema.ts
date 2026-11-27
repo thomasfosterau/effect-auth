@@ -78,7 +78,7 @@ const sessionColumns = () => ({
   expiresAt: datetime("expires_at", { mode: "date", fsp: 3 }).notNull(),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
   lastActivityAt: datetime("last_activity_at", { mode: "date", fsp: 3 }).notNull(),
-  attributes: json("attributes").$type<Auth.JsonObject>().notNull(),
+  attributes: json("attributes").$type<Auth.Types.JsonObject>().notNull(),
 });
 
 const userColumns = () => ({
@@ -86,7 +86,7 @@ const userColumns = () => ({
   name: varchar("name", { length: KEY_LENGTH }),
   image: varchar("image", { length: 2048 }),
   passwordHash: varchar("password_hash", { length: 512 }),
-  attributes: json("attributes").$type<Auth.JsonObject>().notNull(),
+  attributes: json("attributes").$type<Auth.Types.JsonObject>().notNull(),
   createdAt: datetime("created_at", { mode: "date", fsp: 3 }).notNull(),
   updatedAt: datetime("updated_at", { mode: "date", fsp: 3 }).notNull(),
 });
@@ -94,7 +94,7 @@ const userColumns = () => ({
 const identifierColumns = () => ({
   id: varchar("id", { length: KEY_LENGTH }).primaryKey(),
   userId: varchar("user_id", { length: KEY_LENGTH }).notNull(),
-  type: varchar("type", { length: 32 }).$type<Auth.IdentifierType>().notNull(),
+  type: varchar("type", { length: 32 }).$type<Auth.Identifier.IdentifierType>().notNull(),
   value: binaryVarchar("value", { length: KEY_LENGTH }).notNull(),
   verified: boolean("verified").notNull().default(false),
   verifiedAt: datetime("verified_at", { mode: "date", fsp: 3 }),
@@ -119,7 +119,7 @@ const apiKeyColumns = () => ({
   expiresAt: instant("expires_at"),
   lastUsedAt: instant("last_used_at"),
   permissions: json("permissions").$type<ApiKeyPermissions>(),
-  metadata: json("metadata").$type<Auth.JsonObject>().notNull(),
+  metadata: json("metadata").$type<Auth.Types.JsonObject>().notNull(),
   remaining: int("remaining"),
   refillAmount: int("refill_amount"),
   refillInterval: bigint("refill_interval", { mode: "number" }),

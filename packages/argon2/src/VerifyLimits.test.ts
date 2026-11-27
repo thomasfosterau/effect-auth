@@ -10,6 +10,7 @@ import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vite-pl
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import { Password } from "@thomasfosterau/effect-auth";
+import { Argon2ConfigError } from "@thomasfosterau/effect-auth/Password";
 import { hashWasmFixtures } from "./HashWasm.fixtures.ts";
 import * as Argon2 from "./index.ts";
 import { verifyArgon2 } from "./Wasm.ts";
@@ -36,29 +37,29 @@ const stored = (m: number, t: number, p: number): string =>
 
 /** Hash `password` at `costs` and verify it with `verifier`. */
 const roundtrip = async (
-  costs: Argon2.Argon2Options,
+  costs: Argon2.Common.Argon2Options,
   verifier: typeof Password.PasswordHasher.Service,
 ): Promise<boolean> => {
-  const { hash } = await run(Argon2.argon2Hasher(costs).hash("at the ceiling"));
+  const { hash } = await run(Argon2.Argon2.argon2Hasher(costs).hash("at the ceiling"));
   return run(verifier.verify("at the ceiling", hash));
 };
 
 describe("the default verify ceiling", () => {
   it("is maxMemoryKiB 131072, maxIterations 10, maxParallelism 8", () => {
-    expect(Argon2.defaultVerifyLimits).toEqual({
+    expect(Argon2.Common.defaultVerifyLimits).toEqual({
       maxMemoryKiB: 131072,
       maxIterations: 10,
       maxParallelism: 8,
     });
-    expect(Argon2.resolveVerifyLimits()).toEqual(Argon2.defaultVerifyLimits);
+    expect(Argon2.Common.resolveVerifyLimits()).toEqual(Argon2.Common.defaultVerifyLimits);
   });
 
   it("sits at or above both profiles, so every hash this package writes verifies", () => {
-    const { maxMemoryKiB, maxIterations, maxParallelism } = Argon2.defaultVerifyLimits;
-    const within = ({ memoryCost, timeCost, parallelism }: Argon2.Argon2Profile) =>
+    const { maxMemoryKiB, maxIterations, maxParallelism } = Argon2.Common.defaultVerifyLimits;
+    const within = ({ memoryCost, timeCost, parallelism }: Argon2.Common.Argon2Profile) =>
       memoryCost <= maxMemoryKiB && timeCost <= maxIterations && parallelism <= maxParallelism;
-    expect(within(Argon2.defaultProfile)).toBe(true);
-    expect(within(Argon2.serverProfile)).toBe(true);
+    expect(within(Argon2.Common.defaultProfile)).toBe(true);
+    expect(within(Argon2.Common.serverProfile)).toBe(true);
   });
 
   it.each([
@@ -69,7 +70,7 @@ describe("the default verify ceiling", () => {
     ["p one over maxParallelism", stored(256, 1, 9), /p=9 is over maxParallelism=8/],
     ["p of 2^24 - 1", stored(256, 1, 2 ** 24 - 1), /over maxParallelism=8/],
   ])("refuses a stored hash with %s, without entering the kernel", async (_, hash, message) => {
-    const error = await run(Effect.flip(Argon2.argon2Hasher().verify("x", hash)));
+    const error = await run(Effect.flip(Argon2.Argon2.argon2Hasher().verify("x", hash)));
     expect(error._tag).toBe("HashingError");
     expect(error.message).toMatch(/exceeds the verify ceiling/);
     expect(error.message).toMatch(message);
@@ -78,7 +79,7 @@ describe("the default verify ceiling", () => {
 
   it("checks the ceiling after the password guards: an over-long password is still false", async () => {
     const verdict = await run(
-      Argon2.argon2Hasher().verify("x".repeat(1025), stored(2 ** 32 - 1, 1, 1)),
+      Argon2.Argon2.argon2Hasher().verify("x".repeat(1025), stored(2 ** 32 - 1, 1, 1)),
     );
     expect(verdict).toBe(false);
     expect(kernel).not.toHaveBeenCalled();
@@ -91,14 +92,16 @@ describe("the default verify ceiling", () => {
   ] as const)(
     "verifies a hash at the limit: %s",
     async (_, costs) => {
-      expect(await roundtrip(costs, Argon2.argon2Hasher())).toBe(true);
+      expect(await roundtrip(costs, Argon2.Argon2.argon2Hasher())).toBe(true);
       expect(kernel).toHaveBeenCalledOnce();
     },
     30_000,
   );
 
   it.each(hashWasmFixtures)("still verifies the hash-wasm fixture: $label", async (fixture) => {
-    expect(await run(Argon2.argon2Hasher().verify(fixture.password, fixture.hash))).toBe(true);
+    expect(await run(Argon2.Argon2.argon2Hasher().verify(fixture.password, fixture.hash))).toBe(
+      true,
+    );
     expect(kernel).toHaveBeenCalledOnce();
   });
 });
@@ -112,35 +115,37 @@ describe("the verify ceiling on Cloudflare Workers", () => {
   });
 
   it("defaults maxMemoryKiB to 65536, half the isolate, still above serverProfile", () => {
-    expect(Argon2.resolveVerifyLimits()).toEqual(Argon2.workerdVerifyLimits);
-    expect(Argon2.workerdVerifyLimits).toEqual({
+    expect(Argon2.Common.resolveVerifyLimits()).toEqual(Argon2.Common.workerdVerifyLimits);
+    expect(Argon2.Common.workerdVerifyLimits).toEqual({
       maxMemoryKiB: 65536,
       maxIterations: 10,
       maxParallelism: 8,
     });
-    expect(Argon2.resolveVerifyLimits(Argon2.serverProfile).maxMemoryKiB).toBe(65536);
+    expect(Argon2.Common.resolveVerifyLimits(Argon2.Common.serverProfile).maxMemoryKiB).toBe(65536);
   });
 
   it("refuses a stored hash over 64 MiB that the general default would run", async () => {
-    const error = await run(Effect.flip(Argon2.argon2Hasher().verify("x", stored(65537, 1, 1))));
+    const error = await run(
+      Effect.flip(Argon2.Argon2.argon2Hasher().verify("x", stored(65537, 1, 1))),
+    );
     expect(error.message).toMatch(/m=65537 is over maxMemoryKiB=65536/);
     expect(kernel).not.toHaveBeenCalled();
   });
 
   it("rises to a configured memoryCost above it, so the hasher's own hashes verify", () => {
-    expect(Argon2.resolveVerifyLimits({ memoryCost: 98304 }).maxMemoryKiB).toBe(98304);
-    expect(() => Argon2.argon2Hasher({ memoryCost: 98304 })).not.toThrow();
+    expect(Argon2.Common.resolveVerifyLimits({ memoryCost: 98304 }).maxMemoryKiB).toBe(98304);
+    expect(() => Argon2.Argon2.argon2Hasher({ memoryCost: 98304 })).not.toThrow();
   });
 
   it("yields to a configured maxMemoryKiB", () => {
-    expect(Argon2.resolveVerifyLimits({ maxMemoryKiB: 131072 }).maxMemoryKiB).toBe(131072);
-    expect(Argon2.resolveVerifyLimits({ maxMemoryKiB: 19456 }).maxMemoryKiB).toBe(19456);
+    expect(Argon2.Common.resolveVerifyLimits({ maxMemoryKiB: 131072 }).maxMemoryKiB).toBe(131072);
+    expect(Argon2.Common.resolveVerifyLimits({ maxMemoryKiB: 19456 }).maxMemoryKiB).toBe(19456);
   });
 });
 
 describe("a configured verify ceiling", () => {
   it("lowers each limit", async () => {
-    const strict = Argon2.argon2Hasher({
+    const strict = Argon2.Argon2.argon2Hasher({
       memoryCost: 256,
       timeCost: 1,
       maxMemoryKiB: 1024,
@@ -165,7 +170,7 @@ describe("a configured verify ceiling", () => {
 
   it("raises each limit", async () => {
     const raised = { maxMemoryKiB: 262144, maxIterations: 12, maxParallelism: 16 } as const;
-    const lenient = Argon2.argon2Hasher(raised);
+    const lenient = Argon2.Argon2.argon2Hasher(raised);
     const cases = [
       { memoryCost: 131080, timeCost: 1, parallelism: 1 },
       { memoryCost: 256, timeCost: 12, parallelism: 1 },
@@ -178,7 +183,7 @@ describe("a configured verify ceiling", () => {
         (costs) =>
           Effect.map(
             Effect.flip(
-              Argon2.argon2Hasher().verify(
+              Argon2.Argon2.argon2Hasher().verify(
                 "x",
                 stored(costs.memoryCost, costs.timeCost, costs.parallelism),
               ),
@@ -212,7 +217,7 @@ describe("a configured verify ceiling", () => {
             return yield* hasher.verify("x", stored(2048, 1, 1));
           }),
         ),
-        Argon2.argon2HasherLayer({ memoryCost: 256, timeCost: 1, maxMemoryKiB: 1024 }),
+        Argon2.Argon2.argon2HasherLayer({ memoryCost: 256, timeCost: 1, maxMemoryKiB: 1024 }),
       ),
     );
     expect(error.message).toMatch(/m=2048 is over maxMemoryKiB=1024/);
@@ -220,19 +225,22 @@ describe("a configured verify ceiling", () => {
   });
 
   it("refuses, at construction, costs over the ceiling: their hashes would not verify", () => {
-    expect(() => Argon2.argon2Hasher({ memoryCost: 262144 })).toThrow(
-      new RangeError(
-        "Argon2 memoryCost=262144 is over maxMemoryKiB=131072: its hashes would not verify",
-      ),
+    expect(() => Argon2.Argon2.argon2Hasher({ memoryCost: 262144 })).toThrow(
+      new Argon2ConfigError({
+        message:
+          "Argon2 memoryCost=262144 is over maxMemoryKiB=131072: its hashes would not verify",
+      }),
     );
-    expect(() => Argon2.argon2Hasher({ timeCost: 3, maxIterations: 2 })).toThrow(
+    expect(() => Argon2.Argon2.argon2Hasher({ timeCost: 3, maxIterations: 2 })).toThrow(
       /timeCost=3 is over maxIterations=2/,
     );
-    expect(() => Argon2.argon2HasherLayer({ parallelism: 9 })).toThrow(
+    expect(() => Argon2.Argon2.argon2HasherLayer({ parallelism: 9 })).toThrow(
       /parallelism=9 is over maxParallelism=8/,
     );
-    expect(() => Argon2.argon2Hasher({ memoryCost: 262144, maxMemoryKiB: 262144 })).not.toThrow();
-    expect(() => Argon2.argon2Hasher(Argon2.serverProfile)).not.toThrow();
+    expect(() =>
+      Argon2.Argon2.argon2Hasher({ memoryCost: 262144, maxMemoryKiB: 262144 }),
+    ).not.toThrow();
+    expect(() => Argon2.Argon2.argon2Hasher(Argon2.Common.serverProfile)).not.toThrow();
   });
 
   it.each(
@@ -252,8 +260,10 @@ describe("a configured verify ceiling", () => {
         ),
     ),
   )("refuses %s = %s at construction", (limit, value) => {
-    expect(() => Argon2.argon2Hasher({ [limit]: value })).toThrow(
-      new RangeError(`Argon2 ${limit} must be a positive integer, got ${value}`),
+    expect(() => Argon2.Argon2.argon2Hasher({ [limit]: value })).toThrow(
+      new Argon2ConfigError({
+        message: `Argon2 ${limit} must be a positive integer, got ${value}`,
+      }),
     );
   });
 });
@@ -281,7 +291,7 @@ describe("a stored hash the ceiling cannot read is refused before the kernel", (
     ["an empty value", "m=,t=2,p=1", /malformed parameters/],
   ])("%s", async (_, parameters, message) => {
     const error = await run(
-      Effect.flip(Argon2.argon2Hasher().verify("x", withParameters(parameters))),
+      Effect.flip(Argon2.Argon2.argon2Hasher().verify("x", withParameters(parameters))),
     );
     expect(error._tag).toBe("HashingError");
     expect(error.message).toMatch(/^Invalid Argon2 hash: /);
@@ -290,7 +300,7 @@ describe("a stored hash the ceiling cannot read is refused before the kernel", (
   });
 
   it("refuses a stored hash over 512 characters without copying it into the kernel", async () => {
-    const hasher = Argon2.argon2Hasher();
+    const hasher = Argon2.Argon2.argon2Hasher();
     const fixture = hashWasmFixtures[0];
     assert(fixture !== undefined, "a hash-wasm fixture exists");
     const padded = (length: number) => `${fixture.hash}${"A".repeat(length - fixture.hash.length)}`;

@@ -34,7 +34,7 @@ import { tables as defaultTables } from "./PgSchema.ts";
  */
 type SessionRow = DrizzleSelected<SessionColumns>;
 
-const toSession = (row: SessionRow): Auth.Session => ({
+const toSession = (row: SessionRow): Auth.Types.Session => ({
   id: row.id,
   userId: row.userId,
   expiresAt: row.expiresAt,
@@ -50,7 +50,7 @@ const toSession = (row: SessionRow): Auth.Session => ({
 /** Build a `SessionStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   schema: SchemaInput = defaultTables,
-): Effect.Effect<typeof Auth.SessionStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.SessionStore.SessionStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const sessions: SessionSchema = resolveSchema(schema).sessions;
@@ -136,14 +136,14 @@ export const make = (
             .orderBy(asc(column.createdAt))
             .execute(),
         ).pipe(Effect.map((rows) => rows.map(toSession))),
-    } satisfies typeof Auth.SessionStore.Service;
+    } satisfies typeof Auth.SessionStore.SessionStore.Service;
   });
 
 /** `SessionStore` backed by drizzle, on top of {@link DrizzleDatabase}. */
 export const layer = (
   schema: SchemaInput = defaultTables,
-): Layer.Layer<Auth.SessionStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.SessionStore, make(schema));
+): Layer.Layer<Auth.SessionStore.SessionStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.SessionStore.SessionStore, make(schema));
 
 // ---------------------------------------------------------------------------
 // Request / Resolver
@@ -157,8 +157,8 @@ export const layer = (
  */
 export class GetSession extends Request.TaggedClass("GetSession")<
   { readonly id: string },
-  Option.Option<Auth.Session>,
-  Auth.AuthError
+  Option.Option<Auth.Types.Session>,
+  Auth.Errors.AuthError
 > {}
 
 /**

@@ -33,6 +33,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./BetterAuth": {
+      "types": "./dist/BetterAuth.d.ts",
+      "import": "./dist/BetterAuth.js"
+    },
+    "./Convert": {
+      "types": "./dist/Convert.d.ts",
+      "import": "./dist/Convert.js"
+    },
+    "./Credentials": {
+      "types": "./dist/Credentials.d.ts",
+      "import": "./dist/Credentials.js"
+    },
+    "./PasswordHasher": {
+      "types": "./dist/PasswordHasher.d.ts",
+      "import": "./dist/PasswordHasher.js"
+    },
+    "./Session": {
+      "types": "./dist/Session.d.ts",
+      "import": "./dist/Session.js"
+    },
+    "./Users": {
+      "types": "./dist/Users.d.ts",
+      "import": "./dist/Users.js"
     }
   },
   "scripts": {

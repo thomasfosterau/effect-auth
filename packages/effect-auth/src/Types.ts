@@ -89,7 +89,7 @@ export type Session = typeof Session.Type;
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { isImpersonationSession } from "@thomasfosterau/effect-auth"
+ * import { isImpersonationSession } from "@thomasfosterau/effect-auth/Types"
  *
  * const session = {
  *   id: "digest",
@@ -136,7 +136,7 @@ export const SESSION_ISSUANCE_ATTRIBUTES: ReadonlyArray<string> = [
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { sessionCredentialClass } from "@thomasfosterau/effect-auth"
+ * import { sessionCredentialClass } from "@thomasfosterau/effect-auth/Types"
  *
  * const session = {
  *   id: "digest",

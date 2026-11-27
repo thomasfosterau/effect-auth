@@ -10,21 +10,21 @@
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * // The app's own French catalog. Codes it lacks fall back to the English default.
- * const frCatalog: Record<string, (params?: Auth.JsonObject) => string> = {
- *   [Auth.ErrorCode.INVALID_CREDENTIALS]: () => "E-mail ou mot de passe invalide",
+ * const frCatalog: Record<string, (params?: Auth.Types.JsonObject) => string> = {
+ *   [Auth.Errors.ErrorCode.INVALID_CREDENTIALS]: () => "E-mail ou mot de passe invalide",
  * }
  *
  * // Default English – no configuration needed.
  * const english = Effect.gen(function* () {
- *   const messages = yield* Auth.Messages
- *   assert.equal(messages.resolve(Auth.ErrorCode.INVALID_CREDENTIALS), "Invalid email or password")
- * }).pipe(Effect.provide(Auth.Messages.Default))
+ *   const messages = yield* Auth.Messages.Messages
+ *   assert.equal(messages.resolve(Auth.Errors.ErrorCode.INVALID_CREDENTIALS), "Invalid email or password")
+ * }).pipe(Effect.provide(Auth.Messages.Messages.Default))
  *
  * // Custom locale: a French resolver that falls back to the English one.
  * const frenchMessages = Layer.effect(
- *   Auth.Messages,
+ *   Auth.Messages.Messages,
  *   Effect.gen(function* () {
- *     const fallback = yield* Auth.Messages
+ *     const fallback = yield* Auth.Messages.Messages
  *     return {
  *       resolve: (code, locale, params) =>
  *         locale === "fr"
@@ -32,14 +32,14 @@
  *           : fallback.resolve(code, locale, params),
  *     }
  *   }),
- * ).pipe(Layer.provide(Auth.Messages.Default))
+ * ).pipe(Layer.provide(Auth.Messages.Messages.Default))
  *
  * const french = Effect.gen(function* () {
- *   const messages = yield* Auth.Messages
- *   assert.equal(messages.resolve(Auth.ErrorCode.INVALID_CREDENTIALS, "fr"), "E-mail ou mot de passe invalide")
+ *   const messages = yield* Auth.Messages.Messages
+ *   assert.equal(messages.resolve(Auth.Errors.ErrorCode.INVALID_CREDENTIALS, "fr"), "E-mail ou mot de passe invalide")
  *   // No French entry for this code, so the English text is used.
  *   assert.equal(
- *     messages.resolve(Auth.ErrorCode.PASSWORD_TOO_SHORT, "fr", { minLength: 10 }),
+ *     messages.resolve(Auth.Errors.ErrorCode.PASSWORD_TOO_SHORT, "fr", { minLength: 10 }),
  *     "Password must be at least 10 characters",
  *   )
  * }).pipe(Effect.provide(frenchMessages))

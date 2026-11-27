@@ -784,7 +784,8 @@ const isAllowedDynamicRedirectUri = (uri: string, extraSchemes: readonly string[
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Redacted } from "effect"
- * import { JwtService, mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth"
+ * import { JwtService } from "@thomasfosterau/effect-auth/Jwt"
+ * import { mcpProviderPreset, OidcProviderService } from "@thomasfosterau/effect-auth/OidcProvider"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * const config = mcpProviderPreset({

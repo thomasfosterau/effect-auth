@@ -27,7 +27,7 @@ import {
   type SamlMetadataInput,
   type SamlSignatureAlgorithm,
   type SamlVerifyInput,
-} from "../index.ts";
+} from "../Saml.ts";
 
 /** The emailAddress NameID format, the sensible default for a B2B SP. */
 export const EMAIL_NAMEID_FORMAT = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress";
@@ -553,7 +553,8 @@ export const verifier: typeof SamlVerifier.Service = {
  * import { Layer } from "effect";
  * import { FetchHttpClient } from "effect/http";
  * import * as Saml from "@thomasfosterau/effect-auth/saml";
- * import { SamlReplayStore, memorySamlReplayStore, SsoService } from "@thomasfosterau/effect-auth";
+ * import { SamlReplayStore, memorySamlReplayStore } from "@thomasfosterau/effect-auth/Saml";
+ * import { SsoService } from "@thomasfosterau/effect-auth/Sso";
  *
  * const ssoLayer = SsoService.layer().pipe(
  *   Layer.provide([

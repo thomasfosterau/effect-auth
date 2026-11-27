@@ -8,7 +8,7 @@ Or use the hasher directly:
 
 ```ts
 import { Effect } from "effect";
-import { argon2Hasher } from "@thomasfosterau/effect-auth-argon2";
+import { argon2Hasher } from "@thomasfosterau/effect-auth-argon2/Argon2";
 
 const hasher = argon2Hasher();
 
@@ -28,7 +28,8 @@ const program = Effect.gen(function* () {
 | `serverProfile`  | `65536` (64 MiB) | `3`        | `1`           | Plain Node servers with headroom |
 
 ```ts
-import { argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
+import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
+import { serverProfile } from "@thomasfosterau/effect-auth-argon2/Common";
 
 const layer = argon2HasherLayer(serverProfile);
 // or tune individual parameters
@@ -52,7 +53,7 @@ Budget: with `defaultProfile`, a hash costs ~19 MiB of the isolate's 128 MiB and
 The [verify ceiling](#verify-ceiling) bounds what a stored hash can make that memory grow to. On Workers its default `maxMemoryKiB` is `65536` (64 MiB, half the isolate) rather than the general `131072`, which is the isolate's whole limit, so one verify at the ceiling cannot exhaust it; a configured `memoryCost` above 64 MiB raises it to that cost. Tighter is better: set `maxMemoryKiB` to the largest `memoryCost` you have ever written, which for a deployment that has only used `defaultProfile` is `19456`:
 
 ```ts
-import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
+import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
 
 const layer = argon2HasherLayer({ maxMemoryKiB: 19456 });
 ```
@@ -76,7 +77,7 @@ Because the costs come from the stored hash, a corrupt or attacker-written one (
 The names and defaults match `@thomasfosterau/argon2`'s `verify(password, hash, { maxMemoryKiB, maxIterations, maxParallelism })`, except for the [lower `maxMemoryKiB` on Workers](#cloudflare-workers). The defaults sit above `serverProfile`, so every hash written with either profile verifies. Set them beside the costs:
 
 ```ts
-import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
+import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
 
 // Tighter on Workers: nothing this deployment wrote needs more than 19 MiB.
 const layer = argon2HasherLayer({ maxMemoryKiB: 19456, maxIterations: 4, maxParallelism: 1 });
@@ -84,7 +85,7 @@ const layer = argon2HasherLayer({ maxMemoryKiB: 19456, maxIterations: 4, maxPara
 
 `verify` also refuses, the same way, a stored hash whose parameters repeat a name or add one other than `m`, `t` and `p` (so the ceiling always reads the costs the kernel would run), and one longer than 512 characters, before it is copied into wasm memory.
 
-`argon2Hasher` and `argon2HasherLayer` throw a `RangeError` when a cost or a limit is not a positive integer, or when the configured costs exceed the ceiling (for example `memoryCost: 262144` without raising `maxMemoryKiB`), since such a hasher would write hashes its own `verify` refuses. Lowering the ceiling below costs your stored hashes already carry locks those users out until they reset their password, so lower it only to what you have written.
+`argon2Hasher` and `argon2HasherLayer` throw an `Argon2ConfigError` (from `@thomasfosterau/effect-auth/Password`) when a cost or a limit is not a positive integer, or when the configured costs exceed the ceiling (for example `memoryCost: 262144` without raising `maxMemoryKiB`), since such a hasher would write hashes its own `verify` refuses. Lowering the ceiling below costs your stored hashes already carry locks those users out until they reset their password, so lower it only to what you have written.
 
 Hashes that cannot be recomputed (a malformed PHC string, an unsupported variant, Argon2 `v=0x10`, or a salt or digest outside the Argon2 crate's bounds: salt 8–48 bytes, digest 4–64 bytes) fail with a `HashingError` rather than silently returning `false`.
 
@@ -100,7 +101,7 @@ The hasher implements the core `PasswordHasher`'s `needsRehash`. It is true for 
 
 ```ts
 import { Password } from "@thomasfosterau/effect-auth";
-import { argon2Hasher } from "@thomasfosterau/effect-auth-argon2";
+import { argon2Hasher } from "@thomasfosterau/effect-auth-argon2/Argon2";
 
 const verifier = Password.multiAlgorithmVerifier([argon2Hasher(), Password.pbkdf2Hasher()]);
 ```

@@ -49,7 +49,7 @@ The store-contract conformance suites (`sessionStoreConformance`, `userStoreConf
 
 ```ts
 const program = Effect.gen(function* () {
-  const sessions = yield* Auth.SessionService;
+  const sessions = yield* Auth.SessionService.SessionService;
   const { token } = yield* sessions.createSession(ada.id);
   yield* sessions.validateSession(token);
   yield* sessions.invalidateSession(token); // validateSession now fails

@@ -58,7 +58,7 @@ import {
 import { firstProofServices, proveAddress } from "../FirstProof.ts";
 import { SessionService } from "../SessionService.ts";
 import * as Types from "../Types.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 import { IdentifierStore, lookupIdentifier } from "../Identifier.ts";
 import {
   createUserWithIdentifier,
@@ -2052,7 +2052,7 @@ export const profile = (
  * can be just as terse.
  *
  * @example
- * import { provider, ProfileMap } from "@thomasfosterau/effect-auth";
+ * import { provider, ProfileMap } from "@thomasfosterau/effect-auth/OAuth";
  *
  * const LinearProvider = (config: OAuthClientConfig): OAuthProvider =>
  *   provider("linear", {

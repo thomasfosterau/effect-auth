@@ -19,14 +19,14 @@ read `Date`s and booleans.
 
 ## Layers and stores
 
-`Drizzle.databaseLayer(db)` accepts any drizzle PostgreSQL, SQLite or MySQL
-handle, including a transaction handle. `Drizzle.layer(tables)` takes the tables
+`Drizzle.Database.databaseLayer(db)` accepts any drizzle PostgreSQL, SQLite or MySQL
+handle, including a transaction handle. `Drizzle.Layers.layer(tables)` takes the tables
 for the matching dialect — it defaults to the PostgreSQL ones:
 
 ```ts
-Drizzle.layer(); //                     ← Pg.tables
-Drizzle.layer(Drizzle.Sqlite.tables);
-Drizzle.layer(Drizzle.MySql.tables);
+Drizzle.Layers.layer(); //                     ← Pg.tables
+Drizzle.Layers.layer(Drizzle.Sqlite.tables);
+Drizzle.Layers.layer(Drizzle.MySql.tables);
 ```
 
 Individual stores are available too, all with the same shape — one namespace per
@@ -73,7 +73,7 @@ Two consequences worth knowing:
 | **MySQL**      | `Drizzle.MySql`  | `datetime(3)`        | `json`             | `tinyint` 0/1 |
 
 Column names are identical across the three, and every one of them round-trips
-to the same TypeScript values: `string`, `Date`, `Auth.JsonObject`,
+to the same TypeScript values: `string`, `Date`, `Auth.Types.JsonObject`,
 `boolean`. MySQL uses `varchar(255)` where the others use `text`, because InnoDB
 cannot index a `TEXT` column without a prefix length and the `(type, value)`
 unique index has to be indexable.
@@ -111,7 +111,7 @@ const appUsers = mysqlTable("users", {
 column.) `utf8mb4_bin`
 treats trailing spaces as insignificant, which never matters here: core trims
 the addresses and usernames it stores. Core also never acts on a record whose
-value differs from the one it looked up (`Auth.lookupIdentifier`), so a
+value differs from the one it looked up (`Auth.Identifier.lookupIdentifier`), so a
 store that compares loosely fails closed (a look-alike reads as unknown)
 rather than resolving another account.
 
@@ -149,7 +149,7 @@ that, the same four read paths are also exposed as Effect `Request`s backed by
 import { Effect, Layer } from "effect";
 import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
 
-const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+const requests = Drizzle.Requests.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 
 const program = Effect.forEach(userIds, Drizzle.Requests.getUser, { concurrency: "unbounded" });
 //    ^ one SELECT ... WHERE id IN (...), however many ids
@@ -206,7 +206,7 @@ remembering that a cached auth read is a stale auth read.
 Drizzle's Effect drivers (`drizzle-orm/effect-postgres` and its siblings, drizzle
 `1.0`) build queries that _are_ `Effect`s. Bind one with `effectDatabaseLayer`
 and the stores run its queries directly — there is no Promise boundary anywhere
-between `Auth.SessionStore` and the database.
+between `Auth.SessionStore.SessionStore` and the database.
 
 **On Cloudflare Workers, a pool's sockets are pinned to the request that opened
 them**: a pool shared across requests deadlocks every later request, so each
@@ -248,7 +248,7 @@ several emails, a username and a phone number, or none at all (passkey-only,
 anonymous, or agent users).
 
 `effect_auth_identifiers` is unique on `(type, value)`. That index _is_ the
-claim mechanism behind `Auth.claimIdentifier`. For an application whose users
+claim mechanism behind `Auth.Identifier.claimIdentifier`. For an application whose users
 table holds the email itself, see
 [Single-table identifiers](#single-table-identifiers-opt-in).
 
@@ -260,7 +260,7 @@ factory takes the result:
 ```ts
 const tables = Drizzle.Pg.defineTables({ sessions: "app_sessions" });
 
-const stores = Drizzle.layer(tables).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+const stores = Drizzle.Layers.layer(tables).pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 ```
 
 Omitted names keep their `effect_auth_*` defaults, and `Sqlite.defineTables` /
@@ -398,13 +398,13 @@ const appUsers = pgTable("users", {
   userId: uuid("id").primaryKey(),
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),
-  meta: jsonb("meta").$type<Auth.JsonObject>().notNull().default({}),
+  meta: jsonb("meta").$type<Auth.Types.JsonObject>().notNull().default({}),
   role: text("role").notNull().default("user"),
   created: timestamp("created_at", { withTimezone: true }).notNull(),
   updated: timestamp("updated_at", { withTimezone: true }).notNull(),
 });
 
-const schema = Drizzle.defineSchema({
+const schema = Drizzle.Columns.defineSchema({
   // This package's own sessions table, mapped one to one.
   sessions: {
     table: Drizzle.Pg.sessionsTable,
@@ -444,11 +444,11 @@ const schema = Drizzle.defineSchema({
   },
 });
 
-export const stores = (db: Parameters<typeof Drizzle.databaseLayer>[0]) =>
-  Drizzle.layer(schema).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+export const stores = (db: Parameters<typeof Drizzle.Database.databaseLayer>[0]) =>
+  Drizzle.Layers.layer(schema).pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 ```
 
-The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Auth.JsonObject>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`, compared byte for byte (on MySQL, declare `value` with `Drizzle.MySql.binaryVarchar`). A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
+The mapping is checked at compile time: naming a column whose selected type is not what the store needs (a `text` column for `expiresAt`, a nullable one for `id`) is a type error. What the mapping cannot check is on you: attribute bags must read back as objects (`jsonb().$type<Auth.Types.JsonObject>()`), extra `NOT NULL` columns need database defaults, and the identifiers table must stay unique on `(type, value)`, compared byte for byte (on MySQL, declare `value` with `Drizzle.MySql.binaryVarchar`). A **promoted** attribute is the sole authority for its key: the store presents the column's value in `user.attributes`, ignores the same key in the bag, and leaves the key out when the column is `NULL`. A users table whose attributes are all promoted may omit `attributes`.
 
 ## Authorization helpers
 
@@ -466,7 +466,7 @@ const Roles = Auth.Ladder.make(["user", "contributor", "moderator", "admin"]);
 export const users = pgTable(
   "users",
   { id: text("id").primaryKey(), role: text("role").notNull().default("user") },
-  (table) => [check("users_role_valid", Drizzle.ladderCheck(table.role, Roles))],
+  (table) => [check("users_role_valid", Drizzle.LadderCheck.ladderCheck(table.role, Roles))],
 );
 ```
 
@@ -502,12 +502,12 @@ const users = Drizzle.SingleTableIdentifierStore.defineUsers({
 });
 
 const identifiers = Drizzle.SingleTableIdentifierStore.layer(users).pipe(
-  Layer.provide(Drizzle.databaseLayer(db)),
+  Layer.provide(Drizzle.Database.databaseLayer(db)),
 );
 ```
 
 Column names are the table object's keys, as in `defineSchema`. The store is not
-part of `Drizzle.layer()`, so choosing it is an explicit provide.
+part of `Drizzle.Layers.layer()`, so choosing it is an explicit provide.
 
 ### What the table has to satisfy
 
@@ -613,6 +613,7 @@ so the writer fails when there is none:
 ```ts
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import { SecureRandom } from "effect/crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` NOT NULL: the row can't be inserted without the address.
@@ -620,9 +621,9 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
   Effect.gen(function* () {
     const email = input.identifier;
     if (email?.type !== "email") {
-      return yield* new Auth.AuthError({ message: "A user needs an email address" });
+      return yield* new Auth.Errors.AuthError({ message: "A user needs an email address" });
     }
-    const id = crypto.randomUUID();
+    const id = SecureRandom.uuidV4Unsafe();
     const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
@@ -635,7 +636,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
           createdAt: now,
           updatedAt: now,
         }),
-      catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
     const user = {
@@ -655,13 +656,14 @@ claim that follows writes it:
 ```ts
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import { SecureRandom } from "effect/crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` nullable: a user created without an address gets `NULL`.
 const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] = (input) =>
   Effect.gen(function* () {
     const email = input.identifier?.type === "email" ? input.identifier : undefined;
-    const id = crypto.randomUUID();
+    const id = SecureRandom.uuidV4Unsafe();
     const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
@@ -674,7 +676,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
           createdAt: now,
           updatedAt: now,
         }),
-      catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
     const user = {
@@ -764,18 +766,18 @@ address.
 Five more stores run on the same `DrizzleDatabase` and the same dialect
 `tables` (each defaults to `Pg.tables`; pass `Sqlite.tables`, `MySql.tables` or
 a `defineTables(...)` result to match your handle). They are not part of
-`Drizzle.layer()`: merge the ones your application uses.
+`Drizzle.Layers.layer()`: merge the ones your application uses.
 
 ```ts
 const stores = Layer.mergeAll(
-  Drizzle.layer(tables), //                          Session, User, Identifier
+  Drizzle.Layers.layer(tables), //                          Session, User, Identifier
   Drizzle.EmailPasswordStore.layer(tables), //        EmailPasswordService
   Drizzle.EmailPasswordStore.passwordResetUserLayer(tables), // PasswordResetService
   Drizzle.UserServiceStore.layer(tables), //          UserService, AccountManagement, Admin
   Drizzle.TokenStore.layer(tables), //                EmailVerificationStore + PasswordResetStore
   Drizzle.ApiKeyStore.layer(tables), //               ApiKeyService
   Drizzle.RateLimitStore.layer(tables), //            RateLimiter, IP/RateLimit plugins
-).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+).pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 ```
 
 Each namespace also exports the `make` its layer is built from
@@ -862,16 +864,16 @@ const appApiKeys = pgTable("api_keys", {
 
 const stores = Layer.mergeAll(
   Drizzle.ApiKeyStore.layer(
-    Drizzle.defineApiKeyTable({
+    Drizzle.Columns.defineApiKeyTable({
       table: appApiKeys,
       columns: { id: "id", userId: "owner", keyHash: "digest" /* , ... */ },
     }),
   ),
-  Drizzle.TokenStore.layer(Drizzle.defineTokenTable({ table: appTokens, columns: { ... } })),
+  Drizzle.TokenStore.layer(Drizzle.Columns.defineTokenTable({ table: appTokens, columns: { ... } })),
   Drizzle.RateLimitStore.layer(
-    Drizzle.defineRateLimitTable({ table: appThrottle, columns: { ... } }),
+    Drizzle.Columns.defineRateLimitTable({ table: appThrottle, columns: { ... } }),
   ),
-).pipe(Layer.provide(Drizzle.databaseLayer(db)));
+).pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
 ```
 
 The mapping is checked at the type level, as in `defineSchema`: each field
@@ -897,7 +899,7 @@ The stores implement effect-auth's contracts exactly:
 - **Deletes are no-ops** when the row does not exist.
 - **Driver failures become `AuthError`** with the original error preserved as
   `cause` — including the unique-index violation raised when two users race for
-  the same `(type, value)`. `Auth.claimIdentifier` and `Auth.replaceIdentifier`
+  the same `(type, value)`. `Auth.Identifier.claimIdentifier` and `Auth.Identifier.replaceIdentifier`
   in core re-read the pair on failure and turn that race into an
   `IdentifierTakenError`.
 - **`IdentifierStore.replace` claims, then releases.** The default store inserts

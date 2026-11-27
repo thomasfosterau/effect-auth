@@ -24,13 +24,13 @@
  * const post = Auth.Entity.ref("posts", "post-1")
  *
  * const program = Effect.gen(function* () {
- *   const authorizer = yield* Auth.Authorizer
+ *   const authorizer = yield* Auth.Authorizer.Authorizer
  *   // Inherited from viewer through the hierarchy.
  *   assert.equal(yield* authorizer.check({ action: "read", resource: post }), true)
  *   // The editor role grants update, and nothing grants delete to user-1.
  *   assert.equal(yield* authorizer.check({ action: "update", resource: post }), true)
  *   assert.equal(yield* authorizer.check({ action: "delete", resource: post }), false)
- * }).pipe(Auth.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")), Effect.provide(rbac))
+ * }).pipe(Auth.Authorizer.CurrentPrincipal.provide(Auth.Entity.ref("User", "user-1")), Effect.provide(rbac))
  *
  * await Effect.runPromise(program)
  * ```
@@ -43,9 +43,13 @@ import * as Layer from "effect/Layer";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
-import { Authorizer, EntityResolver, memoryEntityResolver } from "./Authorizer.ts";
+import {
+  Authorizer,
+  EntityResolver,
+  memoryEntityResolver,
+  type PolicyValidationError,
+} from "./Authorizer.ts";
 import * as Entity from "./Entity.ts";
-import type * as Errors from "./Errors.ts";
 import { formatPermission, type PermissionRef } from "./Permission.ts";
 import * as Policy from "./Policy.ts";
 
@@ -314,7 +318,7 @@ export const model = (config: RbacConfig): AuthorizationModel.Model => {
  */
 export const layer = (
   config: RbacConfig,
-): Layer.Layer<Authorizer | EntityResolver, Errors.AuthError> =>
+): Layer.Layer<Authorizer | EntityResolver, PolicyValidationError> =>
   Layer.provideMerge(
     Authorizer.layer({ policies: policies(config), model: model(config), useStore: false }),
     entityResolverLayer(config),

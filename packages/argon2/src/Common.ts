@@ -9,9 +9,10 @@
  * @module argon2/common
  */
 import * as Effect from "effect/Effect";
+import type { SecureRandom } from "effect/crypto";
 import * as P from "effect/Predicate";
 import * as Str from "effect/String";
-import { HashingError } from "@thomasfosterau/effect-auth";
+import { HashingError } from "@thomasfosterau/effect-auth/Errors";
 
 /** PHC/`parseAlgorithm` identifier for the hashes this package produces. */
 export const ARGON2ID = "argon2id";
@@ -37,7 +38,7 @@ export interface Argon2VerifyLimits {
  * `@thomasfosterau/argon2`'s `verify` options.
  *
  * Unset cost fields fall back to {@link defaultProfile}, unset limits to
- * {@link defaultVerifyLimits}. The hasher throws a `RangeError` when it is
+ * {@link defaultVerifyLimits}. The hasher throws an `Argon2ConfigError` when it is
  * built with a cost or limit that is not a positive integer, or with costs over
  * its own ceiling, since it would write hashes it then refuses to verify.
  */
@@ -58,6 +59,8 @@ export interface Argon2Options {
   readonly maxIterations?: number;
   /** Refuse to verify a stored hash whose `p` exceeds this. Default `8`. */
   readonly maxParallelism?: number;
+  /** Where salts are drawn from. Default the core's `PlatformCrypto.instance` (Web Crypto). */
+  readonly random?: typeof SecureRandom.SecureRandom.Service;
 }
 
 /** A fully-resolved set of Argon2id cost parameters — an {@link Argon2Options} with no holes. */
@@ -92,7 +95,8 @@ export const defaultProfile: Argon2Profile = {
  *
  * @example
  * ```ts
- * import { argon2HasherLayer, serverProfile } from "@thomasfosterau/effect-auth-argon2";
+ * import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
+ * import { serverProfile } from "@thomasfosterau/effect-auth-argon2/Common";
  *
  * const layer = argon2HasherLayer(serverProfile);
  * ```

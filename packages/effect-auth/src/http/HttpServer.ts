@@ -157,7 +157,7 @@ import {
   type SessionCacheConfig,
 } from "../SessionCookieCache.ts";
 import * as Types from "../Types.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 import { definedKeys } from "../DefinedKeys.ts";
 
 /**

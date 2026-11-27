@@ -320,15 +320,16 @@ export const make = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
- * import { Hooks, SessionService } from "@thomasfosterau/effect-auth"
- * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/Email"
  * import {
  *   OtpSecondFactorGateLayer,
  *   OtpSecondFactorService,
  *   type OtpSecondFactorConfig,
  *   type OtpSecondFactorStore,
- * } from "@thomasfosterau/effect-auth/multifactor"
- * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * } from "@thomasfosterau/effect-auth/MultiFactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/Password"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's store adapter and OTP delivery callback, passed in.
@@ -412,20 +413,20 @@ export const OtpSecondFactorGateLayer: Layer.Layer<
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Redacted } from "effect"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
  * import {
- *   Hooks,
- *   SessionService,
  *   TrustedDeviceService,
  *   type TrustedDeviceStore,
- * } from "@thomasfosterau/effect-auth"
- * import { EmailPasswordService } from "@thomasfosterau/effect-auth/email"
+ * } from "@thomasfosterau/effect-auth/TrustedDevice"
+ * import { EmailPasswordService } from "@thomasfosterau/effect-auth/Email"
  * import {
  *   OtpSecondFactorService,
  *   TrustedDeviceWithOtpSecondFactorGateLayer,
  *   type OtpSecondFactorConfig,
  *   type OtpSecondFactorStore,
- * } from "@thomasfosterau/effect-auth/multifactor"
- * import { PasswordHasher } from "@thomasfosterau/effect-auth/password"
+ * } from "@thomasfosterau/effect-auth/MultiFactor"
+ * import { PasswordHasher } from "@thomasfosterau/effect-auth/Password"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * // The app's storage adapters and OTP delivery callback, passed in.

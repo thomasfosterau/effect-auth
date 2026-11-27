@@ -18,7 +18,7 @@ pnpm add @thomasfosterau/effect-auth-argon2 @thomasfosterau/effect-auth effect
 
 ```ts
 import { Layer } from "effect";
-import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2";
+import { argon2HasherLayer } from "@thomasfosterau/effect-auth-argon2/Argon2";
 
 // Make Argon2id the hasher for new passwords, in place of PasswordHasher.layer()
 const AuthLayer = Layer.mergeAll(

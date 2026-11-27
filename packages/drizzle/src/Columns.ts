@@ -12,7 +12,7 @@
  *   userId: uuid("id").primaryKey(),
  *   displayName: text("display_name"),
  *   avatarUrl: text("avatar_url"),
- *   meta: jsonb("meta").$type<Auth.JsonObject>().notNull().default({}),
+ *   meta: jsonb("meta").$type<Auth.Types.JsonObject>().notNull().default({}),
  *   role: text("role").notNull().default("user"),
  *   created: timestamp("created_at", { withTimezone: true }).notNull(),
  *   updated: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -105,7 +105,7 @@ export interface SessionColumnNames<TTable extends Table> {
   readonly expiresAt: ColumnKey<TTable, Date>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly lastActivityAt: ColumnKey<TTable, Date>;
-  readonly attributes: ColumnKey<TTable, Auth.JsonObject | null>;
+  readonly attributes: ColumnKey<TTable, Auth.Types.JsonObject | null>;
 }
 
 /** Which of `TTable`'s columns hold each field of a user. */
@@ -117,7 +117,7 @@ export interface UserColumnNames<TTable extends Table> {
    * The `jsonb` attribute bag. Optional: a table that keeps every attribute it
    * has as a promoted column needs none.
    */
-  readonly attributes?: ColumnKey<TTable, Auth.JsonObject | null>;
+  readonly attributes?: ColumnKey<TTable, Auth.Types.JsonObject | null>;
   readonly createdAt: ColumnKey<TTable, Date>;
   readonly updatedAt: ColumnKey<TTable, Date>;
   /**
@@ -133,7 +133,7 @@ export interface IdentifierColumnNames<TTable extends Table> {
   readonly id: ColumnKey<TTable, string>;
   readonly userId: ColumnKey<TTable, string>;
   /**
-   * `$type<Auth.IdentifierType>()` is welcome but not required: a plain `text`
+   * `$type<Auth.Identifier.IdentifierType>()` is welcome but not required: a plain `text`
    * column maps fine. See {@link IdentifierColumns.type} for what the store
    * assumes about its contents.
    */
@@ -151,7 +151,7 @@ export type SessionColumns = {
   readonly expiresAt: StoreColumn<Date>;
   readonly createdAt: StoreColumn<Date>;
   readonly lastActivityAt: StoreColumn<Date>;
-  readonly attributes: NullableColumn<Auth.JsonObject>;
+  readonly attributes: NullableColumn<Auth.Types.JsonObject>;
 };
 
 /** The user columns, resolved to drizzle column objects. */
@@ -159,7 +159,7 @@ export type UserColumns = {
   readonly id: StoreColumn<string>;
   readonly name: NullableColumn<string>;
   readonly image: NullableColumn<string>;
-  readonly attributes?: NullableColumn<Auth.JsonObject>;
+  readonly attributes?: NullableColumn<Auth.Types.JsonObject>;
   readonly createdAt: StoreColumn<Date>;
   readonly updatedAt: StoreColumn<Date>;
   readonly passwordHash?: NullableColumn<string>;
@@ -170,13 +170,13 @@ export type IdentifierColumns = {
   readonly id: StoreColumn<string>;
   readonly userId: StoreColumn<string>;
   /**
-   * Read back as an `Auth.IdentifierType`. The mapping only requires a `string`
+   * Read back as an `Auth.Identifier.IdentifierType`. The mapping only requires a `string`
    * column, because an application's `type` column is usually plain `text`; this
    * package never writes a value outside the three, and a row that holds one
    * (put there by something else) is passed through as it was found rather than
    * rejected — the same behaviour the fixed-shape tables have always had.
    */
-  readonly type: StoreColumn<Auth.IdentifierType>;
+  readonly type: StoreColumn<Auth.Identifier.IdentifierType>;
   readonly value: StoreColumn<string>;
   readonly verified: StoreColumn<boolean>;
   readonly verifiedAt: NullableColumn<Date>;
@@ -298,10 +298,10 @@ export class SchemaMappingError extends Schema.TaggedError<
  * supported). Beyond the mapping, a table still needs:
  *
  * - attribute bags that read back as an object
- *   (`jsonb().$type<Auth.JsonObject>()`, not a bare `jsonb()`);
+ *   (`jsonb().$type<Auth.Types.JsonObject>()`, not a bare `jsonb()`);
  * - a database default for every required column the stores do not know;
  * - a unique index on the identifiers table's `(type, value)`, which makes
- *   `Auth.claimIdentifier` correct.
+ *   `Auth.Identifier.claimIdentifier` correct.
  *
  * An attribute under `users.promoted` is a real column, presented in
  * `user.attributes` under its name; the column is the only authority for that
@@ -445,7 +445,7 @@ export interface ApiKeyColumnNames<TTable extends Table> {
   readonly expiresAt: ColumnKey<TTable, Date | null>;
   readonly lastUsedAt: ColumnKey<TTable, Date | null>;
   readonly permissions: ColumnKey<TTable, ApiKeyPermissions | null>;
-  readonly metadata: ColumnKey<TTable, Auth.JsonObject | null>;
+  readonly metadata: ColumnKey<TTable, Auth.Types.JsonObject | null>;
   readonly remaining: ColumnKey<TTable, number | null>;
   readonly refillAmount: ColumnKey<TTable, number | null>;
   readonly refillInterval: ColumnKey<TTable, number | null>;
@@ -494,7 +494,7 @@ export type ApiKeyColumns = {
   readonly expiresAt: NullableColumn<Date>;
   readonly lastUsedAt: NullableColumn<Date>;
   readonly permissions: NullableColumn<ApiKeyPermissions>;
-  readonly metadata: NullableColumn<Auth.JsonObject>;
+  readonly metadata: NullableColumn<Auth.Types.JsonObject>;
   readonly remaining: NullableColumn<number>;
   readonly refillAmount: NullableColumn<number>;
   readonly refillInterval: NullableColumn<number>;

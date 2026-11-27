@@ -17,12 +17,12 @@ relay. This guide covers the deployment.
 ```ts
 import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
-const stores = Postgres.layer(env.HYPERDRIVE);
+const stores = Postgres.Postgres.layer(env.HYPERDRIVE);
 ```
 
 `@effect/sql-pg` connects with `node:net` and `node:tls`, so the Worker needs the `nodejs_compat`
 compatibility flag. Hyperdrive pools connections at the edge, so keep the client's own pool small.
-`Postgres.layer(env.HYPERDRIVE, { maxConnections: 1 })` is enough for one request at a time.
+`Postgres.Postgres.layer(env.HYPERDRIVE, { maxConnections: 1 })` is enough for one request at a time.
 
 **In the Alchemy program**, declare the `AuthSchema` resource and give its provider the origin
 database. A Hyperdrive binding exists only inside a Worker, so the deploy-time provider connects
@@ -33,12 +33,12 @@ import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
 const providers = Layer.mergeAll(
   Cloudflare.providers(),
-  Postgres.AuthSchemaProvider({
-    database: Postgres.database(Redacted.make(process.env.DATABASE_URL)),
+  Postgres.AuthSchema.AuthSchemaProvider({
+    database: Postgres.Postgres.database(Redacted.make(process.env.DATABASE_URL)),
   }),
 );
 // …inside the program:
-yield * Postgres.AuthSchema("auth-schema");
+yield * Postgres.AuthSchema.AuthSchema("auth-schema");
 ```
 
 Every deploy reconciles the `auth_*` tables in Postgres. The DDL is idempotent `CREATE … IF NOT

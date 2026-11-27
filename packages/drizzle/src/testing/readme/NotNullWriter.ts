@@ -1,6 +1,7 @@
 // README:begin
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import { SecureRandom } from "effect/crypto";
 import * as Auth from "@thomasfosterau/effect-auth";
 
 // `email` NOT NULL: the row can't be inserted without the address.
@@ -8,9 +9,9 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
   Effect.gen(function* () {
     const email = input.identifier;
     if (email?.type !== "email") {
-      return yield* new Auth.AuthError({ message: "A user needs an email address" });
+      return yield* new Auth.Errors.AuthError({ message: "A user needs an email address" });
     }
-    const id = crypto.randomUUID();
+    const id = SecureRandom.uuidV4Unsafe();
     const now = yield* DateTime.nowAsDate;
     yield* Effect.tryPromise({
       try: () =>
@@ -23,7 +24,7 @@ const createUser: (typeof Auth.Email.EmailPasswordStore.Service)["createUser"] =
           createdAt: now,
           updatedAt: now,
         }),
-      catch: (cause) => new Auth.AuthError({ message: "insert into users failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "insert into users failed", cause }),
     });
     // A plain INSERT: when it succeeds, this call created the user.
     const user = {

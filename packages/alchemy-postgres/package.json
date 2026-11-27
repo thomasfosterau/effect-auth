@@ -38,6 +38,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./AuthSchema": {
+      "types": "./dist/AuthSchema.d.ts",
+      "import": "./dist/AuthSchema.js"
+    },
+    "./Postgres": {
+      "types": "./dist/Postgres.d.ts",
+      "import": "./dist/Postgres.js"
     }
   },
   "publishConfig": {

@@ -306,16 +306,16 @@ const jsonKv = (kv: KeyValueStore.KeyValueStore) => {
  *   return value ?? null
  * }
  *
- * const TakeLive = Layer.succeed(Auth.KeyValueStoreTake, {
+ * const TakeLive = Layer.succeed(Auth.KeyValueStores.KeyValueStoreTake, {
  *   take: (key) =>
  *     Effect.tryPromise({
  *       try: async () => (await getDel(key)) ?? undefined,
- *       catch: (cause) => new Auth.AuthError({ message: "GETDEL failed", cause }),
+ *       catch: (cause) => new Auth.Errors.AuthError({ message: "GETDEL failed", cause }),
  *     }),
  * })
  *
  * const program = Effect.gen(function* () {
- *   const { take } = yield* Auth.KeyValueStoreTake
+ *   const { take } = yield* Auth.KeyValueStores.KeyValueStoreTake
  *   return [yield* take("oauth-state:s1"), yield* take("oauth-state:s1")]
  * })
  * assert.deepEqual(await Effect.runPromise(program.pipe(Effect.provide(TakeLive))), [
@@ -967,12 +967,12 @@ export const EmailOtpStoreKV: Layer.Layer<EmailOtpStore, never, KeyValueStore.Ke
  *
  * // A host's binding, here a fixed key list standing in for a backend.
  * const keys = ["email-otp:sign-in:a@example.com", "oauth-state:s1"]
- * const KeysLive = Layer.succeed(Auth.KeyValueStoreKeys, {
+ * const KeysLive = Layer.succeed(Auth.KeyValueStores.KeyValueStoreKeys, {
  *   list: (prefix) => Effect.succeed(keys.filter((key) => key.startsWith(prefix))),
  * })
  *
  * const program = Effect.gen(function* () {
- *   const listing = yield* Auth.KeyValueStoreKeys
+ *   const listing = yield* Auth.KeyValueStores.KeyValueStoreKeys
  *   return yield* listing.list("email-otp:")
  * })
  * assert.deepEqual(await Effect.runPromise(program.pipe(Effect.provide(KeysLive))), [
@@ -1169,8 +1169,8 @@ const purgeExpiredRecords = <A>(options: {
  * import * as Auth from "@thomasfosterau/effect-auth"
  *
  * const StoresLive = Layer.provideMerge(
- *   Layer.merge(Auth.MagicLinkStoreKV, Auth.EmailOtpStoreKV),
- *   Auth.layerMemoryKeyValueStore,
+ *   Layer.merge(Auth.KeyValueStores.MagicLinkStoreKV, Auth.KeyValueStores.EmailOtpStoreKV),
+ *   Auth.KeyValueStores.layerMemoryKeyValueStore,
  * )
  *
  * const program = Effect.gen(function* () {
@@ -1185,7 +1185,7 @@ const purgeExpiredRecords = <A>(options: {
  *   yield* otps.upsert({ ...record, purpose: "sign-in", expiresAt: 5_000 })
  *   yield* otps.upsert({ ...record, purpose: "forget-password", expiresAt: 60_000 })
  *
- *   const purged = yield* Auth.purgeExpiredKV
+ *   const purged = yield* Auth.KeyValueStores.purgeExpiredKV
  *   assert.equal(purged.emailOtps, 1)
  *   assert.ok(Option.isNone(yield* otps.get("a@example.com", "sign-in")))
  *   assert.ok(Option.isSome(yield* otps.get("a@example.com", "forget-password")))

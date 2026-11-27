@@ -30,7 +30,7 @@ export type AuthStores = Layer.Success<typeof Sql.layer>;
  *
  * const db = yield* Cloudflare.D1.QueryDatabase(AuthDatabase);
  * // in a handler:
- * yield* handle(request).pipe(Effect.provide(AuthD1.layer(db)));
+ * yield* handle(request).pipe(Effect.provide(AuthD1.Storage.layer(db)));
  * ```
  */
 export const layer = (
@@ -49,7 +49,7 @@ export const layer = (
  */
 export const migrate = (
   database: QueryDatabaseClient,
-): Effect.Effect<void, Auth.AuthError, RuntimeContext> =>
+): Effect.Effect<void, Auth.Errors.AuthError, RuntimeContext> =>
   Sql.migrate.pipe(Effect.provide(D1Client.layer({ db: database })));
 
 /**
@@ -61,5 +61,5 @@ export const migrate = (
  */
 export const purgeExpired = (
   database: QueryDatabaseClient,
-): Effect.Effect<Sql.PurgeExpiredResult, Auth.AuthError, RuntimeContext> =>
+): Effect.Effect<Sql.PurgeExpiredResult, Auth.Errors.AuthError, RuntimeContext> =>
   Sql.purgeExpired.pipe(Effect.provide(D1Client.layer({ db: database })));

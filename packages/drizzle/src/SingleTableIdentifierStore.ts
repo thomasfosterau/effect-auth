@@ -24,7 +24,7 @@
  * });
  *
  * const identifiers = Drizzle.SingleTableIdentifierStore.layer(users).pipe(
- *   Layer.provide(Drizzle.databaseLayer(db)),
+ *   Layer.provide(Drizzle.Database.databaseLayer(db)),
  * );
  * ```
  */
@@ -65,7 +65,7 @@ export interface SingleTableUserColumnNames<TTable extends Table> {
   readonly emailVerified: ColumnKey<TTable, boolean>;
   /**
    * When the address was verified, as a nullable timestamp. Optional: when
-   * mapped, {@link Auth.Identifier.verifiedAt} is stored and reported; when not
+   * mapped, {@link Auth.Identifier.Identifier.verifiedAt} is stored and reported; when not
    * mapped it is neither stored nor reported.
    */
   readonly emailVerifiedAt?: ColumnKey<TTable, Date | null>;
@@ -128,7 +128,7 @@ const verifiedAtOf = (row: UserRow): Date | null => {
  * `verifiedAt` is reported only when the `emailVerifiedAt` column is mapped (the
  * projection then includes it) and holds a value.
  */
-const toIdentifier = (row: UserRow): Option.Option<Auth.Identifier> => {
+const toIdentifier = (row: UserRow): Option.Option<Auth.Identifier.Identifier> => {
   if (row.email === null) return Option.none();
   const verifiedAt = verifiedAtOf(row);
   return Option.some({
@@ -149,7 +149,7 @@ const toIdentifier = (row: UserRow): Option.Option<Auth.Identifier> => {
 /** Build a single-table `IdentifierStore` over the ambient {@link DrizzleDatabase}. */
 export const make = (
   users: SingleTableUsers,
-): Effect.Effect<typeof Auth.IdentifierStore.Service, never, DrizzleDatabase> =>
+): Effect.Effect<typeof Auth.Identifier.IdentifierStore.Service, never, DrizzleDatabase> =>
   Effect.gen(function* () {
     const query = queryRunner(yield* DrizzleDatabase);
     const column = users.columns;
@@ -204,7 +204,7 @@ export const make = (
           Option.isNone(row)
             ? Effect.void
             : Effect.fail(
-                new Auth.AuthError({
+                new Auth.Errors.AuthError({
                   message:
                     "the single-table IdentifierStore cannot remove the email of a user whose users.email is NOT NULL: the address would be left NULL. Deleting the user row removes it.",
                 }),
@@ -233,7 +233,7 @@ export const make = (
       create: (identifier) => {
         if (identifier.type !== "email") {
           return Effect.fail(
-            new Auth.IdentifierRefusedError({
+            new Auth.Identifier.IdentifierRefusedError({
               message: `the single-table IdentifierStore holds email identifiers only; a ${identifier.type} identifier needs the multi-identifier store`,
               identifierType: identifier.type,
             }),
@@ -242,12 +242,12 @@ export const make = (
         return Effect.gen(function* () {
           const current = yield* readUser(identifier.userId, "identifier.create.read");
           if (Option.isNone(current)) {
-            return yield* new Auth.AuthError({
+            return yield* new Auth.Errors.AuthError({
               message: "the single-table IdentifierStore has no user row to hold the email",
             });
           }
           if (current.value.email !== null) {
-            return yield* new Auth.IdentifierRefusedError({
+            return yield* new Auth.Identifier.IdentifierRefusedError({
               message:
                 "the single-table IdentifierStore allows one email identifier per user, and this user already has one",
               identifierType: "email",
@@ -273,7 +273,7 @@ export const make = (
           const stored = yield* readUser(identifier.userId, "identifier.create.read");
           const claimed = Option.flatMap(stored, toIdentifier);
           if (Option.isNone(claimed) || claimed.value.value !== identifier.value) {
-            return yield* new Auth.AuthError({
+            return yield* new Auth.Errors.AuthError({
               message: "the user's email changed while it was being claimed",
             });
           }
@@ -284,11 +284,11 @@ export const make = (
       // One guarded UPDATE: the row moves from `from`'s address to `to`'s, or
       // stays as it is. Never NULL, so a NOT NULL column takes it too.
       replace: (from, to) => {
-        const invalid = Auth.replaceInputError(from, to);
+        const invalid = Auth.Identifier.replaceInputError(from, to);
         if (Option.isSome(invalid)) return Effect.fail(invalid.value);
         if (from.type !== "email") {
           return Effect.fail(
-            new Auth.AuthError({
+            new Auth.Errors.AuthError({
               message: `the single-table IdentifierStore holds email identifiers only; a ${from.type} identifier needs the multi-identifier store`,
             }),
           );
@@ -352,11 +352,11 @@ export const make = (
       // keeps the address.
       deleteByUser: (userId) =>
         nullable ? clearEmail(userId, "identifier.deleteByUser") : Effect.void,
-    } satisfies typeof Auth.IdentifierStore.Service;
+    } satisfies typeof Auth.Identifier.IdentifierStore.Service;
   });
 
 /** `IdentifierStore` over a `users` table that holds the email itself. */
 export const layer = (
   users: SingleTableUsers,
-): Layer.Layer<Auth.IdentifierStore, never, DrizzleDatabase> =>
-  Layer.effect(Auth.IdentifierStore, make(users));
+): Layer.Layer<Auth.Identifier.IdentifierStore, never, DrizzleDatabase> =>
+  Layer.effect(Auth.Identifier.IdentifierStore, make(users));

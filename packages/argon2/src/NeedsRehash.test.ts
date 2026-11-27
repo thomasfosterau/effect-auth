@@ -19,7 +19,7 @@ const stored = (
   { variant = "argon2id", salt = SALT, digest = DIGEST } = {},
 ): string => `$${variant}$v=19$m=${m},t=${t},p=${p}$${salt}$${digest}`;
 
-const hasher = Argon2.argon2Hasher({ memoryCost: 19456, timeCost: 2, parallelism: 2 });
+const hasher = Argon2.Argon2.argon2Hasher({ memoryCost: 19456, timeCost: 2, parallelism: 2 });
 const needsRehash = (hash: string): boolean => {
   assert(hasher.needsRehash !== undefined, "the hasher reports rehashing");
   return hasher.needsRehash(hash);
@@ -53,8 +53,10 @@ describe("needsRehash", () => {
   it("replaces the default profile's hashes once the costs are raised", () => {
     const fixture = hashWasmFixtures[0];
     assert(fixture !== undefined, "a hash-wasm fixture exists");
-    expect(Argon2.argon2Hasher().needsRehash?.(fixture.hash)).toBe(false);
-    expect(Argon2.argon2Hasher(Argon2.serverProfile).needsRehash?.(fixture.hash)).toBe(true);
+    expect(Argon2.Argon2.argon2Hasher().needsRehash?.(fixture.hash)).toBe(false);
+    expect(
+      Argon2.Argon2.argon2Hasher(Argon2.Common.serverProfile).needsRehash?.(fixture.hash),
+    ).toBe(true);
   });
 
   it.each([

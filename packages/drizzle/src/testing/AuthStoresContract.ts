@@ -39,22 +39,22 @@ const hashToken = (token: string): string => createHash("sha256").update(token).
  */
 class PurgeRateLimits extends Context.Service<
   PurgeRateLimits,
-  (options?: RateLimitStore.PurgeExpiredOptions) => Effect.Effect<void, Auth.AuthError>
+  (options?: RateLimitStore.PurgeExpiredOptions) => Effect.Effect<void, Auth.Errors.AuthError>
 >()("@thomasfosterau/effect-auth-drizzle/testing/AuthStoresContract/PurgeRateLimits") {}
 
 /** Every store the suite exercises. */
 export type AuthStores =
   | PurgeRateLimits
-  | Auth.ApiKeyStore
+  | Auth.ApiKey.ApiKeyStore
   | Auth.Email.EmailPasswordStore
   | Auth.Password.PasswordResetUserStore
-  | Auth.RateLimitStore
+  | Auth.RateLimit.RateLimitStore
   | Auth.Email.EmailVerificationStore
   | Auth.Password.PasswordResetStore
-  | Auth.SessionStore
-  | Auth.UserStore
-  | Auth.UserServiceStore
-  | Auth.IdentifierStore;
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.User.UserServiceStore
+  | Auth.Identifier.IdentifierStore;
 
 /** Application tables standing in for the dialect's API key, token and rate-limit tables. */
 export interface MappedTables {
@@ -119,7 +119,7 @@ const emailPasswordCases = (label: string, run: Run): void => {
       const result = await run(
         Effect.gen(function* () {
           const store = yield* Auth.Email.EmailPasswordStore;
-          const users = yield* Auth.UserStore;
+          const users = yield* Auth.UserStore.UserStore;
           const created = yield* store.createUser({ name: "Ada", attributes: { team: "core" } });
           return {
             created,
@@ -167,17 +167,17 @@ const emailPasswordCases = (label: string, run: Run): void => {
     it("signs up and signs in through EmailPasswordService", async () => {
       const service = Auth.Email.EmailPasswordService.layer().pipe(
         Layer.provideMerge(
-          Auth.SessionService.layer({
+          Auth.SessionService.SessionService.layer({
             sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
           }),
         ),
         Layer.provideMerge(Auth.Password.PasswordHasher.layer()),
-        Layer.provideMerge(Auth.Hooks.Default),
+        Layer.provideMerge(Auth.Hooks.Hooks.Default),
       );
       const result = await run(
         Effect.gen(function* () {
           const auth = yield* Auth.Email.EmailPasswordService;
-          const sessions = yield* Auth.SessionService;
+          const sessions = yield* Auth.SessionService.SessionService;
           const email = `${uuid()}@example.com`;
           const signedUp = yield* auth.signUp({ email, password: "correct horse battery" });
           const signedIn = yield* auth.signIn({ email, password: "correct horse battery" });
@@ -185,7 +185,7 @@ const emailPasswordCases = (label: string, run: Run): void => {
           // The raw token is the credential; the session (and its row) holds its digest.
           const token = signedIn.token ?? "";
           const validated = yield* sessions.validateSession(token);
-          const stored = yield* Auth.SessionStore.use((store) =>
+          const stored = yield* Auth.SessionStore.SessionStore.use((store) =>
             store.get(signedIn.session?.id ?? ""),
           );
           return {
@@ -214,11 +214,11 @@ const userServiceCases = (label: string, run: Run): void => {
           const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
             store.createUser({ name: "Ada", attributes: { team: "core" } }),
           );
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           return {
             user,
             read: yield* store.get(user.id),
-            viaUserStore: yield* Auth.UserStore.use((users) => users.get(user.id)),
+            viaUserStore: yield* Auth.UserStore.UserStore.use((users) => users.get(user.id)),
             missing: yield* store.get(uuid()),
           };
         }),
@@ -235,7 +235,7 @@ const userServiceCases = (label: string, run: Run): void => {
           const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
             store.createUser({ name: "Ada", image: "a.png", attributes: { team: "core" } }),
           );
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           const renamed = yield* store.update({
             ...user,
             name: "Grace",
@@ -264,7 +264,7 @@ const userServiceCases = (label: string, run: Run): void => {
     });
 
     it("update of a missing user writes nothing and returns the user given", async () => {
-      const ghost: Auth.User = {
+      const ghost: Auth.Types.User = {
         id: uuid(),
         name: "Nobody",
         createdAt: dateAt(0),
@@ -273,7 +273,7 @@ const userServiceCases = (label: string, run: Run): void => {
       };
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           return { returned: yield* store.update(ghost), read: yield* store.get(ghost.id) };
         }),
       );
@@ -289,7 +289,7 @@ const userServiceCases = (label: string, run: Run): void => {
           const { user: other } = yield* Auth.Email.EmailPasswordStore.use((store) =>
             store.createUser({}),
           );
-          const store = yield* Auth.UserServiceStore;
+          const store = yield* Auth.User.UserServiceStore;
           yield* store.delete(user.id);
           yield* store.delete(uuid());
           return { deleted: yield* store.get(user.id), other: yield* store.get(other.id) };
@@ -301,27 +301,27 @@ const userServiceCases = (label: string, run: Run): void => {
 
     it("UserService round-trips over the store", async () => {
       // `deleteUser` deletes the account through `AccountDeletion`.
-      const accountDeletion = Auth.accountDeletionLayer.pipe(
+      const accountDeletion = Auth.AccountManagement.accountDeletionLayer.pipe(
         Layer.provide(
-          Auth.SessionService.layer({
+          Auth.SessionService.SessionService.layer({
             sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
           }),
         ),
-        Layer.provide(Auth.Hooks.Default),
+        Layer.provide(Auth.Hooks.Hooks.Default),
       );
       const result = await run(
         Effect.gen(function* () {
           const { user } = yield* Auth.Email.EmailPasswordStore.use((store) =>
             store.createUser({ name: "Ada" }),
           );
-          const service = yield* Auth.UserService;
+          const service = yield* Auth.User.UserService;
           const renamed = yield* service.updateUser(user.id, { name: "Grace" });
           const tagged = yield* service.updateUserAttributes(user.id, { theme: "dark" });
           const read = yield* service.getUser(user.id);
           yield* service.deleteUser(user.id);
           const gone = yield* Effect.flip(service.getUser(user.id));
           return { renamed, tagged, read, gone: gone._tag };
-        }).pipe(Effect.provide(Auth.UserService.layer().pipe(Layer.provide(accountDeletion)))),
+        }).pipe(Effect.provide(Auth.User.UserService.layer().pipe(Layer.provide(accountDeletion)))),
       );
       expect(result.renamed.name).toBe("Grace");
       expect(result.read).toEqual(result.tagged);
@@ -338,7 +338,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const key = `ip:${uuid()}`;
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           const missing = yield* store.get(key);
           const counts = [
             yield* store.increment(key, 60),
@@ -359,7 +359,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const key = `ip:${uuid()}`;
       const counts = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           return yield* Effect.all(
             Arr.makeBy(8, () => store.increment(key, 60)),
             { concurrency: "unbounded" },
@@ -376,7 +376,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const open = `ip:${uuid()}`;
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* store.set(
             expired,
             { key: expired, count: 9, resetAt: millis(0), blockedUntil: millis(1) },
@@ -408,7 +408,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const key = `ip:${uuid()}`;
       const result = await run(
         Effect.gen(function* () {
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* store.increment(key, 60);
           yield* store.delete(key);
           yield* store.delete(uuid());
@@ -422,7 +422,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       // A fixed instant before the real clock: the other cases' rows all reset
       // after it, so the purge leaves them alone.
       const now = millis(0);
-      const entries: ReadonlyArray<Auth.RateLimitEntry> = [
+      const entries: ReadonlyArray<Auth.RateLimit.RateLimitEntry> = [
         // Window and block both passed, or the block never set: purged.
         { key: `ip:${uuid()}`, count: 3, resetAt: now - 60_000 },
         { key: `ip:${uuid()}`, count: 9, resetAt: now - 60_000, blockedUntil: now - 60_000 },
@@ -435,7 +435,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           yield* Effect.forEach(entries, (entry) => store.set(entry.key, entry, 60), {
             concurrency: 1,
             discard: true,
@@ -464,13 +464,13 @@ const rateLimitCases = (label: string, run: Run): void => {
       // The same fixed instant as the case above, so only this case's spent
       // rows are spent at it.
       const now = millis(0);
-      const spent = Array.from({ length: 5 }, (_, i): Auth.RateLimitEntry => ({
+      const spent = Array.from({ length: 5 }, (_, i): Auth.RateLimit.RateLimitEntry => ({
         key: `ip:${uuid()}`,
         count: 1,
         resetAt: now - 60_000,
         ...presentKeys({ blockedUntil: i % 2 === 0 ? undefined : now - 1 }),
       }));
-      const kept: ReadonlyArray<Auth.RateLimitEntry> = [
+      const kept: ReadonlyArray<Auth.RateLimit.RateLimitEntry> = [
         { key: `ip:${uuid()}`, count: 2, resetAt: now + 60_000 },
         { key: `ip:${uuid()}`, count: 9, resetAt: now - 60_000, blockedUntil: now + 60_000 },
       ];
@@ -478,7 +478,7 @@ const rateLimitCases = (label: string, run: Run): void => {
       const result = await run(
         Effect.gen(function* () {
           yield* TestClock.setTime(now);
-          const store = yield* Auth.RateLimitStore;
+          const store = yield* Auth.RateLimit.RateLimitStore;
           const purge = yield* PurgeRateLimits;
           yield* Effect.forEach(all, (entry) => store.set(entry.key, entry, 60), {
             concurrency: 1,

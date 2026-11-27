@@ -17,7 +17,7 @@ import type { ApiKeyPermissions, TableNames, TokenPurpose } from "./Schema.ts";
 
 /** The JSON attribute bag, `{}` when unset. */
 const attributesColumn = () =>
-  text("attributes", { mode: "json" }).$type<Auth.JsonObject>().notNull().default({});
+  text("attributes", { mode: "json" }).$type<Auth.Types.JsonObject>().notNull().default({});
 
 const sessionColumns = () => ({
   /** SHA-256 hex digest of the bearer token — never the raw token itself. */
@@ -42,7 +42,7 @@ const userColumns = () => ({
 const identifierColumns = () => ({
   id: text("id").primaryKey(),
   userId: text("user_id").notNull(),
-  type: text("type").$type<Auth.IdentifierType>().notNull(),
+  type: text("type").$type<Auth.Identifier.IdentifierType>().notNull(),
   value: text("value").notNull(),
   verified: integer("verified", { mode: "boolean" }).notNull().default(false),
   verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
@@ -64,7 +64,7 @@ const apiKeyColumns = () => ({
   expiresAt: instant("expires_at"),
   lastUsedAt: instant("last_used_at"),
   permissions: text("permissions", { mode: "json" }).$type<ApiKeyPermissions>(),
-  metadata: text("metadata", { mode: "json" }).$type<Auth.JsonObject>().notNull().default({}),
+  metadata: text("metadata", { mode: "json" }).$type<Auth.Types.JsonObject>().notNull().default({}),
   remaining: integer("remaining"),
   refillAmount: integer("refill_amount"),
   refillInterval: integer("refill_interval"),

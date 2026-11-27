@@ -13,7 +13,7 @@ Mounting `Http.makeAsync` directly in the app's Worker is simpler and should be 
 const { handler } = await Http.makeAsync({
   services, // with a RateLimiter: the per-address limits are on by default
   prefix: "/api/auth",
-  trustedProxy: Auth.ClientIP.cloudflare,
+  trustedProxy: Auth.ClientIP.ClientIP.cloudflare,
   /* … */
 });
 // Mount `handler` in your framework.

@@ -41,7 +41,7 @@ beforeEach(async () => {
 
 /** Run `build`'s program against the identifier store on the file's database. */
 const runWithDatabase = <A, E>(
-  build: () => Effect.Effect<A, E, Auth.IdentifierStore>,
+  build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
     build().pipe(
@@ -56,7 +56,9 @@ const at = (offsetMs: number): Date =>
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const identifier = (overrides: Partial<Auth.Identifier> = {}): Auth.Identifier => ({
+const identifier = (
+  overrides: Partial<Auth.Identifier.Identifier> = {},
+): Auth.Identifier.Identifier => ({
   id: "identifier-1",
   userId: "user-1",
   type: "email",
@@ -70,7 +72,7 @@ describe("IdentifierStore", () => {
   it("creates and resolves identifiers by (type, value)", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         const created = yield* store.create(identifier());
         yield* store.create(
           identifier({ id: "identifier-2", type: "username", value: "ada", createdAt: at(1000) }),
@@ -98,7 +100,7 @@ describe("IdentifierStore", () => {
   it("rejects a duplicate (type, value) with AuthError, which claimIdentifier reads as taken", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier());
 
         // The unique index rejects the losing INSERT; the store surfaces it as
@@ -108,10 +110,13 @@ describe("IdentifierStore", () => {
         );
         // claimIdentifier re-reads the pair and reports a conflict instead.
         const claim = yield* Effect.flip(
-          Auth.claimIdentifier(store, identifier({ id: "identifier-3", userId: "user-2" })),
+          Auth.Identifier.claimIdentifier(
+            store,
+            identifier({ id: "identifier-3", userId: "user-2" }),
+          ),
         );
         // A free pair still claims cleanly after the rejection.
-        const free = yield* Auth.claimIdentifier(
+        const free = yield* Auth.Identifier.claimIdentifier(
           store,
           identifier({ id: "identifier-4", userId: "user-2", value: "grace@example.com" }),
         );
@@ -130,7 +135,7 @@ describe("IdentifierStore", () => {
     expect(result.duplicate.cause).toBeDefined();
 
     expect(result.claim._tag).toBe("IdentifierTakenError");
-    assert.instanceOf(result.claim, Auth.IdentifierTakenError);
+    assert.instanceOf(result.claim, Auth.Identifier.IdentifierTakenError);
     expect(result.claim.identifierType).toBe("email");
 
     expect(result.free.id).toBe("identifier-4");
@@ -141,7 +146,7 @@ describe("IdentifierStore", () => {
   it("lists a user's identifiers by createdAt ascending", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(
           identifier({ id: "third", value: "c@example.com", createdAt: at(3000) }),
         );
@@ -167,7 +172,7 @@ describe("IdentifierStore", () => {
   it("setVerified stamps the timestamp and returns null for an unknown id", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier());
         const verified = yield* store.setVerified("identifier-1", at(9000));
         return {
@@ -188,7 +193,7 @@ describe("IdentifierStore", () => {
   it("deletes one identifier or every identifier of a user, no-op when absent", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier({ id: "email-1" }));
         yield* store.create(identifier({ id: "user-name", type: "username", value: "ada" }));
         yield* store.create(identifier({ id: "kept", userId: "user-2", value: "z@example.com" }));

@@ -63,7 +63,7 @@ import {
 } from "./oauth/OAuth.ts";
 import * as OAuth from "./oauth/OAuth.ts";
 import type * as Types from "./Types.ts";
-import { normalizeDomain, normalizeEmail } from "./utils.ts";
+import { normalizeDomain, normalizeEmail } from "./Normalize.ts";
 
 /** Failure to register, resolve, or complete an SSO sign-in. */
 export class SsoError extends Schema.TaggedError<SsoError, { readonly brand: unique symbol }>()(

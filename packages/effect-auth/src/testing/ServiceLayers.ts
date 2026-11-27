@@ -68,7 +68,7 @@ export interface SessionServiceLayerOptions {
  * const ada = Testing.fixtureUser({ name: "Ada" })
  *
  * const program = Effect.gen(function* () {
- *   const sessions = yield* Auth.SessionService
+ *   const sessions = yield* Auth.SessionService.SessionService
  *   const created = yield* sessions.createSession(ada.id)
  *   const valid = yield* sessions.validateSession(created.token)
  *   assert.equal(valid.user.id, ada.id)
@@ -145,7 +145,7 @@ export interface ApiKeyServiceLayerOptions {
  * const ada = Testing.fixtureUser({ name: "Ada" })
  *
  * const program = Effect.gen(function* () {
- *   const apiKeys = yield* Auth.ApiKeyService
+ *   const apiKeys = yield* Auth.ApiKey.ApiKeyService
  *   const created = yield* apiKeys.create(ada.id, { name: "CI" })
  *   assert.equal((yield* apiKeys.verify(created.key)).valid, true)
  *

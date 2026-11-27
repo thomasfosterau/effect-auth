@@ -9,15 +9,11 @@
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Result } from "effect"
  * import { KeyValueStore } from "effect/persistence"
- * import {
- *   ClientIP,
- *   composePlugins,
- *   Hooks,
- *   RateLimiter,
- *   RateLimitPresets,
- *   RateLimitStoreKV,
- * } from "@thomasfosterau/effect-auth"
- * import { IPRateLimitPlugin } from "@thomasfosterau/effect-auth/plugins"
+ * import { ClientIP } from "@thomasfosterau/effect-auth/ClientIP"
+ * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { RateLimiter, RateLimitPresets } from "@thomasfosterau/effect-auth/RateLimit"
+ * import { RateLimitStoreKV } from "@thomasfosterau/effect-auth/KeyValueStores"
+ * import { IPRateLimitPlugin } from "@thomasfosterau/effect-auth/Plugins"
  *
  * // A single-process rate-limit store; in production use effect-auth/sql's.
  * const rateLimitStore = RateLimitStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory))

@@ -30,7 +30,7 @@ const digestToken =
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
  * import { Digest } from "effect/crypto"
- * import { hashToken } from "@thomasfosterau/effect-auth"
+ * import { hashToken } from "@thomasfosterau/effect-auth/TokenHash"
  *
  * const digest = await Effect.runPromise(
  *   hashToken("abc").pipe(Effect.provide(Digest.layerWebCrypto)),

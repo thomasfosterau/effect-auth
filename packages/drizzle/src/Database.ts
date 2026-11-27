@@ -12,7 +12,7 @@
  * import * as Drizzle from "@thomasfosterau/effect-auth-drizzle";
  *
  * const db = drizzle({ client: new Pool({ connectionString: process.env["DATABASE_URL"] }) });
- * const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(db)));
+ * const stores = Drizzle.Layers.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(db)));
  * ```
  *
  * @example
@@ -27,7 +27,7 @@
  * );
  *
  * // Built once, for the whole isolate — it holds no connection.
- * const stores = Drizzle.layer().pipe(Layer.provide(Drizzle.databaseLayer(RequestDatabase)));
+ * const stores = Drizzle.Layers.layer().pipe(Layer.provide(Drizzle.Database.databaseLayer(RequestDatabase)));
  *
  * // Per request, in that request's scope:
  * const handler = program.pipe(Effect.provide(Context.make(RequestDatabase, thisRequestsDb)));
@@ -357,8 +357,8 @@ export function databaseLayer(db: unknown): Layer.Layer<DrizzleDatabase> {
  * ```ts
  * import * as PgDrizzle from "drizzle-orm/effect-postgres";
  *
- * const stores = Drizzle.layer(Drizzle.Pg.tables).pipe(
- *   Layer.provide(Drizzle.effectDatabaseLayer(PgDrizzle.makeWithDefaults())),
+ * const stores = Drizzle.Layers.layer(Drizzle.Pg.tables).pipe(
+ *   Layer.provide(Drizzle.Database.effectDatabaseLayer(PgDrizzle.makeWithDefaults())),
  * );
  * ```
  */

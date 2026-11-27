@@ -154,7 +154,7 @@ export class ClientIP extends Context.Service<ClientIP, { readonly ip: string | 
    * @example
    * ```ts
    * import assert from "node:assert/strict"
-   * import { ClientIP } from "@thomasfosterau/effect-auth"
+   * import { ClientIP } from "@thomasfosterau/effect-auth/ClientIP"
    *
    * assert.deepEqual(ClientIP.trustedHeader("X-Real-IP"), { trustedHeader: "x-real-ip" })
    * ```
@@ -181,7 +181,7 @@ export class ClientIP extends Context.Service<ClientIP, { readonly ip: string | 
    * @example
    * ```ts
    * import assert from "node:assert/strict"
-   * import { ClientIP } from "@thomasfosterau/effect-auth"
+   * import { ClientIP } from "@thomasfosterau/effect-auth/ClientIP"
    *
    * assert.deepEqual(ClientIP.cloudflare, { trustedHeader: "cf-connecting-ip" })
    * ```
@@ -450,7 +450,7 @@ export const isIpv6RateLimitPrefix = (prefixLength: number): boolean =>
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { rateLimitAddressKey } from "@thomasfosterau/effect-auth"
+ * import { rateLimitAddressKey } from "@thomasfosterau/effect-auth/ClientIP"
  *
  * assert.equal(rateLimitAddressKey("203.0.113.7"), "203.0.113.7")
  * assert.equal(rateLimitAddressKey("2001:db8:1:1::d"), "2001:db8:1:1::/64")
@@ -626,7 +626,7 @@ const selectByCidrs = (
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
  * import { HttpServerRequest } from "effect/http"
- * import { clientIPLayer, ClientIP } from "@thomasfosterau/effect-auth"
+ * import { clientIPLayer, ClientIP } from "@thomasfosterau/effect-auth/ClientIP"
  *
  * // The services the app already provides.
  * const services = Layer.empty

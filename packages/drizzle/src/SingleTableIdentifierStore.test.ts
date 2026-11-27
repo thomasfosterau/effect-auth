@@ -125,7 +125,7 @@ beforeEach(async () => {
 /** Run `build` against a single-table store over `mapping`, on the file's database. */
 const runWith = <A, E>(
   mapping: Parameters<typeof layer>[0],
-  build: () => Effect.Effect<A, E, Auth.IdentifierStore>,
+  build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
     build().pipe(
@@ -153,7 +153,7 @@ const readUserRow = async (userId: string) => {
 };
 
 const harness = {
-  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     runWith(usersMapping, build),
   seedUsers,
   readUserRow,
@@ -165,7 +165,7 @@ singleTableContract("single-table PostgreSQL", harness);
 // The NOT NULL table: both users hold an address from the start, as the
 // application's own writer leaves them.
 notNullContract("single-table PostgreSQL", {
-  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     runWith(strictMapping, build),
   seedUsers: async () => {
     await drizzle({ client })
@@ -198,7 +198,7 @@ notNullContract("single-table PostgreSQL", {
 
 // The mapped verification time: the table's own `email_verified_at` column.
 verifiedAtContract("single-table PostgreSQL", {
-  run: <A, E>(build: () => Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
+  run: <A, E>(build: () => Effect.Effect<A, E, Auth.Identifier.IdentifierStore>): Promise<A> =>
     runWith(verifiedMapping, build),
   seedUsers: async () => {
     await drizzle({ client })
@@ -262,7 +262,7 @@ conformance(
           drizzle({ client })
             .insert(appUsers)
             .values({ userId: user.id, createdAt: user.createdAt, updatedAt: user.updatedAt }),
-        catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+        catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
       }).pipe(Effect.orDie),
   }),
   (effect) => runWith(usersMapping, () => effect),

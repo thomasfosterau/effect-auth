@@ -21,6 +21,7 @@ import * as Entity from "./Entity.ts";
 import * as AuthorizationModel from "./AuthorizationModel.ts";
 import * as Policy from "./Policy.ts";
 import { definedKeys } from "./DefinedKeys.ts";
+import { SecureRandom } from "effect/crypto";
 
 // ---------------------------------------------------------------------------
 // Templates
@@ -122,7 +123,7 @@ export const makeLink = (input: {
   readonly resource?: Entity.EntityRef;
   readonly now: Date;
 }): TemplateLink => ({
-  id: input.id ?? globalThis.crypto.randomUUID(),
+  id: input.id ?? SecureRandom.uuidV4Unsafe(),
   templateId: input.templateId,
   ...definedKeys({ principal: input.principal, resource: input.resource }),
   createdAt: input.now,

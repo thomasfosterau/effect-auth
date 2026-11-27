@@ -25,6 +25,7 @@ import { DrizzleDatabase } from "./Database.ts";
 import { queryRunner, type Query, selectOne } from "./internal.ts";
 import { tables as defaultTables } from "./PgSchema.ts";
 import { userFromRow, selection } from "./UserStore.ts";
+import * as PlatformCrypto from "@thomasfosterau/effect-auth/PlatformCrypto";
 
 /**
  * Each promoted attribute's column, by the key it has on the table object
@@ -54,7 +55,7 @@ export const promotedKeys = (users: UserSchema): Readonly<Record<string, string>
 export const splitAttributes = (
   users: UserSchema,
   keys: Readonly<Record<string, string>>,
-  attributes: Auth.Attributes,
+  attributes: Auth.Types.Attributes,
   label: string,
 ) => {
   const bag = R.filter(attributes, (_value, name) => !R.has(keys, name));
@@ -64,7 +65,7 @@ export const splitAttributes = (
   );
   return users.columns.attributes === undefined && !R.isEmptyRecord(bag)
     ? Effect.fail(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message: `drizzle ${label} failed: the users table has no attribute bag for ${R.keys(bag).join(", ")}`,
         }),
       )
@@ -75,7 +76,7 @@ export const splitAttributes = (
 const passwordColumn = (users: UserSchema): Effect.Effect<NullableColumn<string>> =>
   users.columns.passwordHash === undefined
     ? Effect.die(
-        new Auth.AuthError({
+        new Auth.Errors.AuthError({
           message:
             "EmailPasswordStore needs the users table's password hash: map `passwordHash` in defineSchema",
         }),
@@ -128,7 +129,7 @@ export const make = (
           input.attributes ?? {},
           "emailPassword.createUser",
         );
-        const id = globalThis.crypto.randomUUID();
+        const id = yield* PlatformCrypto.instance.uuidV4();
         const now = yield* DateTime.nowAsDate;
         yield* query("emailPassword.createUser", (db) =>
           db
@@ -148,7 +149,7 @@ export const make = (
         );
         const user = yield* readUser(id);
         if (Option.isNone(user)) {
-          return yield* new Auth.AuthError({
+          return yield* new Auth.Errors.AuthError({
             message: "drizzle emailPassword.createUser failed: the inserted user was not found",
           });
         }

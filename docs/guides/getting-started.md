@@ -34,8 +34,8 @@ import * as Auth from "@thomasfosterau/effect-auth";
 // Stores are "dumb persistence": lookups return `Option.none()` on a miss, and the
 // service turns that into a typed `SessionNotFoundError` / `UserNotFoundError`.
 // `session.id` arrives already hashed (SHA-256); the raw token never reaches the store.
-const sessions = new Map<string, Auth.Session>();
-const sessionStore: typeof Auth.SessionStore.Service = {
+const sessions = new Map<string, Auth.Types.Session>();
+const sessionStore: typeof Auth.SessionStore.SessionStore.Service = {
   create: (session) => Effect.sync(() => (sessions.set(session.id, session), session)),
   get: (id) => Effect.sync(() => Option.fromUndefinedOr(sessions.get(id))),
   // Never creates: a session signed out or revoked since the caller read it stays gone.
@@ -64,12 +64,12 @@ const sessionStore: typeof Auth.SessionStore.Service = {
 
 // Users carry first-class fields (name, image, createdAt, updatedAt) plus an
 // `attributes` bag for app-specific data; email, username and phone are identifiers.
-const userStore: typeof Auth.UserStore.Service = {
+const userStore: typeof Auth.UserStore.UserStore.Service = {
   get: (id) =>
     Effect.succeedSome({ id, createdAt: new Date(), updatedAt: new Date(), attributes: {} }),
 };
 
-const sessionConfig: Auth.SessionConfig = {
+const sessionConfig: Auth.Types.SessionConfig = {
   sessionExpiresIn: {
     activePeriod: 1000 * 60 * 60 * 24 * 30, // 30 days, the absolute maximum lifetime
     idlePeriod: 1000 * 60 * 60 * 24 * 14, // 14 days idle timeout and renewal window
@@ -80,18 +80,18 @@ const sessionConfig: Auth.SessionConfig = {
 // an unset `Number(env)` would otherwise issue sessions that never expire.
 
 // Every service class exposes a static `layer`, the canonical way to provide it.
-const AuthLive = Auth.SessionService.layer(sessionConfig).pipe(
+const AuthLive = Auth.SessionService.SessionService.layer(sessionConfig).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
-      Layer.succeed(Auth.SessionStore)(sessionStore),
-      Layer.succeed(Auth.UserStore)(userStore),
-      Auth.Hooks.Default, // no-op hooks; compose plugins here instead
+      Layer.succeed(Auth.SessionStore.SessionStore)(sessionStore),
+      Layer.succeed(Auth.UserStore.UserStore)(userStore),
+      Auth.Hooks.Hooks.Default, // no-op hooks; compose plugins here instead
     ),
   ),
 );
 
 const program = Effect.gen(function* () {
-  const service = yield* Auth.SessionService;
+  const service = yield* Auth.SessionService.SessionService;
   // `token` is the raw token: put it in the cookie. `session.id` is its hash.
   const { token } = yield* service.createSession("user-123", { ip: "127.0.0.1" });
   const { user } = yield* service.validateSession(token);
@@ -105,7 +105,8 @@ Most services expose their `make(config)` constructor for embedding in your own 
 
 ```typescript
 import { Effect, Layer } from "effect";
-import { SessionService, type SessionConfig } from "@thomasfosterau/effect-auth";
+import { SessionService } from "@thomasfosterau/effect-auth/SessionService";
+import { type SessionConfig } from "@thomasfosterau/effect-auth/Types";
 
 const sessionConfig: SessionConfig = {
   sessionExpiresIn: { activePeriod: 30 * 86_400_000, idlePeriod: 14 * 86_400_000 },
@@ -160,11 +161,11 @@ Upgrading from a release without the root secret: rows stay readable while they 
 | Entry                                        | Root namespace     | Contents                                                                                                                                                                              |
 | -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@thomasfosterau/effect-auth`                | `Auth`             | Sessions, users, identifiers, hooks, errors, the authorization kernel, organizations, admin, API keys, JWT, SSO, …                                                                    |
-| `@thomasfosterau/effect-auth/email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
-| `@thomasfosterau/effect-auth/password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2), password reset, `HaveIBeenPwnedPlugin`                                                                                                                     |
-| `@thomasfosterau/effect-auth/multifactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
-| `@thomasfosterau/effect-auth/oauth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
-| `@thomasfosterau/effect-auth/plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
+| `@thomasfosterau/effect-auth/Email`          | `Auth.Email`       | Email and password sign-in, email verification, email OTP                                                                                                                             |
+| `@thomasfosterau/effect-auth/Password`       | `Auth.Password`    | `PasswordHasher` (PBKDF2), password reset, `HaveIBeenPwnedPlugin`                                                                                                                     |
+| `@thomasfosterau/effect-auth/MultiFactor`    | `Auth.MultiFactor` | TOTP and backup codes, the OTP second factor, WebAuthn, and the OTP primitives                                                                                                        |
+| `@thomasfosterau/effect-auth/OAuth`          | `Auth.OAuth`       | `OAuthService`, provider presets, `provider` for custom ones, `generateState`, `generatePKCE`                                                                                         |
+| `@thomasfosterau/effect-auth/Plugins`        | `Auth.Plugins`     | First-party hooks plugins: account lockout, audit, captcha, IP rate limit, last login method, email normalization                                                                     |
 | `@thomasfosterau/effect-auth/http`           | — (subpath only)   | The HTTP contract, the mountable handler (`make`, `makeAsync`), the typed Effect client, `AuthMiddleware`, the authorization middleware, `RemoteSession` (auth as a separate service) |
 | `@thomasfosterau/effect-auth/client`         | — (subpath only)   | The browser client over the HTTP contract ([below](./client-reference.md))                                                                                                            |
 | `@thomasfosterau/effect-auth/client/atoms`   | — (subpath only)   | The client session as `effect/reactivity` Atoms ([below](./client-reference.md#the-session-atoms-clientatoms))                                                                        |
@@ -172,7 +173,7 @@ Upgrading from a release without the root secret: rows stay readable while they 
 | `@thomasfosterau/effect-auth/sql`            | — (subpath only)   | Every store contract it covers over `effect/sql`'s `SqlClient`, plus the DDL ([below](./storage.md#sql-storage-sql))                                                                  |
 | `@thomasfosterau/effect-auth/saml`           | — (subpath only)   | The `SamlVerifier` over `@node-saml/node-saml`; Node-only ([below](./saml.md))                                                                                                        |
 | `@thomasfosterau/effect-auth/scrypt`         | — (subpath only)   | `scryptHasher` and its layer, to verify and rehash scrypt hashes; Node-only                                                                                                           |
-| `@thomasfosterau/effect-auth/ladder`         | —                  | An ordered role ladder for browser UX gates; imports only `effect/Option`                                                                                                             |
+| `@thomasfosterau/effect-auth/Ladder`         | —                  | An ordered role ladder for browser UX gates; imports only `effect/Option`                                                                                                             |
 | `@thomasfosterau/effect-auth/testing`        | —                  | Test helpers: run as a fixture principal, fixture users, guard assertions, store conformance suites                                                                                   |
 
 The package root also carries these namespaces, each a module whose member names are too generic to sit flat:

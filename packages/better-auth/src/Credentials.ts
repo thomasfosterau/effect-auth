@@ -31,7 +31,7 @@ import { type CredentialError, fromApiError, toUser } from "./Convert.ts";
 export type CredentialResult =
   | {
       readonly status: "signed-in" | "pending-verification";
-      readonly user: Auth.User;
+      readonly user: Auth.Types.User;
       readonly setCookie: ReadonlyArray<string>;
     }
   | { readonly status: "second-factor"; readonly setCookie: ReadonlyArray<string> };
@@ -53,14 +53,14 @@ const call = <A>(run: () => Promise<A>, email?: string) =>
 
 const signedIn = (
   answer: WithHeaders<SignInAnswer | null>,
-): Effect.Effect<CredentialResult, Auth.AuthError> => {
+): Effect.Effect<CredentialResult, Auth.Errors.AuthError> => {
   const setCookie = answer.headers.getSetCookie();
   const response: SignInAnswer | null = answer.response;
   if (response !== null && "twoFactorRedirect" in response) {
     return Effect.succeed({ status: "second-factor", setCookie });
   }
   if (response === null || !P.isObject(response.user)) {
-    return Effect.fail(new Auth.AuthError({ message: "BetterAuth answered no user" }));
+    return Effect.fail(new Auth.Errors.AuthError({ message: "BetterAuth answered no user" }));
   }
   return Effect.succeed({
     status: response.token === null ? "pending-verification" : "signed-in",
@@ -145,7 +145,7 @@ export class BetterAuthCredentials extends Context.Service<
             const signIn = api.signInUsername?.bind(api);
             if (signIn === undefined) {
               return Effect.fail(
-                new Auth.AuthError({
+                new Auth.Errors.AuthError({
                   message: "signInUsername needs BetterAuth's username() plugin",
                 }),
               );

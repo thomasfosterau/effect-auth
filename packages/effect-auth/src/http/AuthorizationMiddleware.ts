@@ -13,18 +13,15 @@
  * import { AuthMiddleware, layer as authLayer, makeAuthorizationMiddleware } from "@thomasfosterau/effect-auth/http"
  * import {
  *   Authorizer,
- *   Condition,
- *   Entity,
  *   EntityResolver,
- *   Hooks,
  *   memoryEntityResolver,
- *   Policy,
- *   SessionService,
- *   SessionStore,
- *   UserStore,
- *   type Session,
- *   type User,
- * } from "@thomasfosterau/effect-auth"
+ * } from "@thomasfosterau/effect-auth/Authorizer"
+ * import { Condition, Entity, Policy } from "@thomasfosterau/effect-auth"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { SessionService } from "@thomasfosterau/effect-auth/SessionService"
+ * import { SessionStore } from "@thomasfosterau/effect-auth/SessionStore"
+ * import { UserStore } from "@thomasfosterau/effect-auth/UserStore"
+ * import { type Session, type User } from "@thomasfosterau/effect-auth/Types"
  *
  * // A route-level gate: AuthMiddleware answers "who is calling", this answers
  * // "may they do this". The name gives this guard its own type. The resource

@@ -11,7 +11,7 @@ import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { safeRedirect } from "@thomasfosterau/effect-auth";
+import { safeRedirect } from "@thomasfosterau/effect-auth/Redirect";
 
 /**
  * The part of SvelteKit's `RequestEvent` a credential action reads and
@@ -470,7 +470,7 @@ export const submitCredential = async <Input, Fields>(
  * @example
  * ```ts
  * import { deepStrictEqual } from "node:assert";
- * import { credentialAction } from "@thomasfosterau/effect-auth-sveltekit";
+ * import { credentialAction } from "@thomasfosterau/effect-auth-sveltekit/Actions";
  *
  * const kit = {
  *   redirect: (status: 303, location: string): never => {
@@ -572,7 +572,7 @@ export interface RemoteFormKit extends RemoteKit {
  * @example
  * ```ts
  * import { deepStrictEqual, rejects } from "node:assert";
- * import { credentialForm } from "@thomasfosterau/effect-auth-sveltekit";
+ * import { credentialForm } from "@thomasfosterau/effect-auth-sveltekit/Actions";
  *
  * const relayed: Array<string> = [];
  * const kit = {
@@ -652,7 +652,7 @@ export const credentialForm =
  * @example
  * ```ts
  * import { deepStrictEqual } from "node:assert";
- * import { credentialCommand } from "@thomasfosterau/effect-auth-sveltekit";
+ * import { credentialCommand } from "@thomasfosterau/effect-auth-sveltekit/Actions";
  *
  * const signIn = credentialCommand(
  *   {

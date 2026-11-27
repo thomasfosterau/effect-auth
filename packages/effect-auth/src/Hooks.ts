@@ -8,8 +8,8 @@
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
- * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
- * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
+ * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/Plugins"
  *
  * const layer = composePlugins([
  *   NormalizeEmailPlugin, // beforeSignUp/beforeSignIn: normalises email
@@ -153,7 +153,7 @@ export type PossessionMethod = "email-otp" | "phone-otp" | "magic-link";
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { isPossessionMethod } from "@thomasfosterau/effect-auth"
+ * import { isPossessionMethod } from "@thomasfosterau/effect-auth/Hooks"
  *
  * assert.equal(isPossessionMethod("magic-link"), true)
  * assert.equal(isPossessionMethod("email-password"), false)
@@ -224,7 +224,7 @@ export interface AuthenticateAttempt {
  * @example
  * ```ts
  * import assert from "node:assert/strict"
- * import { authenticationSubject } from "@thomasfosterau/effect-auth"
+ * import { authenticationSubject } from "@thomasfosterau/effect-auth/Hooks"
  *
  * const known = authenticationSubject({
  *   method: "username",
@@ -397,8 +397,8 @@ const makeNoopHooks = (): typeof Hooks.Service => ({
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { Hooks } from "@thomasfosterau/effect-auth"
- * import type { AuthResult } from "@thomasfosterau/effect-auth/email"
+ * import { Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import type { AuthResult } from "@thomasfosterau/effect-auth/Email"
  *
  * // `Hooks.tap` adapts a void-returning observer into an after* tap.
  * const seen: Array<string> = []
@@ -709,8 +709,13 @@ const wrapHooks = (
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
- * import { composePlugins, Hooks, makePlugin, type PluginImpls } from "@thomasfosterau/effect-auth"
- * import type { SignInInput } from "@thomasfosterau/effect-auth/email"
+ * import {
+ *   composePlugins,
+ *   Hooks,
+ *   makePlugin,
+ *   type PluginImpls,
+ * } from "@thomasfosterau/effect-auth/Hooks"
+ * import type { SignInInput } from "@thomasfosterau/effect-auth/Email"
  *
  * // Zero-dependency: pass the hook implementations directly.
  * const NormalizeEmail = makePlugin({
@@ -774,8 +779,8 @@ export function makePlugin<R>(
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect, Layer } from "effect"
- * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth"
- * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/plugins"
+ * import { composePlugins, Hooks } from "@thomasfosterau/effect-auth/Hooks"
+ * import { AuditPlugin, NormalizeEmailPlugin } from "@thomasfosterau/effect-auth/Plugins"
  *
  * const layer = composePlugins([NormalizeEmailPlugin, AuditPlugin]).pipe(
  *   Layer.provide(Hooks.Default),
@@ -815,12 +820,12 @@ export const composePlugins = <RIn = never>(
  * ```ts
  * import { Effect, Layer } from "effect"
  * import * as Auth from "@thomasfosterau/effect-auth"
- * import { AuditPlugin } from "@thomasfosterau/effect-auth/plugins"
+ * import { AuditPlugin } from "@thomasfosterau/effect-auth/Plugins"
  *
  * const chargeInvoice = (id: string) =>
  *   Effect.gen(function* () {
  *     // ...the write itself...
- *     yield* Auth.recordWrite({
+ *     yield* Auth.Hooks.recordWrite({
  *       principal: Auth.System.ref("billing-cron"),
  *       action: "invoice:charge",
  *       resource: Auth.Entity.ref("Invoice", id),
@@ -828,7 +833,7 @@ export const composePlugins = <RIn = never>(
  *   })
  *
  * await Effect.runPromise(
- *   chargeInvoice("inv-1").pipe(Effect.provide(AuditPlugin.pipe(Layer.provide(Auth.Hooks.Default)))),
+ *   chargeInvoice("inv-1").pipe(Effect.provide(AuditPlugin.pipe(Layer.provide(Auth.Hooks.Hooks.Default)))),
  * )
  * ```
  */

@@ -41,7 +41,9 @@ beforeEach(async () => {
 });
 
 /** Run `build`'s program against the session store on the file's database. */
-const runWithDatabase = <A, E>(build: () => Effect.Effect<A, E, Auth.SessionStore>): Promise<A> =>
+const runWithDatabase = <A, E>(
+  build: () => Effect.Effect<A, E, Auth.SessionStore.SessionStore>,
+): Promise<A> =>
   Effect.runPromise(
     build().pipe(
       Effect.provide(
@@ -55,7 +57,7 @@ const at = (offsetMs: number): Date =>
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const makeSession = (overrides: Partial<Auth.Session> = {}): Auth.Session => ({
+const makeSession = (overrides: Partial<Auth.Types.Session> = {}): Auth.Types.Session => ({
   id: "session-1",
   userId: "user-1",
   expiresAt: at(60_000),
@@ -69,7 +71,7 @@ describe("SessionStore", () => {
   it("round-trips a session through create/get/update/delete", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         const session = makeSession({ attributes: { device: "laptop" } });
 
         const created = yield* store.create(session);
@@ -104,7 +106,7 @@ describe("SessionStore", () => {
   it("returns null on a miss and no-ops on deletes of absent rows", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         const missing = yield* store.get("nope");
         yield* store.delete("nope");
         yield* store.deleteByUserId("nobody");
@@ -122,7 +124,7 @@ describe("SessionStore", () => {
     // whatever instant it was given, including one already in the past.
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         const expired = makeSession({ id: "expired", expiresAt: at(-60_000) });
         const future = makeSession({ id: "future", expiresAt: at(86_400_000) });
         yield* store.create(expired);
@@ -156,7 +158,7 @@ describe("SessionStore", () => {
 
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         yield* store.create(makeSession({ attributes }));
         const empty = makeSession({ id: "session-2", attributes: {} });
         yield* store.create(empty);
@@ -174,7 +176,7 @@ describe("SessionStore", () => {
   it("lists a user's sessions by createdAt and scopes deleteByUserId", async () => {
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         yield* store.create(makeSession({ id: "b", createdAt: at(2000) }));
         yield* store.create(makeSession({ id: "a", createdAt: at(1000) }));
         yield* store.create(makeSession({ id: "c", createdAt: at(3000) }));

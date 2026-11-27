@@ -8,7 +8,8 @@
  * import assert from "node:assert/strict"
  * import { Effect, Layer, Result } from "effect"
  * import { RateLimiter as PersistenceRateLimiter } from "effect/persistence"
- * import { RateLimiter, rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth"
+ * import { RateLimiter } from "@thomasfosterau/effect-auth/RateLimit"
+ * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth/RateLimitPersistence"
  *
  * const RateLimiterLive = rateLimiterPersistenceLayer.pipe(
  *   Layer.provide(PersistenceRateLimiter.layer),
@@ -33,7 +34,7 @@
  * ```ts
  * import { Layer } from "effect"
  * import { RateLimiter as PersistenceRateLimiter, Redis } from "effect/persistence"
- * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth"
+ * import { rateLimiterPersistenceLayer } from "@thomasfosterau/effect-auth/RateLimitPersistence"
  *
  * // The app's Redis client layer (for example, a node-redis adapter) is supplied
  * // by the app. Building this layer connects to Redis, so it is composed here and

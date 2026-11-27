@@ -42,7 +42,7 @@ beforeEach(async () => {
 });
 
 const verifiedAt = DateTime.toDateUtc(DateTime.makeUnsafe("2026-10-15T00:00:00.000Z"));
-const ada: Auth.NewUserIdentifier = {
+const ada: Auth.UserStore.NewUserIdentifier = {
   type: "email",
   value: "ada@example.com",
   verified: true,
@@ -102,7 +102,7 @@ describe("README: sign-up writer examples", () => {
   it("NOT NULL: fails with AuthError when there is no email address, and inserts nothing", async () => {
     const error = await Effect.runPromise(Effect.flip(notNullWriter({ name: "Nobody" })));
 
-    expect(error).toBeInstanceOf(Auth.AuthError);
+    expect(error).toBeInstanceOf(Auth.Errors.AuthError);
     const [row] = await drizzle({ client }).select({ n: count() }).from(notNullUsers);
     expect(row?.n).toBe(0);
   });
@@ -139,8 +139,8 @@ describe("README: sign-up writer examples", () => {
 
     const created = await Effect.runPromise(
       Effect.gen(function* () {
-        const identifiers = yield* Auth.IdentifierStore;
-        return yield* Auth.createUserWithIdentifier(identifiers, ada, (identifier) =>
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
+        return yield* Auth.UserStore.createUserWithIdentifier(identifiers, ada, (identifier) =>
           notNullWriter({ identifier }),
         );
       }).pipe(Effect.provide(layer(users).pipe(Layer.provide(databaseLayer(drizzle({ client })))))),

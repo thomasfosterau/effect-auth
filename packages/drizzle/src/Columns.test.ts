@@ -30,7 +30,10 @@ import { databaseLayer } from "./Database.ts";
 import { layer as storesLayer } from "./Layers.ts";
 import { migratedPglite, truncate } from "./testing/PgliteTemplate.ts";
 
-type StoreServices = Auth.SessionStore | Auth.UserStore | Auth.IdentifierStore;
+type StoreServices =
+  | Auth.SessionStore.SessionStore
+  | Auth.UserStore.UserStore
+  | Auth.Identifier.IdentifierStore;
 
 // ---------------------------------------------------------------------------
 // An application's own tables
@@ -41,7 +44,7 @@ const appUsers = pgTable("account", {
   key: uuid("account_id").primaryKey(),
   displayName: text("full_name"),
   avatar: text("avatar_url"),
-  meta: jsonb("profile").$type<Auth.Attributes>().notNull().default({}),
+  meta: jsonb("profile").$type<Auth.Types.Attributes>().notNull().default({}),
   /** A column the stores know nothing about, with a database-level default. */
   role: text("role").notNull().default("member"),
   born: timestamp("created_at", { mode: "date", withTimezone: true }).notNull(),
@@ -54,7 +57,7 @@ const appSessions = pgTable("login", {
   expires: timestamp("expires_at", { mode: "date", withTimezone: true }).notNull(),
   born: timestamp("started_at", { mode: "date", withTimezone: true }).notNull(),
   lastSeen: timestamp("last_seen_at", { mode: "date", withTimezone: true }).notNull(),
-  meta: jsonb("context").$type<Auth.Attributes>().notNull().default({}),
+  meta: jsonb("context").$type<Auth.Types.Attributes>().notNull().default({}),
   /** Another one, likewise defaulted. */
   origin: text("origin").notNull().default("web"),
 });
@@ -260,7 +263,7 @@ describe("stores over an application's own schema", () => {
 
   it("reads a user out of uuid-keyed columns under the application's names", async () => {
     const user = await runWithDatabase(() =>
-      Effect.flatMap(Auth.UserStore, (store) => store.get(userId)),
+      Effect.flatMap(Auth.UserStore.UserStore, (store) => store.get(userId)),
     );
 
     expect(user).toEqual(
@@ -276,7 +279,7 @@ describe("stores over an application's own schema", () => {
   });
 
   it("round-trips a session, leaving the application's own columns to their defaults", async () => {
-    const session: Auth.Session = {
+    const session: Auth.Types.Session = {
       id: "digest-1",
       userId,
       expiresAt: at(60_000),
@@ -287,7 +290,7 @@ describe("stores over an application's own schema", () => {
 
     const result = await runWithDatabase((db) =>
       Effect.gen(function* () {
-        const store = yield* Auth.SessionStore;
+        const store = yield* Auth.SessionStore.SessionStore;
         yield* store.create(session);
         const read = yield* store.get("digest-1");
         yield* store.update({ ...session, lastActivityAt: at(30_000) });
@@ -299,7 +302,7 @@ describe("stores over an application's own schema", () => {
           Effect.tryPromise({
             try: () =>
               db.select().from(appSessions).where(eq(appSessions.digest, "digest-1")).execute(),
-            catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+            catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
           }),
         );
 
@@ -315,7 +318,7 @@ describe("stores over an application's own schema", () => {
   });
 
   it("claims and verifies an identifier through the application's columns", async () => {
-    const identifier: Auth.Identifier = {
+    const identifier: Auth.Identifier.Identifier = {
       id: identifierId,
       userId,
       type: "email",
@@ -326,7 +329,7 @@ describe("stores over an application's own schema", () => {
 
     const result = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create(identifier);
         const byValue = yield* store.getByValue("email", "ada@example.com");
         const verified = yield* store.setVerified(identifierId, at(10_000));
@@ -351,7 +354,7 @@ describe("stores over an application's own schema", () => {
   it("surfaces the application's own unique index as the claim mechanism", async () => {
     const exit = await runWithDatabase(() =>
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         yield* store.create({
           id: identifierId,
           userId,

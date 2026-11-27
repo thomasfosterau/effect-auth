@@ -31,7 +31,7 @@ import { BAN_ATTRIBUTES, UserServiceStore } from "./User.ts";
 import { revokeStandingAccess } from "./UserCredentials.ts";
 import { purgeUser, userPurgeStores } from "./UserPurge.ts";
 import { isBanned } from "./UserStanding.ts";
-import { normalizeEmail, normalizeUsername } from "./utils.ts";
+import { normalizeEmail, normalizeUsername } from "./Normalize.ts";
 import {
   createUserWithIdentifier,
   type CreateUserResult,

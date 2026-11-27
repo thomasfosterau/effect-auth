@@ -63,9 +63,12 @@ const decodeRow = Schema.decodeUnknownEffect(Schema.Record(Schema.String, Schema
 export const decodeBigintColumns = <A extends object>(
   row: A,
   label: string,
-): Effect.Effect<A, Auth.AuthError> => {
+): Effect.Effect<A, Auth.Errors.AuthError> => {
   const failure = (column: string) => (cause: unknown) =>
-    new Auth.AuthError({ message: `${label}: stored integer ${column} did not decode`, cause });
+    new Auth.Errors.AuthError({
+      message: `${label}: stored integer ${column} did not decode`,
+      cause,
+    });
   return decodeRow(row).pipe(
     Effect.mapError(failure("row")),
     Effect.flatMap((record) =>

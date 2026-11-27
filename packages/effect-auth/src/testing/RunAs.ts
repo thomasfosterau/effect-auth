@@ -136,7 +136,8 @@ export function layerAs(
  * ```ts
  * import assert from "node:assert/strict"
  * import { Effect } from "effect"
- * import { SessionContext, type User } from "@thomasfosterau/effect-auth"
+ * import { SessionContext } from "@thomasfosterau/effect-auth"
+ * import { type User } from "@thomasfosterau/effect-auth/Types"
  * import * as Testing from "@thomasfosterau/effect-auth/testing"
  *
  * const now = new Date()

@@ -120,14 +120,16 @@ const wireRow = (values: {
 const runWith = <A, E>(
   proxy: Proxy,
   mapping: Parameters<typeof layer>[0],
-  program: Effect.Effect<A, E, Auth.IdentifierStore>,
+  program: Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
 ): Promise<A> =>
   Effect.runPromise(
     program.pipe(Effect.provide(layer(mapping).pipe(Layer.provide(databaseLayer(proxy.db))))),
   );
 
-const run = <A, E>(proxy: Proxy, program: Effect.Effect<A, E, Auth.IdentifierStore>): Promise<A> =>
-  runWith(proxy, usersMapping, program);
+const run = <A, E>(
+  proxy: Proxy,
+  program: Effect.Effect<A, E, Auth.Identifier.IdentifierStore>,
+): Promise<A> => runWith(proxy, usersMapping, program);
 
 const USER_ID = "5e1f0c3a-7b1d-4a53-9c0e-00000000000a";
 
@@ -150,7 +152,7 @@ describe("single-table MySQL / statements", () => {
     const found = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.getByValue("email", "ada@example.com");
       }),
     );
@@ -180,7 +182,7 @@ describe("single-table MySQL / statements", () => {
     const listed = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.listByUser(USER_ID);
       }),
     );
@@ -195,7 +197,7 @@ describe("single-table MySQL / statements", () => {
     const found = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.getByValue("username", "ada");
       }),
     );
@@ -210,10 +212,10 @@ describe("single-table MySQL / statements", () => {
     const error = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* Effect.flip(
           store.create(
-            Auth.makeIdentifier({
+            Auth.Identifier.makeIdentifier({
               userId: USER_ID,
               type: "phone",
               value: "+61400000000",
@@ -234,7 +236,7 @@ describe("single-table MySQL / statements", () => {
     await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.delete(USER_ID);
       }),
     );
@@ -250,7 +252,7 @@ describe("single-table MySQL / statements", () => {
 });
 
 describe("single-table MySQL / replace", () => {
-  const from: Auth.Identifier = {
+  const from: Auth.Identifier.Identifier = {
     id: USER_ID,
     userId: USER_ID,
     type: "email",
@@ -258,7 +260,7 @@ describe("single-table MySQL / replace", () => {
     verified: true,
     createdAt: DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z")),
   };
-  const to = Auth.makeIdentifier({
+  const to = Auth.Identifier.makeIdentifier({
     userId: USER_ID,
     type: "email",
     value: "ada-new@example.com",
@@ -280,7 +282,7 @@ describe("single-table MySQL / replace", () => {
     const replaced = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.replace(from, to);
       }),
     );
@@ -311,7 +313,7 @@ describe("single-table MySQL / replace", () => {
       proxy,
       strictMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.replace(from, to);
       }),
     );
@@ -330,7 +332,7 @@ describe("single-table MySQL / replace", () => {
       proxy,
       verifiedMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.replace(from, { ...to, verifiedAt });
       }),
     );
@@ -353,7 +355,7 @@ describe("single-table MySQL / replace", () => {
     const error = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* Effect.flip(store.replace(from, { ...to, userId: "someone-else" }));
       }),
     );
@@ -384,7 +386,7 @@ describe("single-table MySQL / NOT NULL email", () => {
       proxy,
       strictMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* Effect.flip(store.delete(USER_ID));
       }),
     );
@@ -403,7 +405,7 @@ describe("single-table MySQL / NOT NULL email", () => {
       proxy,
       strictMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.deleteByUser(USER_ID);
       }),
     );
@@ -430,7 +432,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
       proxy,
       verifiedMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.setVerified(USER_ID, verifiedAt);
       }),
     );
@@ -450,7 +452,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
       proxy,
       verifiedMapping,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.delete(USER_ID);
       }),
     );
@@ -476,7 +478,7 @@ describe("single-table MySQL / mapped emailVerifiedAt", () => {
     const verified = await run(
       proxy,
       Effect.gen(function* () {
-        const store = yield* Auth.IdentifierStore;
+        const store = yield* Auth.Identifier.IdentifierStore;
         return yield* store.setVerified(
           USER_ID,
           DateTime.toDateUtc(DateTime.makeUnsafe("2026-01-02T09:30:00.000Z")),

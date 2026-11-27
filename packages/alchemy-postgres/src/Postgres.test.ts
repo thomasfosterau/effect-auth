@@ -48,7 +48,7 @@ describe.skipIf(skipWithoutServer)("effect-auth on Postgres over @effect/sql-pg"
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const users = yield* Auth.Email.EmailPasswordStore;
-        const sessions = yield* Auth.SessionStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
         const { user } = yield* users.createUser({ name: "Ada", attributes: { plan: "pro" } });
         const now = yield* DateTime.nowAsDate;
         const id = `sess-${user.id}`;

@@ -46,7 +46,7 @@ const at = (offsetMs: number): Date =>
     DateTime.add(DateTime.makeUnsafe("2026-01-01T00:00:00.000Z"), { milliseconds: offsetMs }),
   );
 
-const makeSession = (id: string): Auth.Session => ({
+const makeSession = (id: string): Auth.Types.Session => ({
   id,
   userId: "user-1",
   expiresAt: at(60_000),
@@ -109,7 +109,7 @@ const run = (): Promise<Observed> => {
       );
 
       return yield* Effect.gen(function* () {
-        const sessions = yield* Auth.SessionStore;
+        const sessions = yield* Auth.SessionStore.SessionStore;
 
         // 1. A transaction that commits, with a direct read and a batch of
         //    concurrent reads issued inside it.
@@ -198,23 +198,23 @@ const purge = (outcome: "fail" | "commit"): Promise<Held> =>
         ApiKeyStore.layer(tables),
         EmailPasswordStore.layer(tables),
       ).pipe(Layer.provide(effectDatabaseLayer(db)));
-      const deletion = Auth.accountDeletionLayer.pipe(
+      const deletion = Auth.AccountManagement.accountDeletionLayer.pipe(
         Layer.provideMerge(
-          Auth.SessionService.layer({
+          Auth.SessionService.SessionService.layer({
             sessionExpiresIn: { activePeriod: 86_400_000, idlePeriod: 3_600_000 },
           }),
         ),
-        Layer.provideMerge(Layer.mergeAll(stores, Auth.Hooks.Default)),
+        Layer.provideMerge(Layer.mergeAll(stores, Auth.Hooks.Hooks.Default)),
       );
 
       return yield* Effect.gen(function* () {
         const { user } = yield* (yield* Auth.Email.EmailPasswordStore).createUser({});
-        const identifiers = yield* Auth.IdentifierStore;
-        const apiKeys = yield* Auth.ApiKeyStore;
-        const sessions = yield* Auth.SessionService;
+        const identifiers = yield* Auth.Identifier.IdentifierStore;
+        const apiKeys = yield* Auth.ApiKey.ApiKeyStore;
+        const sessions = yield* Auth.SessionService.SessionService;
         const now = at(0);
         yield* identifiers.create(
-          Auth.makeIdentifier({
+          Auth.Identifier.makeIdentifier({
             userId: user.id,
             type: "email",
             value: "purge-tx@example.com",
@@ -233,7 +233,7 @@ const purge = (outcome: "fail" | "commit"): Promise<Held> =>
         });
         yield* sessions.createSession(user.id);
 
-        const deleteUser = (yield* Auth.AccountDeletion).deleteUser(user.id);
+        const deleteUser = (yield* Auth.AccountDeletion.AccountDeletion).deleteUser(user.id);
         yield* db
           .transaction(() =>
             outcome === "fail"
@@ -243,7 +243,7 @@ const purge = (outcome: "fail" | "commit"): Promise<Held> =>
           .pipe(Effect.ignore);
 
         return {
-          user: Option.isSome(yield* (yield* Auth.UserStore).get(user.id)),
+          user: Option.isSome(yield* (yield* Auth.UserStore.UserStore).get(user.id)),
           identifiers: (yield* identifiers.listByUser(user.id)).length,
           apiKeys: (yield* apiKeys.listByUserId(user.id)).length,
           sessions: (yield* sessions.listSessions(user.id)).length,

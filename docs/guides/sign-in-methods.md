@@ -140,7 +140,7 @@ const WebAuthnLive = Auth.MultiFactor.WebAuthnService.layer({
       Layer.succeed(Auth.MultiFactor.ChallengeStore)(challengeStore),
       Layer.succeed(Auth.MultiFactor.CredentialStore)(credentialStore),
       // Passkey sign-in fires `beforeAuthenticate`; no plugins here.
-      Auth.Hooks.Default,
+      Auth.Hooks.Hooks.Default,
     ),
   ),
 );
@@ -357,13 +357,14 @@ const EmailVerificationLive = Auth.Email.EmailVerificationService.layer({
           subject: "Verify your email",
           html: `Verify: https://example.com/verify?token=${token}`,
         }),
-      catch: (cause) => new Auth.EmailVerificationError({ message: "Failed to send email", cause }),
+      catch: (cause) =>
+        new Auth.Errors.EmailVerificationError({ message: "Failed to send email", cause }),
     }),
 }).pipe(
   Layer.provide(
     Layer.mergeAll(
       Layer.succeed(Auth.Email.EmailVerificationStore)(emailVerificationStore),
-      Auth.Hooks.Default,
+      Auth.Hooks.Hooks.Default,
     ),
   ),
 );
@@ -401,10 +402,10 @@ import * as Resend from "@thomasfosterau/effect-connect-resend";
 import * as Twilio from "@thomasfosterau/effect-connect-twilio";
 
 // `render` (optional) turns a purpose and its params into your own templates.
-const Email = Auth.EmailSender.layerConnect({
+const Email = Auth.Delivery.EmailSender.layerConnect({
   from: { email: "noreply@example.com", name: "App" },
 }).pipe(Layer.provide(Resend.layer({ apiKey: Redacted.make("re_…") })));
-const Sms = Auth.SmsSender.layerConnect().pipe(
+const Sms = Auth.Delivery.SmsSender.layerConnect().pipe(
   Layer.provide(
     Twilio.layer({ accountSid: "AC…", authToken: Redacted.make("…"), from: "+61400000000" }),
   ),
@@ -438,7 +439,9 @@ declare const ctx: { waitUntil(promise: Promise<unknown>): void };
 declare const handle: Effect.Effect<Response>;
 
 const response = handle.pipe(
-  Effect.provide(Auth.DeliveryScheduler.waitUntil((promise) => ctx.waitUntil(promise))),
+  Effect.provide(
+    Auth.DeliveryScheduler.DeliveryScheduler.waitUntil((promise) => ctx.waitUntil(promise)),
+  ),
 );
 ```
 

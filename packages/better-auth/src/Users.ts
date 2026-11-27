@@ -52,15 +52,16 @@ const hasColumn = (context: BetterAuthContext, column: string): boolean =>
  * @since 0.1.0
  * @category layers
  */
-export const userStoreLayer: Layer.Layer<Auth.UserStore, never, BetterAuthInstance> = Layer.effect(
-  Auth.UserStore,
-  Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
-    get: (userId: string) =>
-      Effect.map(findUser(context, userId), (user) =>
-        Option.map(Option.fromNullishOr(user), toUser),
-      ),
-  })),
-);
+export const userStoreLayer: Layer.Layer<Auth.UserStore.UserStore, never, BetterAuthInstance> =
+  Layer.effect(
+    Auth.UserStore.UserStore,
+    Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
+      get: (userId: string) =>
+        Effect.map(findUser(context, userId), (user) =>
+          Option.map(Option.fromNullishOr(user), toUser),
+        ),
+    })),
+  );
 
 /**
  * The fields of `next` that differ from `current`, as BetterAuth columns. A
@@ -69,9 +70,9 @@ export const userStoreLayer: Layer.Layer<Auth.UserStore, never, BetterAuthInstan
  */
 const changedColumns = (
   context: BetterAuthContext,
-  current: Auth.User,
-  next: Auth.User,
-): Effect.Effect<Columns, Auth.AuthError> => {
+  current: Auth.Types.User,
+  next: Auth.Types.User,
+): Effect.Effect<Columns, Auth.Errors.AuthError> => {
   const changedAttributes = R.filter(
     next.attributes,
     (value, key) => !Eq.equals(value, current.attributes[key]),
@@ -82,7 +83,7 @@ const changedColumns = (
   );
   if (Option.isSome(refused)) {
     return Effect.fail(
-      new Auth.AuthError({
+      new Auth.Errors.AuthError({
         message: `"${refused.value}" is not a user column BetterAuth declares, or is one it owns`,
       }),
     );
@@ -95,7 +96,7 @@ const changedColumns = (
 };
 
 /**
- * The core's `UserServiceStore` over BetterAuth, so `Auth.UserService.layer()`
+ * The core's `UserServiceStore` over BetterAuth, so `Auth.User.UserService.layer()`
  * runs on top: `update` writes only the fields that changed, and only columns
  * BetterAuth declares; `delete` removes the user's sessions, then the user
  * (BetterAuth deletes its `account` rows with it).
@@ -103,36 +104,39 @@ const changedColumns = (
  * @since 0.1.0
  * @category layers
  */
-export const userServiceStoreLayer: Layer.Layer<Auth.UserServiceStore, never, BetterAuthInstance> =
-  Layer.effect(
-    Auth.UserServiceStore,
-    Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
-      get: (userId: string) =>
-        Effect.map(findUser(context, userId), (user) =>
-          Option.map(Option.fromNullishOr(user), toUser),
-        ),
-      update: Effect.fn("UserServiceStore.update")(function* (user: Auth.User) {
-        const row = yield* findUser(context, user.id);
-        if (row === null) {
-          return yield* new Auth.AuthError({
-            message: `No BetterAuth user ${user.id} to update`,
-          });
-        }
-        const changes = yield* changedColumns(context, toUser(row), user);
-        if (R.isEmptyRecord(changes)) return toUser(row);
-        const updated = yield* adapterCall("updateUser", () =>
-          context.internalAdapter.updateUser(user.id, { ...changes, updatedAt: user.updatedAt }),
-        );
-        if (updated === null) {
-          return yield* new Auth.AuthError({
-            message: `No BetterAuth user ${user.id} to update`,
-          });
-        }
-        return toUser(updated);
-      }),
-      delete: (userId: string) => deleteUser(context, userId),
-    })),
-  );
+export const userServiceStoreLayer: Layer.Layer<
+  Auth.User.UserServiceStore,
+  never,
+  BetterAuthInstance
+> = Layer.effect(
+  Auth.User.UserServiceStore,
+  Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
+    get: (userId: string) =>
+      Effect.map(findUser(context, userId), (user) =>
+        Option.map(Option.fromNullishOr(user), toUser),
+      ),
+    update: Effect.fn("UserServiceStore.update")(function* (user: Auth.Types.User) {
+      const row = yield* findUser(context, user.id);
+      if (row === null) {
+        return yield* new Auth.Errors.AuthError({
+          message: `No BetterAuth user ${user.id} to update`,
+        });
+      }
+      const changes = yield* changedColumns(context, toUser(row), user);
+      if (R.isEmptyRecord(changes)) return toUser(row);
+      const updated = yield* adapterCall("updateUser", () =>
+        context.internalAdapter.updateUser(user.id, { ...changes, updatedAt: user.updatedAt }),
+      );
+      if (updated === null) {
+        return yield* new Auth.Errors.AuthError({
+          message: `No BetterAuth user ${user.id} to update`,
+        });
+      }
+      return toUser(updated);
+    }),
+    delete: (userId: string) => deleteUser(context, userId),
+  })),
+);
 
 const deleteUser = (context: BetterAuthContext, userId: string) =>
   Effect.gen(function* () {
@@ -153,29 +157,32 @@ const deleteUser = (context: BetterAuthContext, userId: string) =>
  * @since 0.1.0
  * @category layers
  */
-export const accountDeletionLayer: Layer.Layer<Auth.AccountDeletion, never, BetterAuthInstance> =
-  Layer.effect(
-    Auth.AccountDeletion,
-    Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
-      deleteUser: (userId: string) => deleteUser(context, userId),
-    })),
-  );
+export const accountDeletionLayer: Layer.Layer<
+  Auth.AccountDeletion.AccountDeletion,
+  never,
+  BetterAuthInstance
+> = Layer.effect(
+  Auth.AccountDeletion.AccountDeletion,
+  Effect.map(Effect.service(BetterAuthInstance), ({ context }) => ({
+    deleteUser: (userId: string) => deleteUser(context, userId),
+  })),
+);
 
-const refusedWrite = (type: Auth.IdentifierType) =>
-  new Auth.IdentifierRefusedError({
+const refusedWrite = (type: Auth.Identifier.IdentifierType) =>
+  new Auth.Identifier.IdentifierRefusedError({
     message: `Identifiers are BetterAuth's columns: change a ${type} through BetterAuth's own flow, which verifies it`,
     identifierType: type,
   });
 
 const refusedStoreWrite = (method: string) =>
-  new Auth.AuthError({
+  new Auth.Errors.AuthError({
     message: `IdentifierStore.${method} is refused over BetterAuth: identifiers change only through BetterAuth's own flows`,
   });
 
 /** The column a by-value lookup reads for each identifier type. */
 const VALUE_COLUMN = { email: "email", username: "username", phone: "phoneNumber" } as const;
 
-const identifierOf = (user: BetterAuthUser | null, type: Auth.IdentifierType) =>
+const identifierOf = (user: BetterAuthUser | null, type: Auth.Identifier.IdentifierType) =>
   user === null ? Option.none() : Arr.findFirst(identifiersOf(user), (id) => id.type === type);
 
 /**
@@ -192,65 +199,67 @@ const identifierOf = (user: BetterAuthUser | null, type: Auth.IdentifierType) =>
  * @since 0.1.0
  * @category layers
  */
-export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, BetterAuthInstance> =
-  Layer.effect(
-    Auth.IdentifierStore,
-    Effect.map(Effect.service(BetterAuthInstance), ({ context }) => {
-      const byValue = (type: Auth.IdentifierType, value: string) => {
-        if (type === "email") {
-          return Effect.map(
-            adapterCall("findUserByEmail", () => context.internalAdapter.findUserByEmail(value)),
-            (found) => found?.user ?? null,
-          );
-        }
-        const column = VALUE_COLUMN[type];
-        if (!hasColumn(context, column)) return Effect.succeed(null);
-        return adapterCall(`findOne(user.${column})`, () =>
-          context.adapter.findOne<BetterAuthUser>({
-            model: "user",
-            where: [{ field: column, value }],
-          }),
+export const identifierStoreLayer: Layer.Layer<
+  Auth.Identifier.IdentifierStore,
+  never,
+  BetterAuthInstance
+> = Layer.effect(
+  Auth.Identifier.IdentifierStore,
+  Effect.map(Effect.service(BetterAuthInstance), ({ context }) => {
+    const byValue = (type: Auth.Identifier.IdentifierType, value: string) => {
+      if (type === "email") {
+        return Effect.map(
+          adapterCall("findUserByEmail", () => context.internalAdapter.findUserByEmail(value)),
+          (found) => found?.user ?? null,
         );
-      };
-
-      return {
-        getByValue: (type: Auth.IdentifierType, value: string) =>
-          Effect.map(byValue(type, value), (user) => identifierOf(user, type)),
-
-        listByUser: (userId: string) =>
-          Effect.map(findUser(context, userId), (user) =>
-            user === null ? [] : identifiersOf(user),
-          ),
-
-        create: (identifier: Auth.Identifier) => Effect.fail(refusedWrite(identifier.type)),
-        replace: () => Effect.fail(refusedStoreWrite("replace")),
-        delete: () => Effect.fail(refusedStoreWrite("delete")),
-        deleteByUser: () => Effect.fail(refusedStoreWrite("deleteByUser")),
-
-        setVerified: Effect.fn("IdentifierStore.setVerified")(function* (id: string) {
-          const parsed = parseIdentifierId(id);
-          if (parsed === undefined) return Option.none();
-          const user = yield* findUser(context, parsed.userId);
-          const current = identifierOf(user, parsed.type);
-          if (
-            Option.isNone(current) ||
-            current.value.id !== identifierId(parsed.userId, parsed.type)
-          ) {
-            return Option.none();
-          }
-          if (current.value.verified || parsed.type === "username") return current;
-          const column = parsed.type === "email" ? "emailVerified" : "phoneNumberVerified";
-          const updated = yield* adapterCall("updateUser", () =>
-            context.internalAdapter.updateUser(parsed.userId, { [column]: true }),
-          );
-          return identifierOf(updated, parsed.type);
+      }
+      const column = VALUE_COLUMN[type];
+      if (!hasColumn(context, column)) return Effect.succeed(null);
+      return adapterCall(`findOne(user.${column})`, () =>
+        context.adapter.findOne<BetterAuthUser>({
+          model: "user",
+          where: [{ field: column, value }],
         }),
-      };
-    }),
-  );
+      );
+    };
+
+    return {
+      getByValue: (type: Auth.Identifier.IdentifierType, value: string) =>
+        Effect.map(byValue(type, value), (user) => identifierOf(user, type)),
+
+      listByUser: (userId: string) =>
+        Effect.map(findUser(context, userId), (user) => (user === null ? [] : identifiersOf(user))),
+
+      create: (identifier: Auth.Identifier.Identifier) =>
+        Effect.fail(refusedWrite(identifier.type)),
+      replace: () => Effect.fail(refusedStoreWrite("replace")),
+      delete: () => Effect.fail(refusedStoreWrite("delete")),
+      deleteByUser: () => Effect.fail(refusedStoreWrite("deleteByUser")),
+
+      setVerified: Effect.fn("IdentifierStore.setVerified")(function* (id: string) {
+        const parsed = parseIdentifierId(id);
+        if (parsed === undefined) return Option.none();
+        const user = yield* findUser(context, parsed.userId);
+        const current = identifierOf(user, parsed.type);
+        if (
+          Option.isNone(current) ||
+          current.value.id !== identifierId(parsed.userId, parsed.type)
+        ) {
+          return Option.none();
+        }
+        if (current.value.verified || parsed.type === "username") return current;
+        const column = parsed.type === "email" ? "emailVerified" : "phoneNumberVerified";
+        const updated = yield* adapterCall("updateUser", () =>
+          context.internalAdapter.updateUser(parsed.userId, { [column]: true }),
+        );
+        return identifierOf(updated, parsed.type);
+      }),
+    };
+  }),
+);
 
 /**
- * Every layer in this file, plus `Auth.UserService` on top, over one
+ * Every layer in this file, plus `Auth.User.UserService` on top, over one
  * BetterAuth instance.
  *
  * @since 0.1.0
@@ -259,15 +268,15 @@ export const identifierStoreLayer: Layer.Layer<Auth.IdentifierStore, never, Bett
 export const usersLayer = (config?: {
   readonly serverOnlyAttributes?: ReadonlyArray<string>;
 }): Layer.Layer<
-  | Auth.UserService
-  | Auth.UserStore
-  | Auth.UserServiceStore
-  | Auth.AccountDeletion
-  | Auth.IdentifierStore,
+  | Auth.User.UserService
+  | Auth.UserStore.UserStore
+  | Auth.User.UserServiceStore
+  | Auth.AccountDeletion.AccountDeletion
+  | Auth.Identifier.IdentifierStore,
   never,
   BetterAuthInstance
 > =>
-  Auth.UserService.layer(config).pipe(
+  Auth.User.UserService.layer(config).pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         userServiceStoreLayer,

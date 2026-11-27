@@ -11,6 +11,7 @@
 import * as Schema from "effect/Schema";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
+import { Base64 } from "effect/encoding";
 import * as Result from "effect/Result";
 import { WASM_BASE64 } from "./WasmBinary.ts";
 
@@ -49,7 +50,12 @@ const isArgon2Exports = (
   Arr.every(FUNCTIONS, (name) => P.isFunction(exports[name]));
 
 const decodeBase64 = (value: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
+  Result.match(Base64.decode(value), {
+    onSuccess: (bytes) => Uint8Array.from(bytes),
+    onFailure: () => {
+      throw new TypeError("The embedded Argon2 wasm is not valid base64");
+    },
+  });
 
 // Startup work, not per-request: see the module comment.
 const module = new WebAssembly.Module(decodeBase64(WASM_BASE64));

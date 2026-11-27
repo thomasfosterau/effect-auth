@@ -34,7 +34,7 @@ import { SessionService } from "./SessionService.ts";
 import { UserStore } from "./UserStore.ts";
 import { constantTimeHashEqual, tokenHasher } from "./TokenHash.ts";
 import type * as Types from "./Types.ts";
-import { normalizeDomain, normalizeEmail } from "./utils.ts";
+import { normalizeDomain, normalizeEmail } from "./Normalize.ts";
 
 /**
  * Organization error

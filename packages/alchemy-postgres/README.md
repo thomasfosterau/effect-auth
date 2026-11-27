@@ -34,7 +34,7 @@ pools at the edge, so keep the client's own pool small:
 ```ts
 import * as Postgres from "@thomasfosterau/effect-auth-alchemy-postgres";
 
-const stores = Postgres.layer(env.HYPERDRIVE, { maxConnections: 1 });
+const stores = Postgres.Postgres.layer(env.HYPERDRIVE, { maxConnections: 1 });
 ```
 
 ## Entry points

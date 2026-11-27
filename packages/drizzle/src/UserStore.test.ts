@@ -39,7 +39,7 @@ beforeEach(async () => {
 
 /** Run `build`'s program against the user store on the file's database. */
 const runWithDatabase = <A, E>(
-  build: (db: PgliteDatabase) => Effect.Effect<A, E, Auth.UserStore>,
+  build: (db: PgliteDatabase) => Effect.Effect<A, E, Auth.UserStore.UserStore>,
 ): Promise<A> => {
   const db = drizzle({ client });
   return Effect.runPromise(
@@ -76,7 +76,7 @@ const seedUser = (
           .execute();
         return id;
       },
-      catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+      catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
     }),
   );
 
@@ -94,7 +94,7 @@ describe("UserStore", () => {
         });
         yield* seedUser(db, { id: "bare" });
 
-        const store = yield* Auth.UserStore;
+        const store = yield* Auth.UserStore.UserStore;
         return {
           full: yield* store.get("full"),
           bare: yield* store.get("bare"),
@@ -147,7 +147,7 @@ conformance(
               updatedAt: user.updatedAt,
             })
             .execute(),
-        catch: (cause) => new Auth.AuthError({ message: "test setup failed", cause }),
+        catch: (cause) => new Auth.Errors.AuthError({ message: "test setup failed", cause }),
       }).pipe(Effect.orDie),
   }),
   (effect) => runWithDatabase(() => effect),
