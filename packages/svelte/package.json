@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-auth-svelte",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Svelte bindings and form components for the effect-auth client.",
   "keywords": [
     "auth",

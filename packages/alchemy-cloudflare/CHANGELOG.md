@@ -1,5 +1,100 @@
 # @thomasfosterau/effect-auth-alchemy-cloudflare
 
+## 0.5.0
+
+### Minor Changes
+
+- aa4e451: **Breaking:** every package follows Effect's export layout. The root barrel re-exports each public module as a PascalCase namespace and nothing flat, and each module is also its own PascalCase subpath.
+  
+  - `@thomasfosterau/effect-auth`: `Auth.SessionService` becomes `Auth.SessionService.SessionService`, `Auth.User` (the record) becomes `Auth.Types.User`, and `Auth.AuthError` becomes `Auth.Errors.AuthError`. A named import moves to its module's subpath: `import { SessionService } from "@thomasfosterau/effect-auth/SessionService"`.
+  - The cluster subpaths are PascalCase: `./Email`, `./OAuth`, `./Password`, `./Plugins`, `./MultiFactor` and `./Ladder` replace `./email`, `./oauth`, `./password`, `./plugins`, `./multifactor` and `./ladder`. The subpaths that gate an optional peer or a runtime stay as they are: `./http`, `./client`, `./client/atoms`, `./client/testing`, `./sql`, `./saml`, `./scrypt` and `./testing`.
+  - `utils` is now the `Normalize` module (`Auth.Normalize.normalizeEmail`).
+  - Each adapter's root exports one namespace per module, for example `Drizzle.Layers.layer`, `Drizzle.Database.databaseLayer`, `SvelteKit.Handle.handle`, `Argon2.Argon2.argon2Hasher`, `AuthD1.Storage.layer` and `Postgres.Postgres.layer`. Each module is also a subpath (`@thomasfosterau/effect-auth-drizzle/Layers`).
+- f0e7e63: **Breaking:** options objects spell an optional member `readonly x?: T`, without `| undefined`, as in the core. Under `exactOptionalPropertyTypes`, a caller holding a value that may be `undefined` leaves the key out instead of passing `x: undefined`. This covers the SvelteKit `handle` and credential-action options, the Drizzle column maps and store options, the Argon2 cost options and the D1 client's `spanAttributes`.
+
+### Patch Changes
+
+- e9c5876: Import every Effect module from its own entry point (`effect/Effect`, `effect/Layer`, …) rather than the `effect` barrel. The emitted `dist/` and `.d.ts` change their import specifiers only; no API or behaviour changes.
+- 8c6a234: `purgeExpired` (`./sql`, and the Alchemy packages' `purgeExpired` through it) now deletes every expiring row, not only magic links, email OTPs and rate limits: expired sessions, OAuth states, WebAuthn challenges, pending second factors, email verifications and password resets, ended or idle account-lockout counters, and email-OTP failure budgets 25 hours after their latest wrong code. `PurgeExpiredResult` reports each table, and `purgeExpiredWith` takes `accountLockoutRetention` and `otpFailureRetention`. `migrate` adds the expiry indexes and an `auth_account_lockout_attempts` table, which `registerAttempt` now writes.
+  
+  `purgeExpiredKV` covers every `*StoreKV` prefix the same way (`purgeExpiredKVWith` takes `otpFailureRetention`), and removes a purged token from its user's index. Expiring KV records are written in an expiry envelope, and `RateLimitStoreKV.set` keeps an entry for the TTL it is given. Records written before this read as before.
+  
+  `memoryAccountLockoutStore`, `memorySamlReplayStore` and `AnonymousService`'s record of completed links now drop their spent entries as they grow, so none grows without bound.
+- cbbacba: Shorten each package README to what the package is, how to install it, one example, its entry points and links. The detail moved, unchanged, to guides under `docs/guides/` in the repository: getting started, authorization, sign-in methods, abuse protection, the HTTP API, storage, the browser client reference, SAML, testing, Drizzle, Svelte, SvelteKit, Alchemy and Argon2id.
+- 5e2f119: Shorten the module doc comments to a few lines each. Consumer detail they held now sits on the export it describes: the `SamlVerifier` checks, what a `defineSchema` table must satisfy, and runnable examples on `Guard.requireSystem`, `OwnedAccess.make`, `Delivery`, `TrustedDevice`, `Messages`, `OrganizationEntities` and `RateLimitPersistence`.
+- Updated dependencies [6c618f1]
+- Updated dependencies [511357b]
+- Updated dependencies [8c41d26]
+- Updated dependencies [839deb6]
+- Updated dependencies [d3afdec]
+- Updated dependencies [aeaa5f0]
+- Updated dependencies [afa3c31]
+- Updated dependencies [70c2c8e]
+- Updated dependencies [4c8b37c]
+- Updated dependencies [9a79494]
+- Updated dependencies [03f4aff]
+- Updated dependencies [b5c935d]
+- Updated dependencies [c9e519b]
+- Updated dependencies [9b2c5ce]
+- Updated dependencies [65bc383]
+- Updated dependencies [f546e14]
+- Updated dependencies [4189a4f]
+- Updated dependencies [6ed0d73]
+- Updated dependencies [7dd6f0d]
+- Updated dependencies [390d0eb]
+- Updated dependencies [5158442]
+- Updated dependencies [bc22d09]
+- Updated dependencies [c9e09af]
+- Updated dependencies [934eebe]
+- Updated dependencies [666cb31]
+- Updated dependencies [342aa55]
+- Updated dependencies [e0c9f41]
+- Updated dependencies [c7998b9]
+- Updated dependencies [8feb236]
+- Updated dependencies [e9c5876]
+- Updated dependencies [aa4e451]
+- Updated dependencies [605f0fa]
+- Updated dependencies [2d7dc18]
+- Updated dependencies [692c5b6]
+- Updated dependencies [bdda509]
+- Updated dependencies [4da18de]
+- Updated dependencies [c7f3e0b]
+- Updated dependencies [9f9c278]
+- Updated dependencies [9213fe2]
+- Updated dependencies [8b47bd6]
+- Updated dependencies [6fbfa58]
+- Updated dependencies [67435fc]
+- Updated dependencies [93a21c7]
+- Updated dependencies [3aaae40]
+- Updated dependencies [4db7b04]
+- Updated dependencies [acf056e]
+- Updated dependencies [c1e3933]
+- Updated dependencies [2cbe703]
+- Updated dependencies [4481724]
+- Updated dependencies [e5e6c5c]
+- Updated dependencies [87ce3d0]
+- Updated dependencies [8c6a234]
+- Updated dependencies [36828f4]
+- Updated dependencies [9bb8e23]
+- Updated dependencies [898eb41]
+- Updated dependencies [8024bd1]
+- Updated dependencies [c269ca8]
+- Updated dependencies [7b2a431]
+- Updated dependencies [e803edb]
+- Updated dependencies [5854245]
+- Updated dependencies [e5e7a09]
+- Updated dependencies [d95f411]
+- Updated dependencies [ce726c4]
+- Updated dependencies [cbbacba]
+- Updated dependencies [1bb5c77]
+- Updated dependencies [05adb89]
+- Updated dependencies [afa3c31]
+- Updated dependencies [5e2f119]
+- Updated dependencies [4148b2a]
+- Updated dependencies [d863f61]
+- Updated dependencies [e089e8c]
+  - @thomasfosterau/effect-auth@0.9.0
+
 ## 0.4.0
 
 ### Minor Changes
