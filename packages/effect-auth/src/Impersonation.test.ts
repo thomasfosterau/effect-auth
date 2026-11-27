@@ -1,5 +1,8 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { DateTime, Effect, Layer, Result } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { ApiKeyService } from "./ApiKey.ts";
@@ -64,25 +67,25 @@ describe("Impersonation.guardCurrentSession", () => {
   });
 });
 
-describe("a guarded service under an impersonation session", () => {
-  const run = (session: Types.Session) =>
-    Effect.gen(function* () {
-      const apiKeys = yield* ApiKeyService;
-      // Outside any session context, as the admin's tooling would mint it.
-      const existing = yield* apiKeys.create(user.id, { name: "existing" });
-      const asSession = <A, E>(effect: Effect.Effect<A, E>) =>
-        Effect.result(
-          effect.pipe(Effect.provide(SessionContext.authenticatedLayer({ session, user }))),
-        );
-      return {
-        create: yield* asSession(apiKeys.create(user.id, { name: "new" })),
-        update: yield* asSession(apiKeys.update(user.id, existing.apiKey.id, { name: "renamed" })),
-        remove: yield* asSession(apiKeys.delete(user.id, existing.apiKey.id)),
-      };
-    }).pipe(Effect.provide(apiKeyServiceLayer({ users: [user] })), Effect.runPromise);
+const runApiKeyWrites = (session: Types.Session) =>
+  Effect.gen(function* () {
+    const apiKeys = yield* ApiKeyService;
+    // Outside any session context, as the admin's tooling would mint it.
+    const existing = yield* apiKeys.create(user.id, { name: "existing" });
+    const asSession = <A, E>(effect: Effect.Effect<A, E>) =>
+      Effect.result(
+        effect.pipe(Effect.provide(SessionContext.authenticatedLayer({ session, user }))),
+      );
+    return {
+      create: yield* asSession(apiKeys.create(user.id, { name: "new" })),
+      update: yield* asSession(apiKeys.update(user.id, existing.apiKey.id, { name: "renamed" })),
+      remove: yield* asSession(apiKeys.delete(user.id, existing.apiKey.id)),
+    };
+  }).pipe(Effect.provide(apiKeyServiceLayer({ users: [user] })), Effect.runPromise);
 
+describe("a guarded service under an impersonation session", () => {
   it("refuses API key creation, changes and deletion", async () => {
-    const results = await run(impersonation);
+    const results = await runApiKeyWrites(impersonation);
     const failures: ReadonlyArray<Result.Result<unknown, { readonly _tag: string }>> = [
       results.create,
       results.update,
@@ -95,7 +98,7 @@ describe("a guarded service under an impersonation session", () => {
   });
 
   it("allows them from the user's own session", async () => {
-    const results = await run(plain);
+    const results = await runApiKeyWrites(plain);
     expect(
       Arr.map([results.create, results.update, results.remove], (result) => result._tag),
     ).toEqual(["Success", "Success", "Success"]);

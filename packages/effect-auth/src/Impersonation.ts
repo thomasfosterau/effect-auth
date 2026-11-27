@@ -17,7 +17,7 @@
  * @since 0.1.0
  * @module impersonation
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Errors from "./Errors.ts";
 import { CurrentSession, MaybeCurrentSession } from "./SessionContext.ts";

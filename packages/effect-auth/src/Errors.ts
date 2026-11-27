@@ -388,9 +388,12 @@ export class UserBannedError extends Schema.TaggedError<
  * session asking is an administrator's impersonation, which may not. Raised by
  * `Impersonation.assertNotImpersonating` and the services it guards.
  */
-export class ImpersonationForbiddenError extends Data.TaggedError("ImpersonationForbiddenError")<{
-  readonly message: string;
-}> {
+export class ImpersonationForbiddenError extends Schema.TaggedError<
+  ImpersonationForbiddenError,
+  { readonly brand: unique symbol }
+>()("ImpersonationForbiddenError", {
+  message: Schema.String,
+}) {
   get code(): typeof ErrorCode.IMPERSONATION_FORBIDDEN {
     return ErrorCode.IMPERSONATION_FORBIDDEN;
   }

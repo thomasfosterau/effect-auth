@@ -11,7 +11,7 @@ import type { AuthResult } from "../email/EmailPassword.ts";
 import * as Entity from "../Entity.ts";
 import * as Hooks from "../Hooks.ts";
 
-const impersonationFields = (event: ImpersonationEvent) => ({
+const impersonationFields = (event: Hooks.ImpersonationEvent) => ({
   impersonatorId: event.impersonatorId,
   userId: event.userId,
   sessionId: event.sessionId,
@@ -59,10 +59,10 @@ export const AuditPlugin = Hooks.makePlugin(
         cause: failure.cause,
       }),
     ),
-    afterImpersonationStart: Hooks.tap((event: ImpersonationEvent) =>
+    afterImpersonationStart: Hooks.Hooks.tap((event: Hooks.ImpersonationEvent) =>
       Effect.logInfo("auth.impersonationStart", impersonationFields(event)),
     ),
-    afterImpersonationStop: Hooks.tap((event: ImpersonationEvent) =>
+    afterImpersonationStop: Hooks.Hooks.tap((event: Hooks.ImpersonationEvent) =>
       Effect.logInfo("auth.impersonationStop", impersonationFields(event)),
     ),
   },

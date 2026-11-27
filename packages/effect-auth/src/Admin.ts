@@ -345,7 +345,7 @@ export class AdminService extends Context.Service<
     readonly stopImpersonating: (
       session: Types.Session,
       token: string,
-    ) => Effect.Effect<void, AdminError | Errors.AuthError | HookError>;
+    ) => Effect.Effect<void, AdminError | Errors.AuthError | Hooks.HookError>;
 
     /**
      * Create a new user with a primary email identifier, optionally with
@@ -404,7 +404,7 @@ export const make = (
   | PasswordHasher
   | SecureRandom.SecureRandom
   | Digest.Digest
-  | Hooks
+  | Hooks.Hooks
 > =>
   Effect.gen(function* () {
     const hashToken = yield* tokenHasher;
@@ -453,7 +453,7 @@ export const make = (
     const identifierStore = yield* IdentifierStore;
     const hasher = yield* PasswordHasher;
     const crypto = yield* SecureRandom.SecureRandom;
-    const hooks = yield* Hooks;
+    const hooks = yield* Hooks.Hooks;
     const accountTokens = yield* Effect.serviceOption(AccountManagementStore);
     const purgeServices = definedKeys({
       ...(yield* userPurgeStores),

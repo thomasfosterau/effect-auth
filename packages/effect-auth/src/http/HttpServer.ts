@@ -2668,9 +2668,12 @@ export const multiFactorEnrollmentsGroupLayer = (
           const resolved = yield* requireSession(request, cfg);
           yield* refuseWhileImpersonating(resolved.session);
           const multiFactor = yield* resolveMultiFactor;
-          yield* multiFactor.service
-            .disable(resolved.user.id, payload.meta.password)
-            .pipe(Effect.catchTags({ ...passwordGuardFailures, ImpersonationForbiddenError: forbiddenFor }));
+          yield* multiFactor.service.disable(resolved.user.id, payload.meta.password).pipe(
+            Effect.catchTags({
+              ...passwordGuardFailures,
+              ImpersonationForbiddenError: forbiddenFor,
+            }),
+          );
         }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
