@@ -55,9 +55,7 @@ const cryptoPasswords = (kdf: typeof Kdf.Kdf.Service, options?: Argon2Options) =
     parallelism: costs.parallelism,
   });
   return Effect.runSync(
-    Effect.gen(function* () {
-      return yield* CryptoPassword.Password;
-    }).pipe(
+    Effect.service(CryptoPassword.Password).pipe(
       Effect.provide(
         CryptoPassword.layer({ algorithm }).pipe(
           // The counting Kdf first, so the platform layer only fills the rest.

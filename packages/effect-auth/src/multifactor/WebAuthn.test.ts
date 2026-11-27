@@ -115,12 +115,7 @@ const testUser: WebAuthnUser = {
 
 // `Digest.layerWebCrypto` builds synchronously, from the `WebCrypto` reference.
 const platformDigest = Effect.runSync(
-  Effect.provide(
-    Effect.gen(function* () {
-      return yield* Digest.Digest;
-    }),
-    Digest.layerWebCrypto,
-  ),
+  Effect.provide(Effect.service(Digest.Digest), Digest.layerWebCrypto),
 );
 
 /** The `Hooks` a layer builds, as a value to put in a `Context`. */

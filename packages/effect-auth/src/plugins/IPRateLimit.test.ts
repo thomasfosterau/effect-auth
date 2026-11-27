@@ -96,14 +96,12 @@ const callSignIn = (ip: string | undefined) =>
 describe("IPRateLimitPlugin", () => {
   it("allows requests within the limit", () =>
     Effect.runPromise(
-      Effect.gen(function* () {
-        // Default sign-in limit: 5 per 15 min
-        yield* Effect.forEach(
-          Arr.makeBy(5, () => "1.2.3.4"),
-          (ip) => callSignIn(ip).pipe(Effect.map((result) => expect(result).toBe("ok"))),
-          { concurrency: 1, discard: true },
-        );
-      }).pipe(Effect.provide(makeHooksLayer())),
+      // Default sign-in limit: 5 per 15 min
+      Effect.forEach(
+        Arr.makeBy(5, () => "1.2.3.4"),
+        (ip) => callSignIn(ip).pipe(Effect.map((result) => expect(result).toBe("ok"))),
+        { concurrency: 1, discard: true },
+      ).pipe(Effect.provide(makeHooksLayer())),
     ));
 
   it("blocks after exceeding the limit", () =>
