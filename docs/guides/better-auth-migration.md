@@ -75,7 +75,7 @@ const { handler } = await Http.makeAsync({
 });
 ```
 
-`Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path.
+`Http.makeAsync` resolves to `{ handler, dispose }`. `handler` is a standard Web `Request => Promise<Response>`, so it mounts anywhere Better Auth's handler did (Next.js route handlers, Hono, Elysia, Bun/Deno/Workers `fetch`) with the same catch-all path. [The frameworks guide](frameworks.md) shows the mount, the session read and the cookie relay in Next.js, Nuxt, Astro, Hono and Express.
 
 `services` connects to the database while it builds, so the example uses `Http.makeAsync`, which waits for that build. It resolves to the same `{ handler, dispose }` once `services` is built and checked, and rejects with the startup errors (a missing `RateLimiter` or client address source, which the per-address limits on every sensitive endpoint need unless you pass `ipRateLimit: false`), so the app fails to start. `Http.make` is the synchronous form: it throws those errors only for a build that finishes before it returns. With an asynchronous build like this one it cannot, and every request would reject with them instead.
 
