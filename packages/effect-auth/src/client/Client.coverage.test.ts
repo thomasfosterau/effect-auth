@@ -329,27 +329,25 @@ describe("multi-session", () => {
 // Multi-factor: the challenge-continuation helper
 // -----------------------------------------------------------------------------
 
-const totpFor = (secret: string) => Effect.runPromise(Auth.MultiFactor.generateTotp(secret));
-/**
- * The previous time step's code (still inside the ±1 window). Confirming
- * enrollment with it leaves the current step's code unused, so the replay
- * guard does not reject the later challenge redemption.
- */
-const previousTotpFor = (secret: string) =>
-  Effect.runPromise(
-    Auth.MultiFactor.generateHotp(
-      secret,
-      Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30) - 1,
-    ),
-  );
+/** The 30 s TOTP time step the wall clock is in now. */
+const currentStep = () => Math.floor(DateTime.toEpochMillis(DateTime.nowUnsafe()) / 1000 / 30);
+const hotpFor = (secret: string, step: number) =>
+  Effect.runPromise(Auth.MultiFactor.generateHotp(secret, step));
 
-/** Enrol `email` in multi-factor and return the enrollment view. */
+/**
+ * Enrol `email` in multi-factor and return the enrollment view with the time
+ * step its confirmation spent. Confirm with that step's code and redeem with
+ * the next step's: both come from one clock reading, sit inside the server's
+ * ±1 window whichever side of a 30 s boundary it checks on, and the redemption
+ * is a higher counter than the replay guard has seen.
+ */
 const enrol = async (client: ReturnType<typeof createAuthClient>, email: string) => {
   await client.signUp({ email, password: PW });
   const enrollment = await client.multiFactor.enable({ password: PW });
-  await client.multiFactor.confirm({ code: await previousTotpFor(enrollment.secret) });
+  const step = currentStep();
+  await client.multiFactor.confirm({ code: await hotpFor(enrollment.secret, step) });
   await client.signOut();
-  return enrollment;
+  return { ...enrollment, step };
 };
 
 describe("multi-factor challenge continuation", () => {
@@ -365,7 +363,9 @@ describe("multi-factor challenge continuation", () => {
     expect(challenge.token).toBe(gated.secondFactor.token);
     expect(challenge.isExpired()).toBe(false);
 
-    const verified = await challenge.verifyTotp(await totpFor(enrollment.secret));
+    const verified = await challenge.verifyTotp(
+      await hotpFor(enrollment.secret, enrollment.step + 1),
+    );
     expect(signedInUser(verified).email).toBe("totp@client.test");
     expect(Option.getOrUndefined(await client.getSession())?.user.email).toBe("totp@client.test");
   });
