@@ -1,5 +1,99 @@
 # @thomasfosterau/effect-auth-svelte
 
+## 0.3.0
+
+### Minor Changes
+
+- d3afdec: `CaptchaPlugin` checks what a token was minted for, not only `success: true`: new options `expectedHostname` (one or several), `expectedAction` (one, or one per endpoint) and `minScore` (0 to 1), and `recaptchaVersion: 2 | 3`. reCAPTCHA v3 answers `success: true` for every genuine token, bots included, so `recaptchaVersion: 3` without `minScore` makes the layer build die with the new `CaptchaConfigError`, and a token carrying a `score` that no `minScore` judges is refused. The siteverify answer is decoded with `Schema`, and the client address goes along as `remoteip` when the request has one.
+  
+  `PasswordResetService.requestPasswordReset(email, options?)` fires `beforeSendCode` (`method: "password-reset"`, the new `SendCodeMethod`) with `options.captchaToken`, before the address is looked up, so `CaptchaPlugin`'s `"sendCode"` endpoint now guards password-reset requests too. `POST /password-resets` takes an optional `captchaToken` attribute and answers `400` when the captcha refuses, and the client's `passwordResetRequest` takes `captchaToken`. With the default endpoints, a client that sends no token on a password-reset request is now refused: pass one, or leave `"sendCode"` out of `endpoints`.
+  
+  `PasswordResetRequestForm` takes the `captchaToken` getter `MagicLinkForm` and `EmailOtpForm` take, and sends its token with the request.
+- 67435fc: **Breaking:** the browser client, the session Atoms, the ladder and the Svelte binding answer "nothing" with `Option`.
+  
+  - `./client`: `getSession()` resolves `Option<SessionWithUserView>` (`None` on a `401`). `AuthClientOptions` and the send payloads spell their optional members `readonly x?: T`. The client now imports `effect/Option` at runtime, its only Effect module.
+  - `./client/atoms`: `SessionResult` is an `AsyncResult<Option<SessionWithUserView>, AuthClientError>`; `data` and `error` (on the Atoms and on `SessionState` / `SessionListState`) are `Option`s. The cross-tab message carries no `data` key when signed out.
+  - `./ladder`: `hasAtLeast` takes the holder as `Option<RungHolder>` (`Option.none()` is anonymous). The module imports `effect/Option`, and nothing else.
+  - `effect-auth-svelte`: `$session.data` and `$sessions.data` are `Option`s, so templates unwrap them (`Option.isSome($session.data)`). `effect` is now a runtime peer (`effect/Option`). A form's `captchaToken` prop returns `Option<string>`, and its optional props are `readonly x?: T`.
+- 8feb236: `SignInForm` and `EmailOtpForm` no longer call `onSuccess` when the server answers with a second-factor challenge (`202`), so `onSuccess={() => goto("/app")}` never navigates without a session. The challenge goes to the new `onSecondFactor` prop; the `SecondFactorChallenge` type is exported.
+
+### Patch Changes
+
+- cbbacba: Shorten each package README to what the package is, how to install it, one example, its entry points and links. The detail moved, unchanged, to guides under `docs/guides/` in the repository: getting started, authorization, sign-in methods, abuse protection, the HTTP API, storage, the browser client reference, SAML, testing, Drizzle, Svelte, SvelteKit, Alchemy and Argon2id.
+- 5e2f119: Shorten the module doc comments to a few lines each. Consumer detail they held now sits on the export it describes: the `SamlVerifier` checks, what a `defineSchema` table must satisfy, and runnable examples on `Guard.requireSystem`, `OwnedAccess.make`, `Delivery`, `TrustedDevice`, `Messages`, `OrganizationEntities` and `RateLimitPersistence`.
+- Updated dependencies [6c618f1]
+- Updated dependencies [511357b]
+- Updated dependencies [8c41d26]
+- Updated dependencies [839deb6]
+- Updated dependencies [d3afdec]
+- Updated dependencies [aeaa5f0]
+- Updated dependencies [afa3c31]
+- Updated dependencies [70c2c8e]
+- Updated dependencies [4c8b37c]
+- Updated dependencies [9a79494]
+- Updated dependencies [03f4aff]
+- Updated dependencies [b5c935d]
+- Updated dependencies [c9e519b]
+- Updated dependencies [9b2c5ce]
+- Updated dependencies [65bc383]
+- Updated dependencies [f546e14]
+- Updated dependencies [4189a4f]
+- Updated dependencies [6ed0d73]
+- Updated dependencies [7dd6f0d]
+- Updated dependencies [390d0eb]
+- Updated dependencies [5158442]
+- Updated dependencies [bc22d09]
+- Updated dependencies [c9e09af]
+- Updated dependencies [934eebe]
+- Updated dependencies [666cb31]
+- Updated dependencies [342aa55]
+- Updated dependencies [e0c9f41]
+- Updated dependencies [c7998b9]
+- Updated dependencies [8feb236]
+- Updated dependencies [e9c5876]
+- Updated dependencies [aa4e451]
+- Updated dependencies [605f0fa]
+- Updated dependencies [2d7dc18]
+- Updated dependencies [692c5b6]
+- Updated dependencies [bdda509]
+- Updated dependencies [4da18de]
+- Updated dependencies [c7f3e0b]
+- Updated dependencies [9f9c278]
+- Updated dependencies [9213fe2]
+- Updated dependencies [8b47bd6]
+- Updated dependencies [6fbfa58]
+- Updated dependencies [67435fc]
+- Updated dependencies [93a21c7]
+- Updated dependencies [3aaae40]
+- Updated dependencies [4db7b04]
+- Updated dependencies [acf056e]
+- Updated dependencies [c1e3933]
+- Updated dependencies [2cbe703]
+- Updated dependencies [4481724]
+- Updated dependencies [e5e6c5c]
+- Updated dependencies [87ce3d0]
+- Updated dependencies [8c6a234]
+- Updated dependencies [36828f4]
+- Updated dependencies [9bb8e23]
+- Updated dependencies [898eb41]
+- Updated dependencies [8024bd1]
+- Updated dependencies [c269ca8]
+- Updated dependencies [7b2a431]
+- Updated dependencies [e803edb]
+- Updated dependencies [5854245]
+- Updated dependencies [e5e7a09]
+- Updated dependencies [d95f411]
+- Updated dependencies [ce726c4]
+- Updated dependencies [cbbacba]
+- Updated dependencies [1bb5c77]
+- Updated dependencies [05adb89]
+- Updated dependencies [afa3c31]
+- Updated dependencies [5e2f119]
+- Updated dependencies [4148b2a]
+- Updated dependencies [d863f61]
+- Updated dependencies [e089e8c]
+  - @thomasfosterau/effect-auth@0.9.0
+
 ## 0.2.5
 
 ### Patch Changes
