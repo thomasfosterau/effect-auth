@@ -2138,6 +2138,65 @@ describe("HTTP impersonation endpoints", () => {
     // The administrator's own session is untouched.
     expect((await fx.handler(req("GET", "/sessions/current", adminSid))).status).toBe(200);
   });
+
+  it("refuses to impersonate another administrator", async () => {
+    const { fx, adminSid } = adminFixture();
+    fx.seedUser("admin-2", "admin2@test.com", { role: "admin" });
+    const refused = await fx.handler(
+      apiReq(
+        "POST",
+        "/impersonations",
+        { data: { type: "impersonations", relationships: userLink("admin-2") } },
+        adminSid,
+      ),
+    );
+    expect(refused.status).toBe(403);
+    expect(sessionCookieOf(refused)).toBeUndefined();
+  });
+
+  it("refuses credential and identity changes from the impersonation session", async () => {
+    const { fx, adminSid, userSid } = adminFixture();
+    const started = await fx.handler(
+      apiReq(
+        "POST",
+        "/impersonations",
+        { data: { type: "impersonations", relationships: userLink("u") } },
+        adminSid,
+      ),
+    );
+    const token = sessionCookieOf(started);
+    assert(token !== undefined && token !== "");
+
+    const changes = (sessionId: string) =>
+      Promise.all(
+        [
+          apiReq(
+            "POST",
+            "/api-keys",
+            { data: { type: "api-keys", attributes: { name: "x" } } },
+            sessionId,
+          ),
+          apiReq(
+            "PATCH",
+            "/users/me/password",
+            {
+              data: {
+                type: "user-passwords",
+                id: "me",
+                attributes: { currentPassword: "old-password", newPassword: "new-password-1" },
+              },
+            },
+            sessionId,
+          ),
+          apiReq("DELETE", "/identifiers/any", undefined, sessionId),
+        ].map(async (request) => (await fx.handler(request)).status),
+      );
+    expect(await changes(token)).toEqual([403, 403, 403]);
+    // The user's own session gets past the guard to each endpoint's own answer.
+    const own = await changes(userSid);
+    expect(own[0]).toBe(201);
+    expect(own[2]).toBe(404);
+  });
 });
 
 /** An `api-keys` resource, read for what the API-key tests check. */

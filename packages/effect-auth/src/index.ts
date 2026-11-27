@@ -53,6 +53,8 @@ export * as User from "./User.ts";
 export * as ManagedUser from "./ManagedUser.ts";
 /** Layer constructors and accessors for an already-resolved session. */
 export * as SessionContext from "./SessionContext.ts";
+/** The guards that keep an administrator's impersonation from changing the account's credentials. */
+export * as Impersonation from "./Impersonation.ts";
 /**
  * Session resolution at an application's own edge: credential-presence
  * predicates over a raw `Request`, fail-open and fail-closed resolution, and

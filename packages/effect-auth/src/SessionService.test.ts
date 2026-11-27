@@ -1,6 +1,7 @@
 import { sha256Hex } from "./testing/Sha256.ts";
 import { assert, describe, it, expect, beforeEach } from "vite-plus/test";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -13,6 +14,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
+import { TestClock } from "effect/testing";
 import { AuthError, SessionConfigError } from "./Errors.ts";
 import { composePlugins, Hooks, makePlugin, type PluginImpls, type SessionRef } from "./Hooks.ts";
 import { AuditPlugin } from "./plugins/Audit.ts";
@@ -676,6 +678,38 @@ describe("SessionService", () => {
     expect(results.result2._tag).toBe("Failure");
     // User2 session should still be valid
     expect(results.result3.user.id).toBe("user2");
+  });
+
+  it("never lets an impersonation session outlive its impersonationExpiresAt", async () => {
+    MutableHashMap.clear(mockSessionStore.sessions);
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const manager = yield* make(sessionConfig);
+          const deadline = (yield* Clock.currentTimeMillis) + 60_000;
+          const issued = yield* manager.createSession("user1", {
+            impersonatedBy: "admin-1",
+            impersonationExpiresAt: deadline,
+          });
+          yield* TestClock.adjust("30 seconds");
+          // A sliding refresh stays capped at the deadline.
+          const refreshed = yield* manager.validateSession(issued.token);
+          yield* TestClock.adjust("31 seconds");
+          const late = yield* Effect.result(manager.validateSession(issued.token));
+          return { deadline, issued, refreshed, late };
+        }),
+        Context.merge(SessionStoreTest, UserStoreTest),
+      ).pipe(
+        Effect.provide(Layer.mergeAll(Hooks.Default, PlatformCrypto.layer, TestClock.layer())),
+      ),
+    );
+
+    expect(result.issued.session.expiresAt.getTime()).toBe(result.deadline);
+    expect(result.refreshed.session.expiresAt.getTime()).toBe(result.deadline);
+    assert(Result.isFailure(result.late));
+    expect(result.late.failure._tag).toBe("SessionExpiredError");
+    expect(MutableHashMap.has(mockSessionStore.sessions, result.issued.session.id)).toBe(false);
   });
 });
 const runWithHooks = <A, E>(

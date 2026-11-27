@@ -11,12 +11,21 @@ import type { AuthResult } from "../email/EmailPassword.ts";
 import * as Entity from "../Entity.ts";
 import * as Hooks from "../Hooks.ts";
 
+const impersonationFields = (event: Hooks.ImpersonationEvent) => ({
+  impersonatorId: event.impersonatorId,
+  userId: event.userId,
+  sessionId: event.sessionId,
+  expiresAt: event.expiresAt.toISOString(),
+});
+
 /**
  * Logs `afterSignUp`, `afterSignIn` and `afterSignOut`, and `afterWrite` as
  * `auth.write` with the acting principal (`User::"<id>"` or
  * `System::"<name>"`), the action and the resource. A send run off the response
  * path that failed (`afterDeliveryFailure`) is logged as `auth.deliveryFailure`
- * at warning level, with its purpose and the sender's error.
+ * at warning level, with its purpose and the sender's error. An administrator
+ * starting or stopping an impersonation is logged as `auth.impersonationStart`
+ * / `auth.impersonationStop`, with both user ids and the session's stored id.
  *
  * `Layer<Hooks, never, Hooks>` - no dependencies (uses Effect's built-in
  * logger). Configured with `isolateTaps: true` so audit failures never break
@@ -49,6 +58,12 @@ export const AuditPlugin = Hooks.makePlugin(
         purpose: failure.purpose,
         cause: failure.cause,
       }),
+    ),
+    afterImpersonationStart: Hooks.Hooks.tap((event: Hooks.ImpersonationEvent) =>
+      Effect.logInfo("auth.impersonationStart", impersonationFields(event)),
+    ),
+    afterImpersonationStop: Hooks.Hooks.tap((event: Hooks.ImpersonationEvent) =>
+      Effect.logInfo("auth.impersonationStop", impersonationFields(event)),
     ),
   },
   { isolateTaps: true },

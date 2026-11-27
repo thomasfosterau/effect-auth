@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Option from "effect/Option";
+import { guardCurrentSession } from "../Impersonation.ts";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { Base64, Base64Url, Hex } from "effect/encoding";
@@ -602,6 +603,7 @@ export const make = (
     return {
       generateRegistrationChallenge: Effect.fn("WebAuthnService.generateRegistrationChallenge")(
         function* (user: WebAuthnUser) {
+          yield* guardCurrentSession;
           // Generate random challenge (32 bytes = 256 bits)
           const challenge: Uint8Array = yield* generateChallenge();
           const expiresAt = (yield* Clock.currentTimeMillis) + challengeExpiresIn;
@@ -646,6 +648,7 @@ export const make = (
       verifyRegistration: Effect.fn("WebAuthnService.verifyRegistration")(
         (userId: string, challenge: Uint8Array, response: RegistrationResponse) =>
           Effect.gen(function* () {
+            yield* guardCurrentSession;
             const storedChallenge = yield* liveChallenge(challenge, "registration");
 
             // The credential is filed under the signed-in user the host passes,
@@ -800,6 +803,7 @@ export const make = (
         userId: string,
         credentialId: string,
       ) {
+        yield* guardCurrentSession;
         const foundCredential = yield* credentialStore.get(credentialId);
         if (Option.isNone(foundCredential)) {
           return yield* new Errors.CredentialNotFoundError({
@@ -851,7 +855,10 @@ export class WebAuthnService extends Context.Service<
     /** Generate a challenge for registration */
     generateRegistrationChallenge: (
       user: WebAuthnUser,
-    ) => Effect.Effect<RegistrationChallenge, Errors.AuthError>;
+    ) => Effect.Effect<
+      RegistrationChallenge,
+      Errors.AuthError | Errors.ImpersonationForbiddenError
+    >;
 
     /**
      * Verify a registration response and store the attested credential under
@@ -870,6 +877,7 @@ export class WebAuthnService extends Context.Service<
       | Errors.ChallengeNotFoundError
       | Errors.ChallengeExpiredError
       | Errors.AuthError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -916,7 +924,10 @@ export class WebAuthnService extends Context.Service<
     deleteCredential: (
       userId: string,
       credentialId: string,
-    ) => Effect.Effect<void, Errors.CredentialNotFoundError | Errors.AuthError>;
+    ) => Effect.Effect<
+      void,
+      Errors.CredentialNotFoundError | Errors.AuthError | Errors.ImpersonationForbiddenError
+    >;
 
     /** Rename a passkey; fails if the credential does not belong to `userId` */
     renameCredential: (

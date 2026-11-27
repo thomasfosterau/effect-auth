@@ -161,6 +161,8 @@ const catalog: Catalog = {
   [ErrorCode.RATE_LIMIT_EXCEEDED]: "Too many requests; please slow down",
   [ErrorCode.MAGIC_LINK_ERROR]: "Magic link operation failed",
   [ErrorCode.PASSWORD_RESET_ERROR]: "Password reset failed",
+
+  [ErrorCode.IMPERSONATION_FORBIDDEN]: "This change is not allowed while impersonating a user",
 };
 
 function defaultResolve(code: string, _locale?: string, params?: MessageParams): string {

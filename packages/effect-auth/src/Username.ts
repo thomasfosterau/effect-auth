@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { guardCurrentSession } from "./Impersonation.ts";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import * as Errors from "./Errors.ts";
@@ -132,7 +133,7 @@ export class UsernameService extends Context.Service<
     readonly updateUsername: (
       userId: string,
       username: string,
-    ) => Effect.Effect<void, UsernameError | Errors.AuthError>;
+    ) => Effect.Effect<void, UsernameError | Errors.AuthError | Errors.ImpersonationForbiddenError>;
   }
 >()("@effect-auth/UsernameService") {
   /**
@@ -339,6 +340,7 @@ const make = (
         userId: string,
         rawUsername: string,
       ) {
+        yield* guardCurrentSession;
         const username = yield* validate(rawUsername);
 
         const existing = yield* Identifier.lookupIdentifier(identifiers, "username", username);

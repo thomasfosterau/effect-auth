@@ -665,7 +665,14 @@ describe("an impersonation leaves the target's lockout standing", () => {
           attributes: { role: "admin" },
         };
         const admins = yield* AdminService;
-        const { session } = yield* admins.impersonateUser(admin, ada.id);
+        const { session } = yield* admins.impersonateUser(admin, ada.id, {
+          id: "admin-session",
+          userId: admin.id,
+          expiresAt: now,
+          createdAt: now,
+          lastActivityAt: now,
+          attributes: {},
+        });
         return {
           impersonatedBy: session.attributes["impersonatedBy"],
           lock: yield* lockoutRecord(ada.id),

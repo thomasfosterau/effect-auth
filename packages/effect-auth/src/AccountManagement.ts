@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { guardCurrentSession } from "./Impersonation.ts";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import { type Digest, SecureRandom } from "effect/crypto";
@@ -193,6 +194,7 @@ export class AccountManagementService extends Context.Service<
       | Errors.InvalidCredentialsError
       | Errors.ReauthenticationRequiredError
       | Errors.HashingError
+      | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -228,7 +230,7 @@ export class AccountManagementService extends Context.Service<
       userId: string,
     ) => Effect.Effect<
       { readonly token: string; readonly expiresAt: number },
-      Errors.AuthError | Errors.UserNotFoundError
+      Errors.AuthError | Errors.UserNotFoundError | Errors.ImpersonationForbiddenError
     >;
 
     /**
@@ -360,6 +362,7 @@ const make = (
         rawNewEmail: string,
         proof: EmailChangeReauthentication,
       ) {
+        yield* guardCurrentSession;
         const foundUser = yield* users.get(userId);
         if (Option.isNone(foundUser)) {
           return yield* new Errors.UserNotFoundError({ message: "User not found", userId });
@@ -554,6 +557,7 @@ const make = (
 
       requestAccountDeletion: Effect.fn("AccountManagementService.requestAccountDeletion")(
         function* (userId: string) {
+          yield* guardCurrentSession;
           const foundUser = yield* users.get(userId);
           if (Option.isNone(foundUser)) {
             return yield* new Errors.UserNotFoundError({ message: "User not found", userId });

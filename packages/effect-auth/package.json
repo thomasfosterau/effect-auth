@@ -129,6 +129,10 @@
       "types": "./dist/Identifier.d.ts",
       "import": "./dist/Identifier.js"
     },
+    "./Impersonation": {
+      "types": "./dist/Impersonation.d.ts",
+      "import": "./dist/Impersonation.js"
+    },
     "./Jwt": {
       "types": "./dist/Jwt.d.ts",
       "import": "./dist/Jwt.js"

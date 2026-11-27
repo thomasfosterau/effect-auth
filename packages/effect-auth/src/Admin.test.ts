@@ -12,7 +12,6 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
-import { SecureRandom } from "effect/crypto";
 import * as PlatformCrypto from "./PlatformCrypto.ts";
 import {
   AdminUserStore,
@@ -24,7 +23,7 @@ import {
 } from "./Admin.ts";
 import * as Admin from "./Admin.ts";
 import * as Ladder from "./Ladder.ts";
-import { Hooks } from "./Hooks.ts";
+import { Hooks, makePlugin, type ImpersonationEvent } from "./Hooks.ts";
 import { AuthError } from "./Errors.ts";
 import {
   IdentifierStore,
@@ -218,7 +217,7 @@ const makeTestContext = async (
     Context.add(AdminUserStore, store),
     Context.add(IdentifierStore, identifierStore),
     Context.add(PasswordHasher, testHasher),
-    Context.add(SecureRandom.SecureRandom, PlatformCrypto.instance),
+    Context.merge(PlatformCrypto.context()),
   );
 };
 
@@ -241,6 +240,28 @@ const seedUser = (id: string, email: string, attributes: Attributes = {}): User 
   MutableHashMap.set(identifiers, identifier.id, identifier);
   return user;
 };
+
+/** A plain, current session for `user`, as the actor's own sign-in would hold. */
+const sessionOf = (user: User, attributes: Attributes = {}): Session => {
+  const now = DateTime.nowUnsafe();
+  return {
+    id: sha256Hex(`token-${user.id}`),
+    userId: user.id,
+    expiresAt: DateTime.toDateUtc(DateTime.add(now, { hours: 1 })),
+    createdAt: DateTime.toDateUtc(now),
+    lastActivityAt: DateTime.toDateUtc(now),
+    attributes,
+  };
+};
+
+/** Each outcome failed with `AdminError`. */
+const expectAdminErrors = (
+  outcomes: ReadonlyArray<Result.Result<unknown, { readonly _tag: string }>>,
+) =>
+  Arr.forEach(outcomes, (outcome) => {
+    assert(Result.isFailure(outcome));
+    expect(outcome.failure._tag).toBe("AdminError");
+  });
 
 type TestContext = Awaited<ReturnType<typeof makeTestContext>>;
 
@@ -286,7 +307,9 @@ describe("AdminService", () => {
         const ban = yield* Effect.result(service.banUser(regular, "user-2"));
         const remove = yield* Effect.result(service.removeUser(regular, "user-2"));
         const revoke = yield* Effect.result(service.revokeUserSessions(regular, "user-2"));
-        const impersonate = yield* Effect.result(service.impersonateUser(regular, "user-2"));
+        const impersonate = yield* Effect.result(
+          service.impersonateUser(regular, "user-2", sessionOf(regular)),
+        );
         const createUser = yield* Effect.result(
           service.createUser(regular, { email: "new@example.com" }),
         );
@@ -540,7 +563,7 @@ describe("AdminService", () => {
           return { revoked, blocked, refusedCreate, allowed, lapsed };
         }),
         testContext,
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     assert(Result.isFailure(result.revoked));
@@ -609,7 +632,7 @@ describe("AdminService", () => {
           yield* service.banUser(admin, "user-1");
         }),
         testContext,
-      ),
+      ).pipe(Effect.provide(Hooks.Default)),
     );
 
     expect(Arr.fromIterable(MutableHashMap.keys(keys))).toEqual(["key-user-2"]);
@@ -670,7 +693,7 @@ describe("AdminService", () => {
     const { session, token } = await runService(
       testContext,
       { impersonationSessionDuration: 15 * 60 * 1000 },
-      (service) => service.impersonateUser(admin, "user-1"),
+      (service) => service.impersonateUser(admin, "user-1", sessionOf(admin)),
     );
     // The record carries the stored id; the token travels beside it.
     expect(session.id).toBe(sha256Hex(token));
@@ -680,14 +703,132 @@ describe("AdminService", () => {
     const impersonationExpiresAt = session.attributes["impersonationExpiresAt"];
     assert(P.isNumber(impersonationExpiresAt));
     expect(impersonationExpiresAt).toBeGreaterThanOrEqual(before + 15 * 60 * 1000);
+    // The session itself ends at the deadline, not at the normal lifetime.
+    expect(session.expiresAt.getTime()).toBe(impersonationExpiresAt);
     expect(MutableHashMap.has(sessions, session.id)).toBe(true);
 
     const missingTarget = await runService(testContext, {}, (service) =>
-      Effect.result(service.impersonateUser(admin, "ghost")),
+      Effect.result(service.impersonateUser(admin, "ghost", sessionOf(admin))),
     );
     expect(missingTarget._tag).toBe("Failure");
     assert(Result.isFailure(missingTarget));
     expect(missingTarget.failure._tag).toBe("UserNotFoundError");
+  });
+
+  it("refuses to impersonate an administrator unless allowImpersonatingAdmins is set", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("admin-2", "admin2@example.com", { role: "admin" });
+    seedUser("root", "root@example.com");
+    const config: AdminConfig = { adminUserIds: ["root"] };
+
+    const refused = await runService(testContext, config, (service) =>
+      Effect.all(
+        {
+          byRole: Effect.result(service.impersonateUser(admin, "admin-2", sessionOf(admin))),
+          byId: Effect.result(service.impersonateUser(admin, "root", sessionOf(admin))),
+        },
+        { concurrency: 1 },
+      ),
+    );
+    expectAdminErrors([refused.byRole, refused.byId]);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+
+    const allowed = await runService(
+      testContext,
+      { ...config, allowImpersonatingAdmins: true },
+      (service) => service.impersonateUser(admin, "admin-2", sessionOf(admin)),
+    );
+    expect(allowed.session.userId).toBe("admin-2");
+  });
+
+  it("refuses nested impersonation and a session that is not the actor's", async () => {
+    const testContext = await makeTestContext();
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    const other = seedUser("admin-2", "admin2@example.com", { role: "admin" });
+    seedUser("user-1", "user@example.com");
+
+    const result = await runService(testContext, { allowImpersonatingAdmins: true }, (service) =>
+      Effect.all(
+        {
+          nested: Effect.result(
+            service.impersonateUser(
+              admin,
+              "user-1",
+              sessionOf(admin, {
+                impersonatedBy: "admin-2",
+                impersonationExpiresAt: DateTime.toEpochMillis(DateTime.nowUnsafe()) + 1,
+              }),
+            ),
+          ),
+          foreign: Effect.result(service.impersonateUser(admin, "user-1", sessionOf(other))),
+        },
+        { concurrency: 1 },
+      ),
+    );
+    expectAdminErrors([result.nested, result.foreign]);
+    expect(MutableHashMap.size(sessions)).toBe(0);
+  });
+
+  it("fails the layer when impersonationSessionDuration is not finite and positive", async () => {
+    const testContext = await makeTestContext();
+    const exits = await Promise.all(
+      [0, -1, Number.NaN, Number.POSITIVE_INFINITY].map((impersonationSessionDuration) =>
+        Effect.runPromiseExit(
+          Effect.provide(Admin.make({ impersonationSessionDuration }), testContext).pipe(
+            Effect.provide(Hooks.Default),
+          ),
+        ),
+      ),
+    );
+    expect(exits.map((exit) => exit._tag)).toEqual(["Failure", "Failure", "Failure", "Failure"]);
+  });
+
+  it("emits hook events when an impersonation starts and stops", async () => {
+    const events: Array<{ readonly kind: string; readonly event: ImpersonationEvent }> = [];
+    const recording = makePlugin({
+      afterImpersonationStart: Hooks.tap((event: ImpersonationEvent) =>
+        Effect.sync(() => events.push({ kind: "start", event })),
+      ),
+      afterImpersonationStop: Hooks.tap((event: ImpersonationEvent) =>
+        Effect.sync(() => events.push({ kind: "stop", event })),
+      ),
+    }).pipe(Layer.provide(Hooks.Default));
+    const testContext = await makeTestContext(recording);
+    const admin = seedUser("admin-1", "admin@example.com", { role: "admin" });
+    seedUser("user-1", "user@example.com");
+
+    const result = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const service = yield* Admin.make({});
+          const issued = yield* service.impersonateUser(admin, "user-1", sessionOf(admin));
+          const wrongToken = yield* Effect.result(
+            service.stopImpersonating(issued.session, "not-the-token"),
+          );
+          const notImpersonation = yield* Effect.result(
+            service.stopImpersonating(sessionOf(admin), "token-admin-1"),
+          );
+          yield* service.stopImpersonating(issued.session, issued.token);
+          return { issued, wrongToken, notImpersonation };
+        }),
+        testContext,
+      ).pipe(Effect.provide(recording)),
+    );
+
+    expectAdminErrors([result.wrongToken, result.notImpersonation]);
+    const expected: ImpersonationEvent = {
+      impersonatorId: "admin-1",
+      userId: "user-1",
+      sessionId: result.issued.session.id,
+      expiresAt: result.issued.session.expiresAt,
+    };
+    expect(events).toEqual([
+      { kind: "start", event: expected },
+      { kind: "stop", event: expected },
+    ]);
+    // Stopping revoked the session.
+    expect(MutableHashMap.has(sessions, result.issued.session.id)).toBe(false);
   });
 
   it("createUser: creates a user with role, identifiers, and hashed password", async () => {
