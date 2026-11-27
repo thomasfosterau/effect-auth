@@ -22,7 +22,7 @@ import { SessionAttribute } from "./Session.ts";
  * @since 0.1.0
  * @category utils
  */
-export const sessionRoles = (session: Auth.Session): ReadonlyArray<string> => {
+export const sessionRoles = (session: Auth.Types.Session): ReadonlyArray<string> => {
   const role = session.attributes[SessionAttribute.role];
   const roles = session.attributes[SessionAttribute.roles];
   return Arr.dedupe([
@@ -55,7 +55,7 @@ export interface EntityResolverOptions {
  */
 export const entityResolverLayer = (
   options: EntityResolverOptions = {},
-): Layer.Layer<Auth.EntityResolver> => {
+): Layer.Layer<Auth.Authorizer.EntityResolver> => {
   const principalType = options.principalType ?? Auth.Rbac.DefaultPrincipalType;
   const hierarchy = options.roleHierarchy ?? {};
   const roleEntities = Arr.dedupe([...R.keys(hierarchy), ...R.values(hierarchy).flat()]).map(
@@ -64,10 +64,10 @@ export const entityResolverLayer = (
         parents: (hierarchy[role] ?? []).map(Auth.Rbac.roleRef),
       }),
   );
-  return Layer.succeed(Auth.EntityResolver)({
+  return Layer.succeed(Auth.Authorizer.EntityResolver)({
     resolve: (refs) =>
       Effect.gen(function* () {
-        const session = yield* Effect.serviceOption(Auth.CurrentSession);
+        const session = yield* Effect.serviceOption(Auth.SessionContext.CurrentSession);
         const caller = Option.map(session, (s) =>
           Auth.Entity.entity(Auth.Entity.ref(principalType, s.userId), {
             parents: sessionRoles(s).map(Auth.Rbac.roleRef),
@@ -81,7 +81,7 @@ export const entityResolverLayer = (
               .filter((parent) => !roleEntities.some((r) => Auth.Entity.refEquals(r.ref, parent)))
               .map((parent) => Auth.Entity.entity(parent)),
         });
-        return yield* Auth.memoryEntityResolver([...known, ...extraRoles]).resolve(refs);
+        return yield* Auth.Authorizer.memoryEntityResolver([...known, ...extraRoles]).resolve(refs);
       }),
   });
 };

@@ -18,8 +18,8 @@ const password = "correct horse battery staple";
 const MINUTE = 60_000;
 
 const appLayer = Layer.mergeAll(
-  Auth.Hooks.Default,
-  Auth.OAuthStateStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+  Auth.Hooks.Hooks.Default,
+  Auth.KeyValueStores.OAuthStateStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
   Auth.RootSecret.RootSecret.layer("a-root-secret-of-at-least-32-bytes-long").pipe(Layer.orDie),
   RevokedSessions.layerMemory,
   Auth.PlatformCrypto.layer,
@@ -61,7 +61,9 @@ describe("sessions", () => {
         expect(result.token).not.toContain("refresh_");
         expect(result.user.name).toBe("Ada Lovelace");
         const before = fake.calls.length;
-        const validated = yield* (yield* Auth.SessionService).validateSession(result.token);
+        const validated = yield* (yield* Auth.SessionService.SessionService).validateSession(
+          result.token,
+        );
         expect(fake.calls.length).toBe(before);
         expect(validated.reissued).toBeUndefined();
         expect(validated.user.id).toBe(result.user.id);
@@ -92,7 +94,7 @@ describe("sessions", () => {
       Effect.gen(function* () {
         const { token } = yield* signUpAndIn();
         assert(token !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         yield* TestClock.adjust(10 * MINUTE);
         const validated = yield* sessions.validateSession(token);
         assert(validated.reissued !== undefined);
@@ -111,7 +113,7 @@ describe("sessions", () => {
       Effect.gen(function* () {
         const { token } = yield* signUpAndIn();
         assert(token !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         yield* TestClock.adjust(10 * MINUTE);
         const results = yield* Effect.all(
           [
@@ -132,7 +134,7 @@ describe("sessions", () => {
       Effect.gen(function* () {
         const { token } = yield* signUpAndIn();
         assert(token !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         yield* TestClock.adjust(10 * MINUTE);
         yield* sessions.validateSession(token);
         // Past the sharing window, the old cookie's refresh token is spent.
@@ -149,7 +151,7 @@ describe("sessions", () => {
       Effect.gen(function* () {
         const { token, session } = yield* signUpAndIn();
         assert(token !== undefined && session !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         yield* sessions.invalidateSession(token);
         expect(fake.sessionStatus(session.id)).toBe("inactive");
         const after = yield* Effect.result(sessions.validateSession(token));
@@ -164,7 +166,7 @@ describe("sessions", () => {
       Effect.gen(function* () {
         const { token } = yield* signUpAndIn();
         assert(token !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         const flipped = token.slice(0, -2) + (token.endsWith("A") ? "BA" : "AA");
         const results = yield* Effect.forEach(
           [flipped, "w1~00000000~AAAA", "{}", ""],
@@ -183,7 +185,9 @@ describe("sessions", () => {
           const { token } = yield* signUpAndIn();
           assert(token !== undefined);
           yield* TestClock.adjust(2 * MINUTE);
-          const result = yield* Effect.result((yield* Auth.SessionService).validateSession(token));
+          const result = yield* Effect.result(
+            (yield* Auth.SessionService.SessionService).validateSession(token),
+          );
           assert(Result.isFailure(result));
           expect(result.failure._tag).toBe("SessionExpiredError");
         }),
@@ -219,7 +223,7 @@ describe("sessions", () => {
         const second = yield* auth.signIn({ email, password });
         assert(first.token !== undefined && first.session !== undefined);
         assert(second.session !== undefined);
-        const sessions = yield* Auth.SessionService;
+        const sessions = yield* Auth.SessionService.SessionService;
         yield* sessions.invalidateSession(first.token);
         const listed = yield* sessions.listSessions(first.user.id);
         expect(listed.map((s) => s.id)).not.toContain(first.session.id);
@@ -336,7 +340,7 @@ describe("email verification", () => {
     await run(
       () =>
         Effect.gen(function* () {
-          const lifecycle = yield* Auth.AuthLifecycleService;
+          const lifecycle = yield* Auth.AuthLifecycle.AuthLifecycleService;
           const signUp = yield* lifecycle.signUp({ email, password });
           expect(signUp.needsEmailVerification).toBe(true);
           expect(signUp.session).toBeUndefined();
@@ -480,7 +484,7 @@ describe("AuthKit", () => {
   it("starts SSO from a connection or organization id only", async () => {
     await run(() =>
       Effect.gen(function* () {
-        const sso = yield* Auth.SsoService;
+        const sso = yield* Auth.Sso.SsoService;
         const org = yield* sso.signIn({ providerId: "org_1" });
         expect(new URL(org.url).searchParams.get("organization_id")).toBe("org_1");
         const byEmail = yield* Effect.result(sso.signIn({ email }));
@@ -499,7 +503,7 @@ describe("Authorization", () => {
           const { session, user } = yield* signUpAndIn();
           assert(session !== undefined);
           const resolved = yield* Effect.gen(function* () {
-            const resolver = yield* Auth.EntityResolver;
+            const resolver = yield* Auth.Authorizer.EntityResolver;
             return yield* resolver.resolve([
               Auth.Entity.ref("User", user.id),
               Auth.Entity.ref("User", "user_someone_else"),
@@ -508,7 +512,7 @@ describe("Authorization", () => {
             Effect.provide(
               Backend.Authorization.entityResolverLayer({ roleHierarchy: { admin: ["member"] } }),
             ),
-            Effect.provideService(Auth.CurrentSession, session),
+            Effect.provideService(Auth.SessionContext.CurrentSession, session),
           );
           const caller = resolved.find((e) => e.ref.type === "User");
           expect(caller?.ref.id).toBe(user.id);

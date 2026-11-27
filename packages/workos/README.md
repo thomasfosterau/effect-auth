@@ -21,8 +21,8 @@ const services = WorkOS.layer({
 }).pipe(
   Layer.provideMerge(
     Layer.mergeAll(
-      Auth.Hooks.Default,
-      Auth.OAuthStateStoreKV, // over your KeyValueStore
+      Auth.Hooks.Hooks.Default,
+      Auth.KeyValueStores.OAuthStateStoreKV, // over your KeyValueStore
       Auth.RootSecret.RootSecret.layer(env.AUTH_SECRET),
       WorkOS.Session.RevokedSessions.layerKeyValueStore,
     ),

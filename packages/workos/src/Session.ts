@@ -81,7 +81,7 @@ const Sealed = Schema.Struct({
   startedAt: Schema.Finite,
   authenticationMethod: Schema.optional(Schema.String),
   impersonator: Schema.optional(Impersonator),
-  attributes: Auth.Attributes,
+  attributes: Auth.Types.Attributes,
 });
 type Sealed = typeof Sealed.Type;
 
@@ -103,8 +103,11 @@ export class RevokedSessions extends Context.Service<
   RevokedSessions,
   {
     /** Record `sessionId` as revoked for `ttlMs`, at least the access-token lifetime. */
-    readonly revoke: (sessionId: string, ttlMs: number) => Effect.Effect<void, Auth.AuthError>;
-    readonly isRevoked: (sessionId: string) => Effect.Effect<boolean, Auth.AuthError>;
+    readonly revoke: (
+      sessionId: string,
+      ttlMs: number,
+    ) => Effect.Effect<void, Auth.Errors.AuthError>;
+    readonly isRevoked: (sessionId: string) => Effect.Effect<boolean, Auth.Errors.AuthError>;
   }
 >()("@effect-auth/workos/RevokedSessions") {
   /** Over the `KeyValueStore` in context, under `workos-revoked:`; entries expire by their stored deadline. */
@@ -150,8 +153,8 @@ const REFRESH_SHARE_MS = 30_000;
  * @since 0.1.0
  * @category models
  */
-export interface WorkOSIssued extends Auth.IssuedSession {
-  readonly user: Auth.User;
+export interface WorkOSIssued extends Auth.Types.IssuedSession {
+  readonly user: Auth.Types.User;
 }
 
 /**
@@ -170,8 +173,8 @@ export class WorkOSSessions extends Context.Service<
      */
     readonly issue: (
       auth: AuthenticationResponse,
-      attributes?: Auth.Attributes,
-    ) => Effect.Effect<WorkOSIssued, Auth.AuthError | Auth.HookError>;
+      attributes?: Auth.Types.Attributes,
+    ) => Effect.Effect<WorkOSIssued, Auth.Errors.AuthError | Auth.Hooks.HookError>;
     /**
      * Switch the session a cookie names to another organization the user
      * belongs to (a refresh with `organization_id`), answering the new cookie.
@@ -181,7 +184,10 @@ export class WorkOSSessions extends Context.Service<
       organizationId: string,
     ) => Effect.Effect<
       WorkOSIssued,
-      Auth.SessionNotFoundError | Auth.SessionExpiredError | Auth.AuthError | Auth.HookError
+      | Auth.Errors.SessionNotFoundError
+      | Auth.Errors.SessionExpiredError
+      | Auth.Errors.AuthError
+      | Auth.Hooks.HookError
     >;
     /** The WorkOS session id (`sid`) a cookie names, when it opens. */
     readonly sessionIdOf: (token: string) => Effect.Effect<Option.Option<string>>;
@@ -196,7 +202,7 @@ export class WorkOSSessions extends Context.Service<
   }
 >()("@effect-auth/workos/WorkOSSessions") {}
 
-const sessionAttributes = (sealed: Sealed): Auth.Attributes => {
+const sessionAttributes = (sealed: Sealed): Auth.Types.Attributes => {
   const { claims } = sealed;
   return {
     ...sealed.attributes,
@@ -221,7 +227,7 @@ const sessionAttributes = (sealed: Sealed): Auth.Attributes => {
   };
 };
 
-const toSession = (sealed: Sealed, sessionMaxAge: number): Auth.Session => ({
+const toSession = (sealed: Sealed, sessionMaxAge: number): Auth.Types.Session => ({
   id: sealed.claims.sid,
   userId: sealed.claims.sub,
   createdAt: instant(sealed.startedAt),
@@ -236,7 +242,7 @@ const sessionOver = (error: WorkOSError): boolean =>
 
 /** The WorkOS session machinery and the `SessionService` over it. */
 const revokedStoreFault = (cause: unknown) =>
-  new Auth.AuthError({ message: "The revoked-session store failed", cause });
+  new Auth.Errors.AuthError({ message: "The revoked-session store failed", cause });
 
 const sealedFrom = (
   auth: AuthenticationResponse,
@@ -257,9 +263,9 @@ const sealedFrom = (
 });
 
 const notFound = (sessionId = "") =>
-  new Auth.SessionNotFoundError({ message: "Session not found", sessionId });
+  new Auth.Errors.SessionNotFoundError({ message: "Session not found", sessionId });
 
-const fromWireSession = (s: WireSession): Auth.Session => ({
+const fromWireSession = (s: WireSession): Auth.Types.Session => ({
   id: s.id,
   userId: s.user_id,
   createdAt: instant(s.created_at),
@@ -283,12 +289,12 @@ const fromWireSession = (s: WireSession): Auth.Session => ({
 export const make = Effect.fn("WorkOS.Session.make")(function* () {
   const workos = yield* WorkOSClient;
   const { config } = workos;
-  const hooks = yield* Auth.Hooks;
+  const hooks = yield* Auth.Hooks.Hooks;
   const sealer = yield* Seal.make(config.cookiePasswords).pipe(
     Effect.provide(Auth.PlatformCrypto.layer),
     Effect.orDie,
   );
-  const verifier = yield* Auth.remoteJwksVerifier({
+  const verifier = yield* Auth.Jwt.remoteJwksVerifier({
     jwksUri: `${config.baseUrl}${path`/sso/jwks/${config.clientId}`}`,
     issuer: config.issuer,
     // WorkOS access tokens carry no `typ`; the issuer, signature, `exp` and the
@@ -306,12 +312,12 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
         (claims) =>
           (claims.sub_profile === undefined || claims.sub_profile === "user") &&
           claims.sub_type === undefined,
-        () => new Auth.AuthError({ message: "Not a WorkOS user access token" }),
+        () => new Auth.Errors.AuthError({ message: "Not a WorkOS user access token" }),
       ),
       Effect.mapError((cause) =>
         P.isTagged(cause, "AuthError")
           ? cause
-          : new Auth.AuthError({ message: "WorkOS access token did not verify", cause }),
+          : new Auth.Errors.AuthError({ message: "WorkOS access token did not verify", cause }),
       ),
     );
 
@@ -359,11 +365,13 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       return yield* answer;
     });
 
-  const issue = (auth: AuthenticationResponse, attributes: Auth.Attributes = {}) =>
+  const issue = (auth: AuthenticationResponse, attributes: Auth.Types.Attributes = {}) =>
     Effect.gen(function* () {
       const claims = yield* verifyAccessToken(auth.access_token);
       if (claims.sub !== auth.user.id) {
-        return yield* new Auth.AuthError({ message: "WorkOS access token names another user" });
+        return yield* new Auth.Errors.AuthError({
+          message: "WorkOS access token names another user",
+        });
       }
       const args = yield* hooks.beforeCreateSession({ userId: auth.user.id, attributes });
       const now = yield* Clock.currentTimeMillis;
@@ -380,10 +388,10 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       const auth = yield* refreshShared(sealed.refreshToken, organizationId).pipe(
         Effect.catchTag(
           "WorkOSError",
-          (error): Effect.Effect<never, Auth.SessionExpiredError | Auth.AuthError> =>
+          (error): Effect.Effect<never, Auth.Errors.SessionExpiredError | Auth.Errors.AuthError> =>
             sessionOver(error)
               ? Effect.fail(
-                  new Auth.SessionExpiredError({
+                  new Auth.Errors.SessionExpiredError({
                     message: "The WorkOS session has ended",
                     sessionId: sealed.claims.sid,
                   }),
@@ -393,7 +401,9 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
       );
       const claims = yield* verifyAccessToken(auth.access_token);
       if (claims.sub !== sealed.claims.sub) {
-        return yield* new Auth.AuthError({ message: "WorkOS refreshed another user's session" });
+        return yield* new Auth.Errors.AuthError({
+          message: "WorkOS refreshed another user's session",
+        });
       }
       const now = yield* Clock.currentTimeMillis;
       const next = sealedFrom(auth, claims, now, sealed);
@@ -443,7 +453,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
     }
     const now = yield* Clock.currentTimeMillis;
     if (now >= sealed.startedAt + config.sessionMaxAge) {
-      return yield* new Auth.SessionExpiredError({
+      return yield* new Auth.Errors.SessionExpiredError({
         message: "Session exceeded maximum lifetime",
         sessionId,
       });
@@ -487,7 +497,7 @@ export const make = Effect.fn("WorkOS.Session.make")(function* () {
     },
   });
 
-  const service = Auth.SessionService.of({
+  const service = Auth.SessionService.SessionService.of({
     createSession: () =>
       Effect.fail(
         unsupported("SessionService.createSession (a WorkOS session comes from authenticating)"),
@@ -542,7 +552,7 @@ export class WorkOSAuthenticate extends Context.Service<
       body: Readonly<Record<string, string>>,
     ) => Effect.Effect<AuthenticationResponse, WorkOSError>;
     /** Revoke a WorkOS session (and record it in `RevokedSessions`, when present). */
-    readonly revoke: (sessionId: string) => Effect.Effect<void, Auth.AuthError>;
+    readonly revoke: (sessionId: string) => Effect.Effect<void, Auth.Errors.AuthError>;
   }
 >()("@effect-auth/workos/WorkOSAuthenticate") {}
 
@@ -554,12 +564,12 @@ export class WorkOSAuthenticate extends Context.Service<
  * @category layers
  */
 export const layer: Layer.Layer<
-  Auth.SessionService | WorkOSSessions | WorkOSAuthenticate,
+  Auth.SessionService.SessionService | WorkOSSessions | WorkOSAuthenticate,
   never,
-  WorkOSClient | Auth.Hooks | HttpClient.HttpClient
+  WorkOSClient | Auth.Hooks.Hooks | HttpClient.HttpClient
 > = Layer.effectContext(
   Effect.map(make(), ({ sessions, service, authenticate, revokeAtWorkOS }) =>
-    Context.make(Auth.SessionService, service).pipe(
+    Context.make(Auth.SessionService.SessionService, service).pipe(
       Context.add(WorkOSSessions, sessions),
       Context.add(WorkOSAuthenticate, { authenticate, revoke: revokeAtWorkOS }),
     ),

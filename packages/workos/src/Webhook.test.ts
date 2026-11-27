@@ -48,7 +48,7 @@ const body = (event: string, data: Schema.Json) =>
   encodeJson({ id: "event_1", event, data, created_at: "2026-01-01T00:00:00.000Z" });
 
 const sign = (raw: string, t: number, key = "whsec_test") =>
-  Effect.map(Auth.hmac("sha256", key, `${t}.${raw}`), (mac) =>
+  Effect.map(Auth.Cipher.hmac("sha256", key, `${t}.${raw}`), (mac) =>
     Option.some(`t=${t}, v1=${Hex.encode(mac)}`),
   );
 

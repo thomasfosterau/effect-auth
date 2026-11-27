@@ -40,17 +40,18 @@ export class DeliveryConfigError extends Schema.TaggedError<
   message: Schema.String,
 }) {}
 
-const invalidCode = () => new Auth.EmailVerificationError({ message: "Invalid or expired code" });
+const invalidCode = () =>
+  new Auth.Errors.EmailVerificationError({ message: "Invalid or expired code" });
 
 const verifyInTwoSteps = () =>
   Effect.fail(
-    new Auth.EmailVerificationError({
+    new Auth.Errors.EmailVerificationError({
       message: "The WorkOS backend verifies in one step (verifyToken)",
     }),
   );
 
 const invalidResetToken = () =>
-  new Auth.PasswordResetError({ message: "Invalid or expired token" });
+  new Auth.Errors.PasswordResetError({ message: "Invalid or expired token" });
 
 const onlySignIn = () =>
   new Auth.Email.EmailOtpError({ message: "WorkOS Magic Auth codes are for sign-in only" });
@@ -59,7 +60,7 @@ const onlySignIn = () =>
 const appSender = Effect.fn("WorkOS.appSender")(function* () {
   const workos = yield* WorkOSClient;
   if (workos.config.delivery !== "app") return undefined;
-  const sender = yield* Effect.serviceOption(Auth.EmailSender);
+  const sender = yield* Effect.serviceOption(Auth.Delivery.EmailSender);
   if (Option.isNone(sender)) {
     return yield* Effect.die(
       new DeliveryConfigError({
@@ -67,7 +68,7 @@ const appSender = Effect.fn("WorkOS.appSender")(function* () {
       }),
     );
   }
-  return { sender: sender.value, detached: yield* Auth.makeDetachedSend };
+  return { sender: sender.value, detached: yield* Auth.DeliveryScheduler.makeDetachedSend };
 });
 
 /**
@@ -99,12 +100,12 @@ export const parseVerificationToken = (
 export const emailVerificationLayer: Layer.Layer<
   Auth.Email.EmailVerificationService,
   never,
-  WorkOSClient | Auth.Hooks
+  WorkOSClient | Auth.Hooks.Hooks
 > = Layer.effect(
   Auth.Email.EmailVerificationService,
   Effect.gen(function* () {
     const workos = yield* WorkOSClient;
-    const hooks = yield* Auth.Hooks;
+    const hooks = yield* Auth.Hooks.Hooks;
 
     const send = Effect.fn("WorkOS.EmailVerification.send")(function* (
       rawUserId: string,
@@ -121,7 +122,9 @@ export const emailVerificationLayer: Layer.Layer<
         .pipe(
           Effect.mapError((error) =>
             refused(error)
-              ? new Auth.EmailVerificationError({ message: "WorkOS refused to send the code" })
+              ? new Auth.Errors.EmailVerificationError({
+                  message: "WorkOS refused to send the code",
+                })
               : toAuthError(error),
           ),
         );
@@ -147,7 +150,7 @@ export const emailVerificationLayer: Layer.Layer<
         .pipe(Effect.mapError((error) => (refused(error) ? invalidCode() : toAuthError(error))));
       return yield* hooks.afterVerifyEmail({
         userId: user.id,
-        email: Auth.normalizeEmail(user.email),
+        email: Auth.Normalize.normalizeEmail(user.email),
         verified: user.email_verified,
       });
     });
@@ -173,13 +176,13 @@ export const emailVerificationLayer: Layer.Layer<
 export const passwordResetLayer: Layer.Layer<
   Auth.Password.PasswordResetService,
   never,
-  WorkOSClient | Auth.SessionService | Auth.Hooks
+  WorkOSClient | Auth.SessionService.SessionService | Auth.Hooks.Hooks
 > = Layer.effect(
   Auth.Password.PasswordResetService,
   Effect.gen(function* () {
     const workos = yield* WorkOSClient;
-    const sessions = yield* Auth.SessionService;
-    const hooks = yield* Auth.Hooks;
+    const sessions = yield* Auth.SessionService.SessionService;
+    const hooks = yield* Auth.Hooks.Hooks;
     const app = yield* appSender();
 
     return Auth.Password.PasswordResetService.of({
@@ -187,7 +190,7 @@ export const passwordResetLayer: Layer.Layer<
         ...[rawEmail, options]: Parameters<Reset["requestPasswordReset"]>
       ) {
         const { email: hooked } = yield* hooks.beforeRequestPasswordReset({ email: rawEmail });
-        const email = Auth.normalizeEmail(hooked);
+        const email = Auth.Normalize.normalizeEmail(hooked);
         yield* hooks.beforeSendCode({
           method: "password-reset",
           purpose: "password-reset",
@@ -250,7 +253,7 @@ export const passwordResetLayer: Layer.Layer<
               !refused(error)
                 ? toAuthError(error)
                 : (error.code ?? "").includes("password")
-                  ? new Auth.PasswordResetError({
+                  ? new Auth.Errors.PasswordResetError({
                       message: "The password does not meet the WorkOS password policy",
                     })
                   : invalidResetToken(),
@@ -259,7 +262,7 @@ export const passwordResetLayer: Layer.Layer<
         yield* sessions.invalidateUserSessions(user.id);
         return yield* hooks.afterResetPassword({
           userId: user.id,
-          email: Auth.normalizeEmail(user.email),
+          email: Auth.Normalize.normalizeEmail(user.email),
           reset: true,
         });
       }),
@@ -280,14 +283,14 @@ export const passwordResetLayer: Layer.Layer<
 export const magicAuthLayer: Layer.Layer<
   Auth.Email.EmailOtpService,
   never,
-  WorkOSClient | WorkOSSessions | WorkOSAuthenticate | Auth.Hooks
+  WorkOSClient | WorkOSSessions | WorkOSAuthenticate | Auth.Hooks.Hooks
 > = Layer.effect(
   Auth.Email.EmailOtpService,
   Effect.gen(function* () {
     const workos = yield* WorkOSClient;
     const sessions = yield* WorkOSSessions;
     const { authenticate } = yield* WorkOSAuthenticate;
-    const hooks = yield* Auth.Hooks;
+    const hooks = yield* Auth.Hooks.Hooks;
     const app = yield* appSender();
 
     return Auth.Email.EmailOtpService.of({
@@ -295,7 +298,7 @@ export const magicAuthLayer: Layer.Layer<
         ...[rawEmail, purpose, options]: Parameters<Otp["send"]>
       ) {
         if (purpose !== "sign-in") return yield* onlySignIn();
-        const email = Auth.normalizeEmail(rawEmail);
+        const email = Auth.Normalize.normalizeEmail(rawEmail);
         yield* hooks.beforeSendCode({
           method: "email-otp",
           purpose,
@@ -331,7 +334,7 @@ export const magicAuthLayer: Layer.Layer<
       signIn: Effect.fn("WorkOS.MagicAuth.signIn")(function* (
         ...[rawEmail, otp, options]: Parameters<Otp["signIn"]>
       ) {
-        const email = Auth.normalizeEmail(rawEmail);
+        const email = Auth.Normalize.normalizeEmail(rawEmail);
         yield* hooks.beforeAuthenticate({
           method: "email-otp",
           identifier: { type: "email", value: email },

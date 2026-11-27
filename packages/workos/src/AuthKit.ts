@@ -62,7 +62,7 @@ export const authorizeTarget = (
 };
 
 const asSso = (cause: unknown) =>
-  Effect.fail(new Auth.SsoError({ message: "WorkOS SSO sign-in failed", cause }));
+  Effect.fail(new Auth.Sso.SsoError({ message: "WorkOS SSO sign-in failed", cause }));
 
 /** The `authorizeTarget` provider for a connection or organization id. */
 const connectionOf = (providerId?: string) =>
@@ -78,10 +78,10 @@ const makeFlow = Effect.fn("WorkOS.AuthKit.makeFlow")(function* () {
   const { config } = workos;
   const sessions = yield* WorkOSSessions;
   const { authenticate } = yield* WorkOSAuthenticate;
-  const hooks = yield* Auth.Hooks;
+  const hooks = yield* Auth.Hooks.Hooks;
   const random = yield* SecureRandom.SecureRandom;
   const digest = yield* Digest.Digest;
-  const hash = yield* Auth.tokenHasher;
+  const hash = yield* Auth.TokenHash.tokenHasher;
   const verifierFor = yield* Auth.RootSecret.pkceVerifier;
   const states = Auth.OAuth.hashedStateStore(yield* Auth.OAuth.OAuthStateStore, hash);
 
@@ -89,13 +89,13 @@ const makeFlow = Effect.fn("WorkOS.AuthKit.makeFlow")(function* () {
     Effect.gen(function* () {
       const target = authorizeTarget(provider);
       if (Option.isNone(target)) {
-        return yield* new Auth.OAuthProviderError({
+        return yield* new Auth.Errors.OAuthProviderError({
           message: `Unknown WorkOS provider: ${provider}`,
           provider,
         });
       }
       if (Option.isNone(config.redirectUri)) {
-        return yield* new Auth.OAuthProviderError({
+        return yield* new Auth.Errors.OAuthProviderError({
           message: "The WorkOS backend needs a redirectUri for AuthKit sign-in",
           provider,
         });
@@ -131,14 +131,17 @@ const makeFlow = Effect.fn("WorkOS.AuthKit.makeFlow")(function* () {
     Effect.gen(function* () {
       const consumed = yield* states.consume(state);
       if (Option.isNone(consumed)) {
-        return yield* new Auth.OAuthStateNotFoundError({
+        return yield* new Auth.Errors.OAuthStateNotFoundError({
           message: "Unknown or spent state",
           state,
         });
       }
       const entry = consumed.value;
       if ((yield* Clock.currentTimeMillis) > entry.expiresAt) {
-        return yield* new Auth.OAuthStateExpiredError({ message: "The sign-in expired", state });
+        return yield* new Auth.Errors.OAuthStateExpiredError({
+          message: "The sign-in expired",
+          state,
+        });
       }
       const auth = yield* authenticate({
         grant_type: "authorization_code",
@@ -147,7 +150,7 @@ const makeFlow = Effect.fn("WorkOS.AuthKit.makeFlow")(function* () {
       }).pipe(
         Effect.mapError(
           (error) =>
-            new Auth.OAuthProviderError({
+            new Auth.Errors.OAuthProviderError({
               message: "WorkOS refused the authorization code",
               provider: entry.provider,
               cause: error,
@@ -161,7 +164,7 @@ const makeFlow = Effect.fn("WorkOS.AuthKit.makeFlow")(function* () {
         token: issued.token,
         method,
       });
-      return { entry, issued, email: Auth.normalizeEmail(auth.user.email) };
+      return { entry, issued, email: Auth.Normalize.normalizeEmail(auth.user.email) };
     });
 
   return { begin, complete, config };
@@ -185,7 +188,7 @@ export const oauthLayer: Layer.Layer<
   | WorkOSClient
   | WorkOSSessions
   | WorkOSAuthenticate
-  | Auth.Hooks
+  | Auth.Hooks.Hooks
   | Auth.OAuth.OAuthStateStore
   | Auth.RootSecret.RootSecret
   | SecureRandom.SecureRandom
@@ -224,19 +227,19 @@ export const oauthLayer: Layer.Layer<
 );
 
 const ssoUnsupported = (what: string) =>
-  Effect.fail(new Auth.SsoError({ message: `${what} is managed in the WorkOS dashboard` }));
+  Effect.fail(new Auth.Sso.SsoError({ message: `${what} is managed in the WorkOS dashboard` }));
 
 const toSso = <A, R>(
   effect: Effect.Effect<
     A,
-    | Auth.HookError
-    | Auth.SsoError
-    | Auth.OAuthProviderError
-    | Auth.OAuthStateNotFoundError
-    | Auth.OAuthStateExpiredError,
+    | Auth.Hooks.HookError
+    | Auth.Sso.SsoError
+    | Auth.Errors.OAuthProviderError
+    | Auth.Errors.OAuthStateNotFoundError
+    | Auth.Errors.OAuthStateExpiredError,
     R
   >,
-): Effect.Effect<A, Auth.HookError | Auth.SsoError, R> =>
+): Effect.Effect<A, Auth.Hooks.HookError | Auth.Sso.SsoError, R> =>
   Effect.catchTags(effect, {
     OAuthProviderError: asSso,
     OAuthStateNotFoundError: asSso,
@@ -254,22 +257,22 @@ const toSso = <A, R>(
  * @category layers
  */
 export const ssoLayer: Layer.Layer<
-  Auth.SsoService,
+  Auth.Sso.SsoService,
   never,
   | WorkOSClient
   | WorkOSSessions
   | WorkOSAuthenticate
-  | Auth.Hooks
+  | Auth.Hooks.Hooks
   | Auth.OAuth.OAuthStateStore
   | Auth.RootSecret.RootSecret
   | SecureRandom.SecureRandom
   | Digest.Digest
   | Mac.Mac
 > = Layer.effect(
-  Auth.SsoService,
+  Auth.Sso.SsoService,
   Effect.gen(function* () {
     const flow = yield* makeFlow();
-    return Auth.SsoService.of({
+    return Auth.Sso.SsoService.of({
       registerProvider: () => ssoUnsupported("Registering an SSO connection"),
       registerSamlProvider: () => ssoUnsupported("Registering a SAML connection"),
       resolveProviderForEmail: () => Effect.succeedNone,
@@ -279,13 +282,13 @@ export const ssoLayer: Layer.Layer<
         Option.match(connectionOf(selector.providerId), {
           onNone: () =>
             Effect.fail(
-              new Auth.SsoError({
+              new Auth.Sso.SsoError({
                 message: "WorkOS SSO needs a connection or organization id (conn_… or org_…)",
               }),
             ),
           onSome: (target) =>
             Effect.catchTag(flow.begin(target), "OAuthProviderError", (cause) =>
-              Effect.fail(new Auth.SsoError({ message: cause.message, cause })),
+              Effect.fail(new Auth.Sso.SsoError({ message: cause.message, cause })),
             ),
         }),
       handleCallback: (state, code) =>

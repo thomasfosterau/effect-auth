@@ -48,18 +48,18 @@ export type Services =
   | WorkOSClient
   | Session.WorkOSSessions
   | Session.WorkOSAuthenticate
-  | Auth.SessionService
-  | Auth.UserStore
-  | Auth.IdentifierStore
-  | Auth.UserService
+  | Auth.SessionService.SessionService
+  | Auth.UserStore.UserStore
+  | Auth.Identifier.IdentifierStore
+  | Auth.User.UserService
   | Auth.Email.EmailPasswordService
   | Auth.Email.EmailVerificationService
   | Auth.Email.EmailOtpService
   | Auth.Password.PasswordResetService
   | Auth.Password.PasswordHasher
-  | Auth.AuthLifecycleService
+  | Auth.AuthLifecycle.AuthLifecycleService
   | Auth.OAuth.OAuthService
-  | Auth.SsoService;
+  | Auth.Sso.SsoService;
 
 /**
  * What the app provides beside {@link layer}: its `Hooks` (plugins), the
@@ -71,7 +71,10 @@ export type Services =
  * @since 0.1.0
  * @category models
  */
-export type Requirements = Auth.Hooks | Auth.OAuth.OAuthStateStore | Auth.RootSecret.RootSecret;
+export type Requirements =
+  | Auth.Hooks.Hooks
+  | Auth.OAuth.OAuthStateStore
+  | Auth.RootSecret.RootSecret;
 
 /**
  * The WorkOS backend over the `HttpClient` in context, for a custom

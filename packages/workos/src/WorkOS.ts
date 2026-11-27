@@ -167,8 +167,8 @@ export class WorkOSError extends Schema.TaggedError<
  * @since 0.1.0
  * @category errors
  */
-export const toAuthError = (error: WorkOSError): Auth.AuthError =>
-  new Auth.AuthError({ message: `WorkOS request failed (${error.status})`, cause: error });
+export const toAuthError = (error: WorkOSError): Auth.Errors.AuthError =>
+  new Auth.Errors.AuthError({ message: `WorkOS request failed (${error.status})`, cause: error });
 
 /**
  * The `AuthError` for a core method WorkOS has no equivalent of.
@@ -176,8 +176,8 @@ export const toAuthError = (error: WorkOSError): Auth.AuthError =>
  * @since 0.1.0
  * @category errors
  */
-export const unsupported = (what: string): Auth.AuthError =>
-  new Auth.AuthError({ message: `${what} is not supported by the WorkOS backend` });
+export const unsupported = (what: string): Auth.Errors.AuthError =>
+  new Auth.Errors.AuthError({ message: `${what} is not supported by the WorkOS backend` });
 
 /**
  * One request to WorkOS.

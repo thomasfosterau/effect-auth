@@ -40,20 +40,23 @@ const UNSUPPORTED_STEPS = HashSet.make(
 export const passwordGrantError = (
   email: string,
   error: WorkOSError,
-): Auth.InvalidCredentialsError | Auth.EmailNotVerifiedError | Auth.AuthError => {
+):
+  | Auth.Errors.InvalidCredentialsError
+  | Auth.Errors.EmailNotVerifiedError
+  | Auth.Errors.AuthError => {
   if (error.code === "email_verification_required") {
-    return new Auth.EmailNotVerifiedError({ message: "Email not verified", email });
+    return new Auth.Errors.EmailNotVerifiedError({ message: "Email not verified", email });
   }
   if (error.code !== undefined && HashSet.has(UNSUPPORTED_STEPS, error.code)) {
     // TODO(#900): WorkOS MFA, organization selection and Radar challenges are
     // phase 2; until then the app keeps them off in the WorkOS dashboard.
-    return new Auth.AuthError({
+    return new Auth.Errors.AuthError({
       message: `WorkOS asked for a step this backend does not support (${error.code})`,
       cause: error,
     });
   }
   if (error.status >= 400 && error.status < 500 && error.status !== 429) {
-    return new Auth.InvalidCredentialsError({ message: "Invalid email or password" });
+    return new Auth.Errors.InvalidCredentialsError({ message: "Invalid email or password" });
   }
   return toAuthError(error);
 };
@@ -67,21 +70,24 @@ const splitName = (name?: string) => {
 /** The error a refused user creation maps to. */
 const signUpError = (
   error: WorkOSError,
-): Auth.EmailInUseError | Auth.InvalidInputError | Auth.AuthError => {
+): Auth.Errors.EmailInUseError | Auth.Errors.InvalidInputError | Auth.Errors.AuthError => {
   const code = error.code ?? "";
   // TODO(#900): these codes are not in the WorkOS SDK's source; check them
   // against the API's answers before the package is published.
   if (error.status === 409 || code.includes("email_not_available") || code.includes("exist")) {
-    return new Auth.EmailInUseError({ message: "Email already in use" });
+    return new Auth.Errors.EmailInUseError({ message: "Email already in use" });
   }
   if (code.includes("password")) {
-    return new Auth.InvalidInputError({
+    return new Auth.Errors.InvalidInputError({
       message: "The password does not meet the WorkOS password policy",
       field: "password",
     });
   }
   if (error.status === 400 || error.status === 422) {
-    return new Auth.InvalidInputError({ message: "WorkOS refused the sign-up", field: "email" });
+    return new Auth.Errors.InvalidInputError({
+      message: "WorkOS refused the sign-up",
+      field: "email",
+    });
   }
   return toAuthError(error);
 };
@@ -98,7 +104,7 @@ const unverifiedSessionId = (accessToken: string): Option.Option<string> =>
     ({ sid }) => sid,
   );
 
-const answer = (result: Auth.Email.AuthResult): Auth.AuthLifecycleResult => ({
+const answer = (result: Auth.Email.AuthResult): Auth.AuthLifecycle.AuthLifecycleResult => ({
   user: result.user,
   ...(result.identifier !== undefined && { identifier: result.identifier }),
   ...(result.session !== undefined && { session: result.session, token: result.token }),
@@ -121,15 +127,19 @@ const answer = (result: Auth.Email.AuthResult): Auth.AuthLifecycleResult => ({
 export const emailPasswordLayer: Layer.Layer<
   Auth.Email.EmailPasswordService,
   never,
-  WorkOSClient | WorkOSSessions | WorkOSAuthenticate | Auth.SessionService | Auth.Hooks
+  | WorkOSClient
+  | WorkOSSessions
+  | WorkOSAuthenticate
+  | Auth.SessionService.SessionService
+  | Auth.Hooks.Hooks
 > = Layer.effect(
   Auth.Email.EmailPasswordService,
   Effect.gen(function* () {
     const workos = yield* WorkOSClient;
     const sessions = yield* WorkOSSessions;
     const { authenticate, revoke } = yield* WorkOSAuthenticate;
-    const sessionService = yield* Auth.SessionService;
-    const hooks = yield* Auth.Hooks;
+    const sessionService = yield* Auth.SessionService.SessionService;
+    const hooks = yield* Auth.Hooks.Hooks;
 
     const passwordGrant = (email: string, password: string) =>
       authenticate({ grant_type: "password", email, password }).pipe(
@@ -140,7 +150,7 @@ export const emailPasswordLayer: Layer.Layer<
       raw: Auth.Email.SignInInput,
     ) {
       const input = yield* hooks.beforeSignIn(raw);
-      const email = Auth.normalizeEmail(input.email);
+      const email = Auth.Normalize.normalizeEmail(input.email);
       yield* hooks.beforeAuthenticate({
         method: "email-password",
         identifier: { type: "email", value: email },
@@ -162,9 +172,12 @@ export const emailPasswordLayer: Layer.Layer<
       raw: Auth.Email.SignUpInput,
     ) {
       const input = yield* hooks.beforeSignUp(raw);
-      const email = Auth.normalizeEmail(input.email);
+      const email = Auth.Normalize.normalizeEmail(input.email);
       if (email === "") {
-        return yield* new Auth.InvalidInputError({ message: "Email is required", field: "email" });
+        return yield* new Auth.Errors.InvalidInputError({
+          message: "Email is required",
+          field: "email",
+        });
       }
       const created = yield* workos
         .request({
@@ -225,7 +238,7 @@ export const emailPasswordLayer: Layer.Layer<
         // straight away.
         const probe = yield* passwordGrant(user.email, input.currentPassword).pipe(
           Effect.catchTag("EmailNotVerifiedError", () =>
-            Effect.fail(new Auth.InvalidCredentialsError({ message: "Invalid password" })),
+            Effect.fail(new Auth.Errors.InvalidCredentialsError({ message: "Invalid password" })),
           ),
         );
         const probeId = unverifiedSessionId(probe.access_token);
@@ -265,35 +278,35 @@ export const emailPasswordLayer: Layer.Layer<
  * @category layers
  */
 export const authLifecycleLayer: Layer.Layer<
-  Auth.AuthLifecycleService,
+  Auth.AuthLifecycle.AuthLifecycleService,
   never,
-  Auth.Email.EmailPasswordService | Auth.Email.EmailVerificationService | Auth.UserStore
+  Auth.Email.EmailPasswordService | Auth.Email.EmailVerificationService | Auth.UserStore.UserStore
 > = Layer.effect(
-  Auth.AuthLifecycleService,
+  Auth.AuthLifecycle.AuthLifecycleService,
   Effect.gen(function* () {
     const emailPassword = yield* Auth.Email.EmailPasswordService;
     const verification = yield* Auth.Email.EmailVerificationService;
-    const users = yield* Auth.UserStore;
-    return Auth.AuthLifecycleService.of({
+    const users = yield* Auth.UserStore.UserStore;
+    return Auth.AuthLifecycle.AuthLifecycleService.of({
       signUp: (input) => Effect.map(emailPassword.signUp(input), answer),
       signIn: (input) =>
         emailPassword.signIn(input).pipe(
           Effect.map(answer),
           Effect.catchTag("EmailNotVerifiedError", () =>
             Effect.fail(
-              new Auth.EmailVerificationError({
+              new Auth.Errors.EmailVerificationError({
                 message: "Verify your email address, then sign in",
               }),
             ),
           ),
         ),
       verifyEmail: Effect.fn("WorkOS.AuthLifecycle.verifyEmail")(function* (
-        input: Auth.VerifyEmailInput,
+        input: Auth.AuthLifecycle.VerifyEmailInput,
       ) {
         const result = yield* verification.verifyToken(input.token);
         const found = yield* users.get(result.userId);
         if (Option.isNone(found)) {
-          return yield* new Auth.UserNotFoundError({
+          return yield* new Auth.Errors.UserNotFoundError({
             message: "User not found",
             userId: result.userId,
           });
@@ -316,7 +329,9 @@ export const refusingHasherLayer: Layer.Layer<Auth.Password.PasswordHasher> = La
   Auth.Password.PasswordHasher,
   {
     algorithm: "workos",
-    hash: () => Effect.fail(new Auth.HashingError({ message: "Passwords are held by WorkOS" })),
-    verify: () => Effect.fail(new Auth.HashingError({ message: "Passwords are held by WorkOS" })),
+    hash: () =>
+      Effect.fail(new Auth.Errors.HashingError({ message: "Passwords are held by WorkOS" })),
+    verify: () =>
+      Effect.fail(new Auth.Errors.HashingError({ message: "Passwords are held by WorkOS" })),
   },
 );

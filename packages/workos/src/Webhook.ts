@@ -141,7 +141,7 @@ export const verify = (
   header: Option.Option<string>,
   secret: Redacted.Redacted,
   tolerance: number = DEFAULT_TOLERANCE_MS,
-): Effect.Effect<WorkOSEvent, WebhookVerificationError | Auth.AuthError, Mac.Mac> =>
+): Effect.Effect<WorkOSEvent, WebhookVerificationError | Auth.Errors.AuthError, Mac.Mac> =>
   Effect.gen(function* () {
     const present = Option.filter(header, (value) => value !== "");
     if (Option.isNone(present)) {
@@ -164,12 +164,12 @@ export const verify = (
         reason: "stale",
       });
     }
-    const expected = yield* Auth.hmac(
+    const expected = yield* Auth.Cipher.hmac(
       "sha256",
       Redacted.value<string>(secret),
       `${parsed.t}.${rawBody}`,
     );
-    if (!Auth.timingSafeEqualBytes(expected, parsed.signature)) {
+    if (!Auth.TokenHash.timingSafeEqualBytes(expected, parsed.signature)) {
       return yield* new WebhookVerificationError({
         message: "The webhook signature does not match",
         reason: "bad-signature",
@@ -195,8 +195,8 @@ export const verify = (
  * @category models
  */
 export interface EventHandlers {
-  readonly onUserDeleted?: (userId: string) => Effect.Effect<void, Auth.AuthError>;
-  readonly onEvent?: (event: WorkOSEvent) => Effect.Effect<void, Auth.AuthError>;
+  readonly onUserDeleted?: (userId: string) => Effect.Effect<void, Auth.Errors.AuthError>;
+  readonly onEvent?: (event: WorkOSEvent) => Effect.Effect<void, Auth.Errors.AuthError>;
 }
 
 /**
@@ -207,7 +207,7 @@ export interface EventHandlers {
  */
 export class WorkOSEvents extends Context.Service<
   WorkOSEvents,
-  { readonly handle: (event: WorkOSEvent) => Effect.Effect<void, Auth.AuthError> }
+  { readonly handle: (event: WorkOSEvent) => Effect.Effect<void, Auth.Errors.AuthError> }
 >()("@effect-auth/workos/WorkOSEvents") {
   /** The handler over `RevokedSessions` and `handlers`. */
   static readonly layer = (

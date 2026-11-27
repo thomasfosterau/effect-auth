@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { KeyValueStore } from "effect/persistence";
 import * as Auth from "@thomasfosterau/effect-auth";
 import { createAuthClient } from "@thomasfosterau/effect-auth/client";
@@ -21,8 +22,8 @@ const withServer = async (fakeOptions: Fake.FakeOptions = {}) => {
     Layer.provideMerge(
       Layer.mergeAll(
         fake.layer,
-        Auth.Hooks.Default,
-        Auth.OAuthStateStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
+        Auth.Hooks.Hooks.Default,
+        Auth.KeyValueStores.OAuthStateStoreKV.pipe(Layer.provide(KeyValueStore.layerMemory)),
         Auth.RootSecret.RootSecret.layer("a-root-secret-of-at-least-32-bytes-long").pipe(
           Layer.orDie,
         ),
@@ -46,14 +47,14 @@ describe("Http.make over WorkOS", () => {
     await client.signUp({ email, password, name: "Ada Lovelace" });
     const signedIn = await client.signIn({ email, password });
     expect(signedIn.user?.email).toBe(email);
-    const session = await client.getSession();
+    const session = Option.getOrUndefined(await client.getSession());
     expect(session?.user.id).toBe(signedIn.user?.id);
 
     const refreshes = () => fake.calls.filter((c) => c.body?.grant_type === "refresh_token").length;
     expect(refreshes()).toBe(0);
     await new Promise((resolve) => setTimeout(resolve, 2_100));
     const before = responses.length;
-    const refreshed = await client.getSession();
+    const refreshed = Option.getOrUndefined(await client.getSession());
     expect(refreshed?.user.id).toBe(signedIn.user?.id);
     expect(refreshes()).toBe(1);
     const answer = responses[before];
@@ -69,6 +70,6 @@ describe("Http.make over WorkOS", () => {
     expect(fake.sessionStatus(current ?? "")).toBe("active");
     await client.signOut();
     expect(fake.sessionStatus(current ?? "")).toBe("inactive");
-    expect(await client.getSession()).toBeNull();
+    expect(Option.isNone(await client.getSession())).toBe(true);
   });
 });
