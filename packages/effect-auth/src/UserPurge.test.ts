@@ -6,10 +6,13 @@
  */
 import { sha256Hex } from "./testing/Sha256.ts";
 import { describe, expect, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as MutableHashMap from "effect/MutableHashMap";
+import * as Result from "effect/Result";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AccountDeletion } from "./AccountDeletion.ts";
@@ -25,7 +28,7 @@ import { AuthLifecycleService } from "./AuthLifecycle.ts";
 import { EmailOtpService, EmailOtpStore, EmailOtpUserStore } from "./email/EmailOtp.ts";
 import { EmailPasswordService, EmailPasswordStore } from "./email/EmailPassword.ts";
 import { EmailVerificationService, EmailVerificationStore } from "./email/EmailVerification.ts";
-import { AuthError } from "./Errors.ts";
+import { AuthError, LastOrganizationOwnerError } from "./Errors.ts";
 import { Hooks } from "./Hooks.ts";
 import * as HttpServer from "./http/HttpServer.ts";
 import { IdentifierStore, lookupIdentifier, makeIdentifier } from "./Identifier.ts";
@@ -34,6 +37,13 @@ import { MultiFactorStore } from "./multifactor/MultiFactor.ts";
 import { CredentialStore } from "./multifactor/WebAuthn.ts";
 import { OAuthAccountStore } from "./oauth/OAuthAccount.ts";
 import { OidcConsentStore, OidcTokenStore } from "./OidcProvider.ts";
+import {
+  type Member,
+  type Organization,
+  OrganizationStore,
+  type Team,
+  type TeamMember,
+} from "./Organization.ts";
 import { PasswordHasher } from "./password/Password.ts";
 import {
   PasswordResetService,
@@ -52,6 +62,74 @@ import * as Testing from "./testing/index.ts";
 import { definedKeys } from "./DefinedKeys.ts";
 
 const notUsed = () => Effect.fail(new AuthError({ message: "not used by these tests" }));
+
+/**
+ * An `OrganizationStore` over plain arrays, with the organization, membership
+ * and team calls the purge makes; the rest are not used here.
+ */
+const memoryOrganizations = (): typeof OrganizationStore.Service => {
+  const organizations = MutableHashMap.empty<string, Organization>();
+  let members: ReadonlyArray<Member> = [];
+  const teams = MutableHashMap.empty<string, Team>();
+  let teamMembers: ReadonlyArray<TeamMember> = [];
+  return {
+    createOrganization: (organization) =>
+      Effect.sync(
+        () => (MutableHashMap.set(organizations, organization.id, organization), organization),
+      ),
+    getOrganizationById: (id) => Effect.sync(() => MutableHashMap.get(organizations, id)),
+    getOrganizationBySlug: notUsed,
+    updateOrganization: notUsed,
+    deleteOrganization: notUsed,
+    createMember: (member) => Effect.sync(() => ((members = [...members, member]), member)),
+    getMember: (organizationId, userId) =>
+      Effect.sync(() =>
+        Arr.findFirst(members, (m) => m.organizationId === organizationId && m.userId === userId),
+      ),
+    getMemberById: notUsed,
+    updateMember: notUsed,
+    deleteMember: (id) => Effect.sync(() => void (members = members.filter((m) => m.id !== id))),
+    listMembersByOrganization: (organizationId) =>
+      Effect.sync(() => members.filter((m) => m.organizationId === organizationId)),
+    listMembersByUser: (userId) => Effect.sync(() => members.filter((m) => m.userId === userId)),
+    countMembersByOrganization: notUsed,
+    createInvitation: notUsed,
+    getInvitation: notUsed,
+    updateInvitation: notUsed,
+    listInvitationsByOrganization: notUsed,
+    listInvitationsByEmail: notUsed,
+    createTeam: (team) => Effect.sync(() => (MutableHashMap.set(teams, team.id, team), team)),
+    getTeam: notUsed,
+    updateTeam: notUsed,
+    deleteTeam: notUsed,
+    listTeams: notUsed,
+    addTeamMember: (teamMember) =>
+      Effect.sync(() => ((teamMembers = [...teamMembers, teamMember]), teamMember)),
+    getTeamMemberById: notUsed,
+    removeTeamMember: (teamId, userId) =>
+      Effect.sync(
+        () =>
+          void (teamMembers = teamMembers.filter(
+            (m) => !(m.teamId === teamId && m.userId === userId),
+          )),
+      ),
+    listTeamMembers: notUsed,
+    listTeamsForMember: (organizationId, userId) =>
+      Effect.sync(() =>
+        Arr.filterMap(teamMembers, (m) => {
+          const team = Option.getOrUndefined(MutableHashMap.get(teams, m.teamId));
+          return m.userId === userId && team?.organizationId === organizationId
+            ? Result.succeed(team)
+            : Result.failVoid;
+        }),
+      ),
+    upsertOrgRole: notUsed,
+    getOrgRole: notUsed,
+    getOrgRoleById: notUsed,
+    listOrgRoles: notUsed,
+    deleteOrgRole: notUsed,
+  };
+};
 
 /** The messages the services sent: the latest token or code per address (or user). */
 interface Outbox {
@@ -109,6 +187,7 @@ const stores = Layer.mergeAll(
   PasswordHasher.layer({ iterations: 1 }),
   inlineDeliveryScheduler,
   Layer.succeed(PhoneOtpStore, Testing.memoryPhoneOtpStore()),
+  Layer.effect(OrganizationStore, Effect.sync(memoryOrganizations)),
   Layer.succeed(AdminUserStore, {
     listUsers: notUsed,
     createUser: notUsed,
@@ -199,6 +278,37 @@ const harness = async (failing?: () => boolean) => {
   return { run, handler, outbox };
 };
 
+/** A new organization with no members; answers its id. */
+const createOrganization = (name: string) =>
+  Effect.gen(function* () {
+    const id = globalThis.crypto.randomUUID();
+    yield* (yield* OrganizationStore).createOrganization({
+      id,
+      name,
+      slug: id,
+      metadata: {},
+      createdAt: yield* Clock.currentTimeMillis,
+    });
+    return id;
+  });
+
+const addMember = (
+  organizationId: string,
+  userId: string,
+  role: string,
+  status?: Member["status"],
+) =>
+  Effect.gen(function* () {
+    return yield* (yield* OrganizationStore).createMember({
+      id: globalThis.crypto.randomUUID(),
+      organizationId,
+      userId,
+      role,
+      ...definedKeys({ status }),
+      createdAt: yield* Clock.currentTimeMillis,
+    });
+  });
+
 /** One credential of every kind for `user`, and how to find each again. */
 const seed = (user: Types.User, email: string, outbox: Outbox) =>
   Effect.gen(function* () {
@@ -288,7 +398,27 @@ const seed = (user: Types.User, email: string, outbox: Outbox) =>
       createdAt: at,
       expiresAt: at + 60_000,
     });
+    // An organization of their own, with a team: the only member, so the
+    // purge removes the membership without refusing.
+    const organizationId = yield* createOrganization(`${email}'s organization`);
+    yield* addMember(organizationId, user.id, "owner");
+    const teamId = globalThis.crypto.randomUUID();
+    const organizations = yield* OrganizationStore;
+    yield* organizations.createTeam({
+      id: teamId,
+      organizationId,
+      name: "Team",
+      createdAt: at,
+      updatedAt: at,
+    });
+    yield* organizations.addTeamMember({
+      id: globalThis.crypto.randomUUID(),
+      teamId,
+      userId: user.id,
+      createdAt: at,
+    });
     return {
+      organizationId,
       user,
       email,
       phone,
@@ -329,6 +459,11 @@ const inventory = (seeded: Seeded) =>
       magicLinks: count(yield* (yield* MagicLinkStore).getByEmail(seeded.email)),
       emailOtps: count(yield* (yield* EmailOtpStore).get(seeded.email, "sign-in")),
       phoneOtps: count(yield* (yield* PhoneOtpStore).get(seeded.phone, "sign-in")),
+      memberships: (yield* (yield* OrganizationStore).listMembersByUser(id)).length,
+      teamMemberships: (yield* (yield* OrganizationStore).listTeamsForMember(
+        seeded.organizationId,
+        id,
+      )).length,
       apiKeyValid: (yield* (yield* ApiKeyService).verify(seeded.apiKey)).valid,
     };
   });
@@ -351,6 +486,8 @@ const held = {
   magicLinks: 1,
   emailOtps: 1,
   phoneOtps: 1,
+  memberships: 1,
+  teamMemberships: 1,
   apiKeyValid: true,
 };
 
@@ -372,6 +509,8 @@ const nothing = {
   magicLinks: 0,
   emailOtps: 0,
   phoneOtps: 0,
+  memberships: 0,
+  teamMemberships: 0,
   apiKeyValid: false,
 };
 
@@ -584,6 +723,184 @@ describe("a deleted user's address can be claimed again, and nothing sent before
         expect(yield* (yield* SessionStore).listByUserId(signedUp.user.id)).toHaveLength(
           signedUp.session === undefined ? 0 : 1,
         );
+      }),
+    );
+  });
+});
+
+const expectLastOwner = (error: { readonly _tag: string }, acme: string) => {
+  expect(error).toBeInstanceOf(LastOrganizationOwnerError);
+  expect(error).toMatchObject({
+    organizationId: acme,
+    message: expect.stringContaining("'Acme'"),
+  });
+};
+
+describe("the last owner of an organization that has other members is not deleted", () => {
+  /** The doomed user owns "Acme" alone; the bystander is a plain member of it. */
+  const seedSharedOrganization = Effect.fn("seedSharedOrganization")(function* (outbox: Outbox) {
+    const seeded = yield* seedAccounts(outbox);
+    const acme = yield* createOrganization("Acme");
+    yield* addMember(acme, seeded.doomed.user.id, "owner");
+    yield* addMember(acme, seeded.bystander.user.id, "member");
+    return { ...seeded, acme, before: yield* inventory(seeded.doomed) };
+  });
+
+  /** The doomed account still holds everything, and Acme keeps both members. */
+  const untouched = (shared: Effect.Success<ReturnType<typeof seedSharedOrganization>>) =>
+    Effect.gen(function* () {
+      expect(yield* inventory(shared.doomed)).toEqual(shared.before);
+      expect(shared.before).toEqual({ ...held, memberships: 2 });
+      expect(
+        (yield* (yield* OrganizationStore).listMembersByOrganization(shared.acme)).length,
+      ).toBe(2);
+    });
+
+  const servicePaths: ReadonlyArray<
+    readonly [string, (userId: string) => Effect.Effect<unknown, { readonly _tag: string }, World>]
+  > = [
+    [
+      "AdminService.removeUser",
+      (userId) =>
+        Effect.gen(function* () {
+          const { admin } = yield* seedAdmin();
+          return yield* (yield* AdminService).removeUser(admin, userId);
+        }),
+    ],
+    [
+      "AccountManagementService.confirmAccountDeletion",
+      (userId) =>
+        Effect.gen(function* () {
+          const accounts = yield* AccountManagementService;
+          const { token } = yield* accounts.requestAccountDeletion(userId);
+          return yield* accounts.confirmAccountDeletion(token).pipe(
+            // The token is kept, so the user can confirm once ownership moves.
+            Effect.tapError(() =>
+              Effect.gen(function* () {
+                const kept = yield* (yield* AccountManagementStore).get(sha256Hex(token));
+                expect(Option.isSome(kept)).toBe(true);
+              }),
+            ),
+          );
+        }),
+    ],
+    [
+      "UserService.deleteUser",
+      (userId) => Effect.flatMap(UserService, (s) => s.deleteUser(userId)),
+    ],
+    [
+      "AccountDeletion.deleteUser",
+      (userId) => Effect.flatMap(AccountDeletion, (s) => s.deleteUser(userId)),
+    ],
+  ];
+
+  it.each(servicePaths)("%s refuses with an error naming the organization", async (_, remove) => {
+    const { run, outbox } = await harness();
+    await run(
+      Effect.gen(function* () {
+        const seeded = yield* seedSharedOrganization(outbox);
+        expectLastOwner(
+          yield* Effect.flip(Effect.asVoid(remove(seeded.doomed.user.id))),
+          seeded.acme,
+        );
+        yield* untouched(seeded);
+      }),
+    );
+  });
+
+  it("AnonymousService.linkAccount refuses before its callback, and keeps the guest", async () => {
+    const { run, outbox } = await harness();
+    await run(
+      Effect.gen(function* () {
+        const { bystander } = yield* seedAccounts(outbox);
+        const anonymous = yield* AnonymousService;
+        const { user } = yield* anonymous.signInAnonymous();
+        const guest = yield* seed(user, "guest@example.com", outbox);
+        const acme = yield* createOrganization("Acme");
+        yield* addMember(acme, user.id, "owner");
+        yield* addMember(acme, bystander.user.id, "member");
+        const before = yield* inventory(guest);
+        expectLastOwner(yield* Effect.flip(anonymous.linkAccount(user, bystander.user)), acme);
+        expect(yield* inventory(guest)).toEqual(before);
+      }),
+    );
+  });
+
+  it("HTTP DELETE /admin/users/:id answers 409", async () => {
+    const { run, handler, outbox } = await harness();
+    const { seeded, adminToken } = await run(
+      Effect.gen(function* () {
+        const shared = yield* seedSharedOrganization(outbox);
+        const { token } = yield* seedAdmin();
+        return { seeded: shared, adminToken: token };
+      }),
+    );
+    const response = await handler(
+      request("DELETE", `/admin/users/${seeded.doomed.user.id}`, adminToken),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.text()).toContain("Acme");
+    await run(untouched(seeded));
+  });
+
+  it("HTTP POST /account-deletions/redemptions answers 409", async () => {
+    const { run, handler, outbox } = await harness();
+    const seeded = await run(seedSharedOrganization(outbox));
+    await handler(
+      request("POST", "/account-deletions", seeded.doomed.sessionToken, {
+        data: { type: "account-deletions" },
+      }),
+    );
+    const redeemed = await handler(
+      request("POST", "/account-deletions/redemptions", seeded.doomed.sessionToken, {
+        data: {
+          type: "account-deletion-redemptions",
+          attributes: { token: sent(outbox.deletions, seeded.doomed.user.id) },
+        },
+      }),
+    );
+    expect(redeemed.status).toBe(409);
+    await run(untouched(seeded));
+  });
+
+  it("another active owner lets the user go, and the organization keeps its members", async () => {
+    const { run, outbox } = await harness();
+    await run(
+      Effect.gen(function* () {
+        const seeded = yield* seedSharedOrganization(outbox);
+        yield* addMember(seeded.acme, globalThis.crypto.randomUUID(), "owner");
+        yield* (yield* AccountDeletion).deleteUser(seeded.doomed.user.id);
+        expect(yield* inventory(seeded.doomed)).toEqual(nothing);
+        const left = yield* (yield* OrganizationStore).listMembersByOrganization(seeded.acme);
+        expect(left.map((m) => m.role).toSorted()).toEqual(["member", "owner"]);
+      }),
+    );
+  });
+
+  it("a deactivated owner does not count as another owner", async () => {
+    const { run, outbox } = await harness();
+    await run(
+      Effect.gen(function* () {
+        const seeded = yield* seedSharedOrganization(outbox);
+        yield* addMember(seeded.acme, globalThis.crypto.randomUUID(), "owner", "inactive");
+        expectLastOwner(
+          yield* Effect.flip((yield* AccountDeletion).deleteUser(seeded.doomed.user.id)),
+          seeded.acme,
+        );
+      }),
+    );
+  });
+
+  it("a deactivated owner's own membership does not hold the deletion back", async () => {
+    const { run, outbox } = await harness();
+    await run(
+      Effect.gen(function* () {
+        const { doomed, bystander } = yield* seedAccounts(outbox);
+        const acme = yield* createOrganization("Acme");
+        yield* addMember(acme, doomed.user.id, "owner", "inactive");
+        yield* addMember(acme, bystander.user.id, "member");
+        yield* (yield* AccountDeletion).deleteUser(doomed.user.id);
+        expect(yield* inventory(doomed)).toEqual(nothing);
       }),
     );
   });

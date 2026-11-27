@@ -281,15 +281,17 @@ export class AdminService extends Context.Service<
      * (OAuth links, passkeys, API keys, the multi-factor enrolment, trusted
      * devices, OIDC provider tokens and consents, password-reset,
      * email-verification and account-management tokens), then the sessions,
-     * then the identifiers (so the user's addresses and handles are free
-     * again), and the user row last. A failure part-way leaves the user row,
+     * then the organization memberships, then the identifiers (so the user's
+     * addresses and handles are free again), and the user row last. The last
+     * active owner of an organization that has other members is refused with
+     * `LastOrganizationOwnerError`, with nothing deleted. A failure part-way leaves the user row,
      * and calling it again finishes the removal. Admins cannot remove
      * themselves.
      */
     readonly removeUser: (
       actor: Types.User,
       userId: string,
-    ) => Effect.Effect<void, AdminError | Errors.AuthError>;
+    ) => Effect.Effect<void, AdminError | Errors.AuthError | Errors.LastOrganizationOwnerError>;
 
     /**
      * Revoke all sessions of a user.

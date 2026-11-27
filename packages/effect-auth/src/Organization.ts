@@ -48,6 +48,23 @@ export class OrganizationError extends Schema.TaggedError<
 }) {}
 
 /**
+ * {@link OrganizationService}'s layer was built with a
+ * {@link OrganizationConfig.creatorRole} other than the
+ * {@link OrganizationOwnerRole} in the context. The build dies with it, since
+ * deleting a user would otherwise guard a different role than organizations
+ * give their creators.
+ *
+ * @since 0.9.0
+ * @category errors
+ */
+export class OrganizationConfigError extends Schema.TaggedError<
+  OrganizationConfigError,
+  { readonly brand: unique symbol }
+>()("OrganizationConfigError", {
+  message: Schema.String,
+}) {}
+
+/**
  * An organization (team / tenant).
  */
 export interface Organization {
@@ -214,7 +231,7 @@ export interface TeamMember {
  * Permissions are `"resource:action"` strings and may use the `"*"` wildcard
  * (`"team:*"`, `"*:*"`), matched with `permissionMatches`.
  *
- * The protected owner role (`config.creatorRole`, default `owner`) can never
+ * The protected owner role (`OrganizationOwnerRole`, default `owner`) can never
  * be redefined this way - see {@link OrganizationService.upsertOrgRole}.
  */
 export interface OrgRole {
@@ -591,6 +608,21 @@ export class OrganizationStore extends Context.Service<
 >()("@effect-auth/OrganizationStore") {}
 
 /**
+ * The protected owner role of every organization: what
+ * {@link OrganizationService} gives a creator and guards in its last-owner
+ * checks, and what deleting a user reads to refuse removing an
+ * organization's last owner. Provide it where both are built to change the
+ * role for both.
+ *
+ * @since 0.9.0
+ * @category references
+ */
+export const OrganizationOwnerRole: Context.Reference<string> = Context.Reference<string>(
+  "@effect-auth/OrganizationOwnerRole",
+  { defaultValue: () => "owner" },
+);
+
+/**
  * Organization service configuration
  */
 export interface OrganizationConfig {
@@ -621,9 +653,14 @@ export interface OrganizationConfig {
   readonly invitationResendCooldown?: number;
   /** Invitation lifetime in milliseconds (default: 48 hours) */
   readonly invitationExpiresIn?: number;
-  /** Role assigned to the creator of an organization (default: "owner").
-   * This role is also treated as the protected "owner" role for the
-   * last-owner safeguards in `removeMember`/`updateMemberRole`. */
+  /**
+   * Role assigned to the creator of an organization, and the protected owner
+   * role of the last-owner safeguards.
+   *
+   * @deprecated Provide {@link OrganizationOwnerRole} instead, which user
+   * deletion reads too. A value other than the reference's makes the layer
+   * build die with {@link OrganizationConfigError}.
+   */
   readonly creatorRole?: string;
   /**
    * Static role → permission map (default: {@link defaultOrganizationRoles}).
@@ -825,7 +862,7 @@ export class OrganizationService extends Context.Service<
     /**
      * Create an organization. Enforces `allowUserToCreateOrganization`,
      * `organizationLimit` (organizations the user owns or joined by invitation)
-     * and slug uniqueness. The creator becomes a member with `creatorRole`.
+     * and slug uniqueness. The creator becomes a member with the owner role (`OrganizationOwnerRole`).
      */
     readonly createOrganization: (
       userId: string,
@@ -1367,7 +1404,7 @@ export class OrganizationService extends Context.Service<
      * The definition *replaces* the static `config.roles` entry of the same
      * name for this organization, and takes effect immediately for every
      * member holding the role. Redefining the protected owner role
-     * (`config.creatorRole`, default `owner`) is refused with an
+     * (`OrganizationOwnerRole`, default `owner`) is refused with an
      * `OrganizationError`: owner semantics stay static, so a tenant can never
      * lock itself out of role management.
      *
@@ -1455,6 +1492,28 @@ export class OrganizationService extends Context.Service<
     Layer.effect(OrganizationService, make(config)).pipe(Layer.provide(PlatformCrypto.layer));
 }
 
+/**
+ * Delete a membership and its team memberships in the organization.
+ *
+ * @internal
+ */
+export const deleteMembershipFrom = (
+  store: Pick<
+    typeof OrganizationStore.Service,
+    "deleteMember" | "listTeamsForMember" | "removeTeamMember"
+  >,
+  member: Member,
+): Effect.Effect<void, Errors.AuthError> =>
+  Effect.gen(function* () {
+    yield* store.deleteMember(member.id);
+    // Cascade: leaving the organization also leaves all of its teams.
+    const teams = yield* store.listTeamsForMember(member.organizationId, member.userId);
+    return yield* Effect.forEach(teams, (team) => store.removeTeamMember(team.id, member.userId), {
+      concurrency: 1,
+      discard: true,
+    });
+  });
+
 /** The domain part of an email address, normalized; `""` when there is none. */
 const domainOfEmail = (email: string): string => normalizeDomain(email.split("@")[1] ?? "");
 
@@ -1522,7 +1581,14 @@ export const make = (
     const pendingInvitationLimit = config.pendingInvitationLimit ?? 100;
     const invitationResendCooldown = config.invitationResendCooldown ?? 60 * 1000;
     const invitationExpiresIn = config.invitationExpiresIn ?? 48 * 60 * 60 * 1000; // 48 hours
-    const creatorRole = config.creatorRole ?? "owner";
+    const creatorRole = yield* OrganizationOwnerRole;
+    if (config.creatorRole !== undefined && config.creatorRole !== creatorRole) {
+      return yield* Effect.die(
+        new OrganizationConfigError({
+          message: `OrganizationConfig.creatorRole is '${config.creatorRole}' but OrganizationOwnerRole is '${creatorRole}'; provide OrganizationOwnerRole instead, so deleting a user guards the same owner role`,
+        }),
+      );
+    }
     const roles = config.roles ?? defaultOrganizationRoles;
     // A role name is caller input: read only the record's own keys, so a role
     // named `constructor` or `__proto__` is unknown rather than a prototype
@@ -1842,18 +1908,7 @@ export const make = (
         ).length;
       });
 
-    /** Delete a membership and its team memberships in the organization. */
-    const deleteMembership = (member: Member) =>
-      Effect.gen(function* () {
-        yield* store.deleteMember(member.id);
-        // Cascade: leaving the organization also leaves all of its teams.
-        const teams = yield* store.listTeamsForMember(member.organizationId, member.userId);
-        return yield* Effect.forEach(
-          teams,
-          (team) => store.removeTeamMember(team.id, member.userId),
-          { concurrency: 1, discard: true },
-        );
-      });
+    const deleteMembership = (member: Member) => deleteMembershipFrom(store, member);
 
     /**
      * Number of *active* members holding the protected owner (creator) role.

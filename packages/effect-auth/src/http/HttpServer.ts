@@ -21,7 +21,12 @@ import * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { Base64 } from "effect/encoding";
 import { resolveMessage } from "../Messages.ts";
-import type { AuthError, ResendTooSoonError, UserNotFoundError } from "../Errors.ts";
+import type {
+  AuthError,
+  LastOrganizationOwnerError,
+  ResendTooSoonError,
+  UserNotFoundError,
+} from "../Errors.ts";
 import { HttpApiBuilder } from "effect/http-api";
 import {
   Etag,
@@ -2450,6 +2455,19 @@ const clearDataCookie = (cfg: ResolvedCookieConfig) =>
     ? Effect.void
     : setResponseCookie(dataCookieName(cfg), "", clearCookieOptions(cfg));
 
+/** `409`: the user to delete is the last owner of an organization with other members. */
+const lastOwnerConflict = (e: LastOrganizationOwnerError) =>
+  Effect.fail(new S.Conflict({ message: e.message, code: e.code }));
+
+/** How a redeemed account token's refusals answer: `400`, or `500` for a fault. */
+const accountTokenRefusals = {
+  AccountTokenError: (e: AccountTokenError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  UserNotFoundError: (e: UserNotFoundError) =>
+    Effect.fail(new S.BadRequest({ message: e.message })),
+  AuthError: (e: AuthError) => internalServerError(e),
+};
+
 /**
  * The `redeem` handler of an emailed account token: confirm it with the
  * service's `confirm`, then clear the session-data cookie. A token that does
@@ -2471,11 +2489,7 @@ const redeemAccountToken =
     Effect.gen(function* () {
       const account = yield* resolveAccountManagement;
       yield* confirm(account.service, payload.data.attributes.token).pipe(
-        Effect.catchTags({
-          AccountTokenError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-          UserNotFoundError: (e) => Effect.fail(new S.BadRequest({ message: e.message })),
-          AuthError: (e) => internalServerError(e),
-        }),
+        Effect.catchTags(accountTokenRefusals),
       );
       yield* clearDataCookie(cfg);
     }).pipe(JsonApiErrors.mapHttpErrors);
@@ -2540,9 +2554,17 @@ export const accountDeletionsGroupLayer = (
           yield* account.service.requestAccountDeletion(resolved.user.id).pipe(asCaller);
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle(
-        "redeem",
-        redeemAccountToken(cfg, (service, token) => service.confirmAccountDeletion(token)),
+      .handle("redeem", ({ payload }) =>
+        Effect.gen(function* () {
+          const account = yield* resolveAccountManagement;
+          yield* account.service.confirmAccountDeletion(payload.data.attributes.token).pipe(
+            Effect.catchTags({
+              ...accountTokenRefusals,
+              LastOrganizationOwnerError: lastOwnerConflict,
+            }),
+          );
+          yield* clearDataCookie(cfg);
+        }).pipe(JsonApiErrors.mapHttpErrors),
       ),
   );
 };
@@ -3584,9 +3606,8 @@ const asAdmin = <A, R>(
 /** The `catchTags` cases of {@link asAdmin}. */
 const adminFailures = {
   AdminError: (e: AdminError) => Effect.fail(new S.Forbidden({ message: e.message })),
-  UserNotFoundError: (e: UserNotFoundError) =>
-    Effect.fail(new S.BadRequest({ message: e.message })),
-  AuthError: (e: AuthError) => internalServerError(e),
+  UserNotFoundError: accountTokenRefusals.UserNotFoundError,
+  AuthError: accountTokenRefusals.AuthError,
 };
 
 /**
@@ -3678,9 +3699,15 @@ export const adminUsersGroupLayer = (config?: CookieConfig, multiSession?: Multi
           return Handlers.data(yield* loadAdminUserResource(user));
         }).pipe(JsonApiErrors.mapHttpErrors),
       )
-      .handle(
-        "delete",
-        adminAction(cfg, (admin, actor, id) => admin.removeUser(actor, id)),
+      .handle("delete", ({ params, request }) =>
+        Effect.gen(function* () {
+          const { admin, actor } = yield* adminActor(request, cfg);
+          yield* Effect.catchTags(admin.removeUser(actor, params.id), {
+            AdminError: adminFailures.AdminError,
+            AuthError: adminFailures.AuthError,
+            LastOrganizationOwnerError: lastOwnerConflict,
+          });
+        }).pipe(JsonApiErrors.mapHttpErrors),
       )
       .handle(
         "deleteSessions",

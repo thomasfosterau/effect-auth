@@ -666,7 +666,7 @@ export const accountDeletionsGroup = Group.make(
   HttpApiEndpoint.post("redeem", "/account-deletions/redemptions", {
     payload: jsonApiPayload(AccountDeletionRedemptionDocument),
     success: HttpApiSchema.NoContent,
-    error: accountErrors,
+    error: [...accountErrors, E.Conflict.wire],
   })
     .middleware(Middleware.ContentNegotiation)
     .middleware(Middleware.SchemaErrors),
@@ -1294,7 +1294,9 @@ export type AdminUserUpdateDocument = typeof AdminUserUpdateDocument.Type;
  *   users, filtered by a case-insensitive substring of an email address,
  *   `meta.total` counting every match.
  * - `PATCH /admin/users/:id`: set the user's `role`.
- * - `DELETE /admin/users/:id`: delete the user and revoke their sessions; `204`.
+ * - `DELETE /admin/users/:id`: delete the user and revoke their sessions; `204`,
+ *   or `409` when they are the last owner of an organization that has other
+ *   members.
  * - `DELETE /admin/users/:id/sessions`: revoke every session of the user; `204`.
  *
  * An unknown user answers `400`, as it always has.
@@ -1313,7 +1315,7 @@ export const adminUsersGroup = Group.make(
     payload: AdminUserUpdateDocument,
     errors: resourceErrors,
   }),
-  Endpoint.delete(R.User, { path: "/admin/users/:id", errors: resourceErrors }),
+  Endpoint.delete(R.User, { path: "/admin/users/:id", errors: [...resourceErrors, E.Conflict] }),
   HttpApiEndpoint.delete("deleteSessions", "/admin/users/:id/sessions", {
     params: { id: Schema.String },
     success: HttpApiSchema.NoContent,

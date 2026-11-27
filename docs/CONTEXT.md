@@ -194,7 +194,7 @@ _Avoid_: "manual verification" for anything an Organization member does — hold
 A role name resolved against `OrganizationConfig.roles` (a role → `"resource:action"` permission
 map), optionally replaced for one organization by an `OrgRole` managed at runtime
 (`upsertOrgRole` / `deleteOrgRole`). The two never merge: a tenant's `OrgRole` grants exactly
-what it lists. The protected creator role (`OrganizationConfig.creatorRole`, default `"owner"`)
+what it lists. The protected creator role (`OrganizationOwnerRole`, default `"owner"`)
 always exists and can't be redefined. No one grants beyond their own permissions: a member
 assigns a role (add, invite, promote) only when their own role carries every permission it carries,
 and changes, deactivates, reactivates or removes a member only when it carries every permission of
