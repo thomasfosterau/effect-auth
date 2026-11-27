@@ -1,5 +1,7 @@
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { AccountManagementService } from "../AccountManagement.ts";
 import { EmailOtpService, EmailOtpUserStore } from "../email/EmailOtp.ts";
@@ -205,7 +207,7 @@ describe("ConfusablesPlugin", () => {
       }).pipe(Effect.provide(layer)),
     );
     expect(isConfusableRefusal(outcome.refused)).toBe(true);
-    expect(outcome.held).toBeNull();
+    expect(Option.isNone(outcome.held)).toBe(true);
     expect(outcome.ok.user.id).toBeTypeOf("string");
   });
 
@@ -218,7 +220,9 @@ describe("ConfusablesPlugin", () => {
         const link = sent.links.at(-1);
         assert(link !== undefined);
         const verified = yield* Effect.exit(service.verify(link.token));
-        expect(yield* lookupIdentifier(yield* IdentifierStore, "email", SPOOF)).toBeNull();
+        expect(Option.isNone(yield* lookupIdentifier(yield* IdentifierStore, "email", SPOOF))).toBe(
+          true,
+        );
         return verified;
       }).pipe(Effect.provide(layer)),
     );
@@ -234,7 +238,9 @@ describe("ConfusablesPlugin", () => {
         const code = sent.codes.at(-1);
         assert(code !== undefined);
         const signedIn = yield* Effect.exit(service.signIn(SPOOF, code.code));
-        expect(yield* lookupIdentifier(yield* IdentifierStore, "email", SPOOF)).toBeNull();
+        expect(Option.isNone(yield* lookupIdentifier(yield* IdentifierStore, "email", SPOOF))).toBe(
+          true,
+        );
         return signedIn;
       }).pipe(Effect.provide(layer)),
     );

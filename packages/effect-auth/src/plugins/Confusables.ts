@@ -10,13 +10,13 @@
  *
  * @module plugins/confusables
  */
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { ConfusableEmailError } from "../Errors.ts";
-import { type ClaimEmailArgs, type ClaimEmailFlow, makePlugin } from "../Hooks.ts";
+import * as Hooks from "../Hooks.ts";
 import { CONFUSABLES, SCRIPTS, UNICODE_VERSION } from "./ConfusablesData.ts";
 import { decodePunycode } from "./Punycode.ts";
 
@@ -30,11 +30,11 @@ export const CONFUSABLES_UNICODE_VERSION = UNICODE_VERSION;
 /** One table entry: a base-36 source delta and the target code points. */
 const ENTRY = /^([0-9a-z]+):([0-9a-z.]+)$/;
 
-let confusableTable: HashMap.HashMap<number, string> | undefined;
+let confusableTable: Option.Option<HashMap.HashMap<number, string>> = Option.none();
 
 /** The table, decoded on first use. */
 const confusables = (): HashMap.HashMap<number, string> => {
-  if (confusableTable !== undefined) return confusableTable;
+  if (Option.isSome(confusableTable)) return confusableTable.value;
   const entries = Arr.filterMap(CONFUSABLES.split(","), (entry) => {
     const match = ENTRY.exec(entry);
     return match === null
@@ -51,8 +51,9 @@ const confusables = (): HashMap.HashMap<number, string> => {
     source + delta,
     [source + delta, target] as const,
   ]);
-  confusableTable = HashMap.fromIterable(pairs);
-  return confusableTable;
+  const table = HashMap.fromIterable(pairs);
+  confusableTable = Option.some(table);
+  return table;
 };
 
 /** The code points of `input`, one string each. */
@@ -124,35 +125,40 @@ const LEVELS: ReadonlyArray<RestrictionLevel> = [
   "minimally-restrictive",
 ];
 
-/** A script set; `undefined` is every script (a Common or Inherited character). */
-type ScriptSet = ReadonlyArray<string> | undefined;
+/** A script set; `None` is every script (a Common or Inherited character). */
+type ScriptSet = Option.Option<ReadonlyArray<string>>;
 
 const COMMON_OR_INHERITED = /^[\p{scx=Zyyy}\p{scx=Zinh}]$/u;
 
 /** `\p{scx=…}` throws for a script newer than the runtime's Unicode. */
 const scriptTest = Option.liftThrowable((code: string) => new RegExp(`^\\p{scx=${code}}$`, "u"));
 
-let scriptTests: ReadonlyArray<readonly [string, RegExp]> | undefined;
+let scriptTests: Option.Option<ReadonlyArray<readonly [string, RegExp]>> = Option.none();
 
 /** One test per script the runtime's Unicode knows; newer scripts are skipped. */
 const scriptRegExps = (): ReadonlyArray<readonly [string, RegExp]> => {
-  scriptTests ??= Arr.filterMap(SCRIPTS, (code) =>
+  if (Option.isSome(scriptTests)) return scriptTests.value;
+  const tests = Arr.filterMap(SCRIPTS, (code) =>
     Option.match(scriptTest(code), {
       onNone: () => Result.failVoid,
       onSome: (test) => Result.succeed([code, test] as const),
     }),
   );
-  return scriptTests;
+  scriptTests = Option.some(tests);
+  return tests;
 };
 
 /** UTS 39 §5.1's augmentation: Han, kana and Hangul also count as the writing systems that use them. */
-const AUGMENT: Readonly<Record<string, ReadonlyArray<string>>> = {
-  Hani: ["Hanb", "Jpan", "Kore"],
-  Hira: ["Jpan"],
-  Kana: ["Jpan"],
-  Hang: ["Kore"],
-  Bopo: ["Hanb"],
-};
+const AUGMENT = HashMap.make<ReadonlyArray<readonly [string, ReadonlyArray<string>]>>(
+  ["Hani", ["Hanb", "Jpan", "Kore"]],
+  ["Hira", ["Jpan"]],
+  ["Kana", ["Jpan"]],
+  ["Hang", ["Kore"]],
+  ["Bopo", ["Hanb"]],
+);
+
+const augmentOf = (code: string): ReadonlyArray<string> =>
+  Option.getOrElse(HashMap.get(AUGMENT, code), () => []);
 
 /**
  * The augmented Script_Extensions of one character. A character the runtime
@@ -160,19 +166,19 @@ const AUGMENT: Readonly<Record<string, ReadonlyArray<string>>> = {
  * anything else.
  */
 const scriptsOf = (char: string): ScriptSet => {
-  if (/^[A-Za-z]$/.test(char)) return ["Latn"];
-  if (codePointOf(char) < 0x80 || COMMON_OR_INHERITED.test(char)) return undefined;
+  if (/^[A-Za-z]$/.test(char)) return Option.some(["Latn"]);
+  if (codePointOf(char) < 0x80 || COMMON_OR_INHERITED.test(char)) return Option.none();
   const found = Arr.flatMap(scriptRegExps(), ([code, test]) =>
-    test.test(char) ? [code, ...(AUGMENT[code] ?? [])] : [],
+    test.test(char) ? [code, ...augmentOf(code)] : [],
   );
-  return Arr.isArrayNonEmpty(found) ? Arr.dedupe(found) : ["Zzzz"];
+  return Option.some(Arr.isArrayNonEmpty(found) ? Arr.dedupe(found) : ["Zzzz"]);
 };
 
 /** The identity of {@link intersect}. */
-const everyScript = (): ScriptSet => undefined;
+const everyScript = (): ScriptSet => Option.none();
 
 const intersect = (a: ScriptSet, b: ScriptSet): ScriptSet =>
-  a === undefined ? b : b === undefined ? a : Arr.intersection(a, b);
+  Option.isNone(a) ? b : Option.isNone(b) ? a : Option.some(Arr.intersection(a.value, b.value));
 
 /** The resolved script set of `input` (UTS 39 §5.1), skipping characters in `ignore`. */
 const resolvedScripts = (input: string, ignore?: string): ScriptSet =>
@@ -181,13 +187,14 @@ const resolvedScripts = (input: string, ignore?: string): ScriptSet =>
     everyScript(),
     (resolved: ScriptSet, char): ScriptSet => {
       const scripts = scriptsOf(char);
-      return ignore !== undefined && scripts !== undefined && Arr.contains(scripts, ignore)
+      return ignore !== undefined && Option.isSome(scripts) && Arr.contains(scripts.value, ignore)
         ? resolved
         : intersect(resolved, scripts);
     },
   );
 
-const isEmpty = (set: ScriptSet): boolean => set !== undefined && !Arr.isReadonlyArrayNonEmpty(set);
+const isEmpty = (set: ScriptSet): boolean =>
+  Option.isSome(set) && !Arr.isReadonlyArrayNonEmpty(set.value);
 
 /**
  * The UTS 39 §5.2 restriction level of `input`; see {@link RestrictionLevel}.
@@ -208,8 +215,9 @@ const isEmpty = (set: ScriptSet): boolean => set !== undefined && !Arr.isReadonl
 export const restrictionLevel = (input: string): RestrictionLevel => {
   if (ASCII.test(input)) return "ascii";
   if (!isEmpty(resolvedScripts(input))) return "single-script";
-  const withoutLatin = resolvedScripts(input, "Latn");
-  if (withoutLatin === undefined) return "single-script";
+  const resolvedWithoutLatin = resolvedScripts(input, "Latn");
+  if (Option.isNone(resolvedWithoutLatin)) return "single-script";
+  const withoutLatin = resolvedWithoutLatin.value;
   const has = (code: string) => Arr.contains(withoutLatin, code);
   if (has("Zzzz")) return "minimally-restrictive";
   if (Arr.some(["Jpan", "Kore", "Hanb"], has)) return "highly-restrictive";
@@ -255,15 +263,15 @@ export interface ConfusablesConfig {
    * `"highly-restrictive"`: one script, or Latin with Japanese, Korean or
    * Chinese.
    */
-  readonly restriction?: ConfusablesRestriction | undefined;
+  readonly restriction?: ConfusablesRestriction;
   /**
    * Refuse a part that is not ASCII but whose {@link skeleton} is, so it can
    * pass for an ASCII name (`раураl`, all Cyrillic, for `paypal`; full-width
    * `ｐａｙｐａｌ`). Default `true`.
    */
-  readonly asciiLookalikes?: boolean | undefined;
+  readonly asciiLookalikes?: boolean;
   /** The flows to guard. Default both, `["sign-up", "email-change"]`. */
-  readonly flows?: ReadonlyArray<ClaimEmailFlow> | undefined;
+  readonly flows?: ReadonlyArray<Hooks.ClaimEmailFlow>;
 }
 
 /**
@@ -336,8 +344,8 @@ export const confusableEmailReason = (
  */
 export const ConfusablesPlugin = (config: ConfusablesConfig = {}) => {
   const flows = config.flows ?? ["sign-up", "email-change"];
-  return makePlugin({
-    beforeClaimEmail: (args: ClaimEmailArgs) => {
+  return Hooks.makePlugin({
+    beforeClaimEmail: (args: Hooks.ClaimEmailArgs) => {
       if (!Arr.contains(flows, args.flow)) return Effect.succeed(args);
       return Option.match(confusableEmailReason(args.email, config), {
         onNone: () => Effect.succeed(args),

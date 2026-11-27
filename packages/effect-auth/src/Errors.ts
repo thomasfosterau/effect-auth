@@ -340,10 +340,13 @@ export class InvalidInputError extends Schema.TaggedError<
  *
  * @since 0.9.0
  */
-export class ConfusableEmailError extends Data.TaggedError("ConfusableEmailError")<{
-  readonly message: string;
-  readonly reason: "mixed-script" | "ascii-lookalike";
-}> {
+export class ConfusableEmailError extends Schema.TaggedError<
+  ConfusableEmailError,
+  { readonly brand: unique symbol }
+>()("ConfusableEmailError", {
+  message: Schema.String,
+  reason: Schema.Literals(["mixed-script", "ascii-lookalike"]),
+}) {
   get code(): typeof ErrorCode.CONFUSABLE_EMAIL {
     return ErrorCode.CONFUSABLE_EMAIL;
   }
