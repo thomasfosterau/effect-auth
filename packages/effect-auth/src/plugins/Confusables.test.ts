@@ -14,7 +14,7 @@ import { pbkdf2Hasher, PasswordHasher } from "../password/Password.ts";
 import { SessionService } from "../SessionService.ts";
 import * as Testing from "../testing/index.ts";
 import { inlineDeliveryScheduler } from "../testing/Delivery.ts";
-import { normalizeEmail } from "../utils.ts";
+import { normalizeEmail } from "../Normalize.ts";
 import {
   confusableEmailReason,
   ConfusablesPlugin,
